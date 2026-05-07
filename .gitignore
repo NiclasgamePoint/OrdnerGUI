@@ -1,0 +1,49 @@
+# Python environments
+venv/
+.venv/
+
+# Python cache/bytecode
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Packaging/build artifacts
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+
+# Test/coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local databases and generated app data
+*.db
+*.sqlite
+*.sqlite3
+data/mock/
+data/index.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Editor/OS files
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# VS Code: ignore local workspace state, keep shared launch config
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
