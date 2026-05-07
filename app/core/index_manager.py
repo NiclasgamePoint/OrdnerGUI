@@ -1,4 +1,3 @@
-"""Index-Manager für Dateimetadaten"""
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -9,15 +8,12 @@ import shutil
 
 
 class IndexManager:
-    """Verwaltet SQLite-Index für Dateimetadaten"""
-    
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.conn = None
         self.init_db()
     
     def init_db(self):
-        """Initialisiert die Datenbankstruktur"""
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         cursor = self.conn.cursor()
@@ -55,7 +51,6 @@ class IndexManager:
         self.conn.commit()
     
     def index_directory(self, base_path: Path):
-        """Indiziert alle Dateien aus einem Verzeichnis"""
         cursor = self.conn.cursor()
         indexed_count = 0
         
@@ -72,12 +67,9 @@ class IndexManager:
         return indexed_count
     
     def _index_file(self, filepath: Path, base_path: Path, cursor: sqlite3.Cursor):
-        """Indiziert eine einzelne Datei"""
         try:
             stat = filepath.stat()
             rel_path = str(filepath.relative_to(base_path))
-            
-            # Parse Pfadstruktur: [Jahr]/[Dienstleistungstyp]/[Kundenname]/[optional: Subfolder]
             parts = rel_path.split(os.sep)
             
             year = parts[0] if len(parts) > 0 else None
@@ -108,7 +100,6 @@ class IndexManager:
             print(f"Fehler beim Indexieren von {filepath}: {e}")
     
     def search_customers(self, query: str) -> List[Dict]:
-        """Sucht nach Kunden basierend auf Namen"""
         cursor = self.conn.cursor()
         
         cursor.execute("""
@@ -129,10 +120,7 @@ class IndexManager:
         return results
     
     def get_customer_details(self, customer_name: str) -> Dict:
-        """Holt alle Details zu einem Kunden"""
         cursor = self.conn.cursor()
-        
-        # Grundinfo
         cursor.execute("""
             SELECT 
                 COUNT(*) as file_count,

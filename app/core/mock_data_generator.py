@@ -1,4 +1,3 @@
-"""Mock-Datengenerator für Testzwecke"""
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -10,9 +9,6 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 
 def generate_mock_data(base_path: Path, num_customers: int = 5, files_per_customer: int = 50):
-    """
-    Generiert Mock-Kundendaten in der Struktur: [Jahr]/[Dienstleistungstyp]/[Kundenname]
-    """
     base_path.mkdir(parents=True, exist_ok=True)
     
     customers = [
@@ -46,17 +42,14 @@ def generate_mock_data(base_path: Path, num_customers: int = 5, files_per_custom
     for year in years:
         for service_type in service_types:
             for customer in customers:
-                # Struktur: [Jahr]/[Dienstleistungstyp]/[Kundenname]
                 customer_path = base_path / year / service_type / customer
                 customer_path.mkdir(parents=True, exist_ok=True)
                 
-                # Unterordner (z.B. Hausbegehung)
                 subfolders = ["Hausbegehung", "Berichte", "Verträge", "Rechnungen", "Dokumentation"]
                 for subfolder in random.sample(subfolders, k=random.randint(2, 4)):
                     subfolder_path = customer_path / subfolder
                     subfolder_path.mkdir(exist_ok=True)
                     
-                    # Dateien in Subordnern
                     num_files = random.randint(3, 8)
                     for i in range(num_files):
                         file_type, generator = random.choice(file_types)
@@ -69,7 +62,6 @@ def generate_mock_data(base_path: Path, num_customers: int = 5, files_per_custom
                         except Exception as e:
                             print(f"Fehler beim Generieren von {filepath}: {e}")
                 
-                # Dateien direkt im Kundenordner
                 num_direct_files = random.randint(3, 5)
                 for i in range(num_direct_files):
                     file_type, generator = random.choice(file_types)
@@ -87,7 +79,6 @@ def generate_mock_data(base_path: Path, num_customers: int = 5, files_per_custom
 
 
 def _generate_pdf(filepath: Path):
-    """Generiert eine einfache PDF-Datei"""
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import letter
@@ -96,7 +87,6 @@ def _generate_pdf(filepath: Path):
         c.drawString(100, 750, f"Dokument: {filepath.stem}")
         c.drawString(100, 730, f"Erstellt: {datetime.now().strftime('%d.%m.%Y')}")
         
-        # Dummy-Text
         text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 10
         y = 700
         for line in text.split():
@@ -105,22 +95,18 @@ def _generate_pdf(filepath: Path):
         
         c.save()
     except ImportError:
-        # Fallback: Einfache Text-PDF
         filepath.write_text("Mock PDF Content")
 
 
 def _generate_excel(filepath: Path):
-    """Generiert eine Excel-Datei"""
     try:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Daten"
         
-        # Header
         headers = ["Datum", "Kunde", "Betrag", "Status", "Bemerkungen"]
         ws.append(headers)
         
-        # Daten
         for i in range(10):
             row = [
                 (datetime.now() - timedelta(days=i)).strftime("%d.%m.%Y"),
@@ -137,7 +123,6 @@ def _generate_excel(filepath: Path):
 
 
 def _generate_text(filepath: Path):
-    """Generiert eine Textdatei"""
     content = "\n".join([
         f"Dokumentation für {filepath.parent.name}",
         f"Erstellt: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
@@ -150,19 +135,16 @@ def _generate_text(filepath: Path):
 
 
 def _generate_image(filepath: Path):
-    """Generiert ein Dummy-Bild"""
     try:
         img = Image.new('RGB', (400, 300), color=(random.randint(50, 255), 
                                                     random.randint(50, 255), 
                                                     random.randint(50, 255)))
         img.save(filepath)
     except Exception:
-        # Fallback: minimal PNG
         filepath.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
 
 
 def _generate_docx(filepath: Path):
-    """Generiert eine Word-Datei"""
     try:
         from docx import Document
         doc = Document()
@@ -171,12 +153,10 @@ def _generate_docx(filepath: Path):
         doc.add_paragraph('Lorem ipsum dolor sit amet, consectetur adipiscing elit.')
         doc.save(filepath)
     except ImportError:
-        # Fallback: Zip-ähnliches Verhalten
         filepath.write_text("Mock DOCX Content")
 
 
 def _generate_csv(filepath: Path):
-    """Generiert eine CSV-Datei"""
     lines = [
         "Datum,Kunde,Betrag,Status",
     ]
