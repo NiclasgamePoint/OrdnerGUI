@@ -1,24 +1,20 @@
-# PapaGUI - Kundenmanagement System
-
-Ein Python-basiertes GUI-System zur Verwaltung und Suche von Kundendaten mit bis zu 6TB Dateien auf NAS-Systemen.
-
 ## Funktionen
 
-### ✅ Implementiert (v0.1)
+### Implementiert (v0.1)
 - **Kundensuche**: Suche nach Kundennamen mit lokaler Indexierung
 - **Dateiindex**: SQLite-basierter Index für schnelle Metadaten-Abfragen
 - **Dateisystem-Browser**: Ordnerstruktur: `[Jahr]/[Dienstleistungstyp]/[Kundenname]/[Subfolder]`
 - **Multi-Format Viewer**:
-  - 📄 PDFs (Basis + Text-Extract)
-  - 🖼️ Bilder (JPG, PNG, GIF, BMP)
-  - 📊 Excel-Dateien (XLSX/XLS) - Tabellenvorschau
-  - 📝 Textdateien (TXT, CSV, LOG, MD)
-  - 📋 Word-Dokumente (DOCX)
+  - PDFs (Basis + Text-Extract)
+  - Bilder (JPG, PNG, GIF, BMP)
+  - Excel-Dateien (XLSX/XLS) - Tabellenvorschau
+  - Textdateien (TXT, CSV, LOG, MD)
+  - Word-Dokumente (DOCX)
 - **Volltextsuche**: ripgrep-Integration für Textdateien
 - **Mock-Daten**: 5 Kunden × 50 Dateien zum Testen
 - **GUI**: PySide6-basiert mit modernem Interface
 
-### 🔄 Zu Implementieren (später)
+### Zu Implementieren (später)
 - Reiter für verschiedene Kundenviews
 - PDF-Vorschau (vollständig, nicht nur Text)
 - Thumbnails für Bilder
@@ -33,7 +29,7 @@ Ein Python-basiertes GUI-System zur Verwaltung und Suche von Kundendaten mit bis
 
 ### 1. Repository klonen
 ```bash
-cd /home/niclas/privat/03_Projekts/01_Code/03_PapaGUI
+git clone https://github.com/NiclasgamePoint/OrdnerGUI.git
 ```
 
 ### 2. Virtuelle Umgebung erstellen
