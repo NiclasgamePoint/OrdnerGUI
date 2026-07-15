@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import re
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QAbstractTextDocumentLayout, QPainter, QPalette, QTextDocument
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -24,6 +24,22 @@ class HighlightDelegate(QStyledItemDelegate):
 
     QUERY_ROLE = Qt.UserRole + 20
 
+    def _document(self, text: str, query: str, color: str, width: int) -> QTextDocument:
+        escaped = html.escape(text)
+        for token in sorted(set(re.findall(r"\w+", query)), key=len, reverse=True):
+            escaped = re.sub(
+                re.escape(html.escape(token)),
+                lambda match: f"<b>{match.group(0)}</b>",
+                escaped,
+                flags=re.IGNORECASE,
+            )
+        document = QTextDocument()
+        document.setDocumentMargin(0)
+        document.setDefaultStyleSheet(f"body {{ color: {color}; }}")
+        document.setHtml(escaped)
+        document.setTextWidth(max(1, width))
+        return document
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
         text = str(index.data(Qt.DisplayRole) or "")
         query = str(index.data(self.QUERY_ROLE) or "").strip()
@@ -40,26 +56,33 @@ class HighlightDelegate(QStyledItemDelegate):
         styled.text = ""
         style.drawControl(QStyle.CE_ItemViewItem, styled, painter, styled.widget)
 
-        escaped = html.escape(text)
-        for token in sorted(set(re.findall(r"\w+", query)), key=len, reverse=True):
-            escaped = re.sub(
-                re.escape(html.escape(token)),
-                lambda match: f"<b>{match.group(0)}</b>",
-                escaped,
-                flags=re.IGNORECASE,
-            )
-        document = QTextDocument()
         color = styled.palette.color(
             QPalette.HighlightedText if option.state & QStyle.State_Selected else QPalette.Text
         ).name()
-        document.setDefaultStyleSheet(f"body {{ color: {color}; }}")
-        document.setHtml(escaped)
-        document.setTextWidth(max(1, styled.rect.width() - 14))
+        document = self._document(text, query, color, styled.rect.width() - 28)
         painter.save()
-        painter.translate(styled.rect.left() + 7, styled.rect.top() + 3)
+        painter.setClipRect(styled.rect)
+        painter.translate(styled.rect.left() + 14, styled.rect.top() + 8)
         context = QAbstractTextDocumentLayout.PaintContext()
         document.documentLayout().draw(painter, context)
         painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        query = str(index.data(self.QUERY_ROLE) or "").strip()
+        if not query:
+            return super().sizeHint(option, index)
+        view = self.parent()
+        width = option.rect.width()
+        if width <= 0 and view is not None and hasattr(view, "viewport"):
+            width = view.viewport().width()
+        width = max(120, width)
+        document = self._document(
+            str(index.data(Qt.DisplayRole) or ""),
+            query,
+            option.palette.color(QPalette.Text).name(),
+            width - 28,
+        )
+        return QSize(width, max(38, int(document.size().height()) + 16))
 
 
 class SearchResultSection(QWidget):
@@ -81,6 +104,9 @@ class SearchResultSection(QWidget):
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("ResultList")
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list_widget.setWordWrap(True)
+        self.list_widget.setTextElideMode(Qt.ElideNone)
+        self.list_widget.setUniformItemSizes(False)
         self.list_widget.setItemDelegate(HighlightDelegate(self.list_widget))
         layout.addWidget(self.list_widget, 1)
 
@@ -113,3 +139,7 @@ class SearchResultSection(QWidget):
     def reset_title(self):
         self.heading.setText(self.base_title)
         self.set_page(1, 1, 0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.list_widget.scheduleDelayedItemsLayout()

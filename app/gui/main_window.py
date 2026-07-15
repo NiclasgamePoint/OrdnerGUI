@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
-    QMessageBox, QProgressBar, QToolButton, QComboBox, QCompleter
+    QMessageBox, QProgressBar, QToolButton, QCompleter
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QStringListModel
 from PySide6.QtGui import QIcon
@@ -41,7 +41,12 @@ from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
 from app.gui.panels import CustomerDetailsPanel
-from app.gui.widgets import AppButton, HighlightDelegate, SearchResultSection
+from app.gui.widgets import (
+    AppButton,
+    HighlightDelegate,
+    SearchFilterPopup,
+    SearchResultSection,
+)
 from app.gui.workers import IndexingWorker, SearchWorker
 from app.services import FileSystemMonitor
 
@@ -94,11 +99,8 @@ class MainWindow(QMainWindow):
 
         search_card = QWidget()
         search_card.setObjectName("SearchCard")
-        search_card.setFixedHeight(92)
-        search_outer_layout = QVBoxLayout(search_card)
-        search_outer_layout.setContentsMargins(12, 7, 12, 7)
-        search_outer_layout.setSpacing(6)
-        search_layout = QHBoxLayout()
+        search_card.setFixedHeight(50)
+        search_layout = QHBoxLayout(search_card)
         search_layout.setContentsMargins(12, 7, 12, 7)
         search_layout.setSpacing(8)
         
@@ -122,6 +124,16 @@ class MainWindow(QMainWindow):
         self.search_button.setMinimumWidth(120)
         self.search_button.clicked.connect(self.start_full_search)
 
+        self.filter_popup = SearchFilterPopup(self)
+        self.filter_popup.filtersChanged.connect(self._on_filter_changed)
+        self.domain_filter = self.filter_popup.domain_combo
+        self.year_filter = self.filter_popup.year_combo
+        self.file_type_filter = self.filter_popup.file_type_combo
+
+        self.filter_button = AppButton("Filter", AppButton.SECONDARY)
+        self.filter_button.setMinimumWidth(90)
+        self.filter_button.clicked.connect(self.open_filter_popup)
+
         self.settings_button = QToolButton()
         self.settings_button.setObjectName("SettingsButton")
         self.settings_button.setFixedSize(32, 32)
@@ -137,27 +149,9 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input, 2)
         search_layout.addWidget(self.search_button)
+        search_layout.addWidget(self.filter_button)
         search_layout.addStretch(1)
         search_layout.addWidget(self.settings_button)
-        search_outer_layout.addLayout(search_layout)
-
-        filter_layout = QHBoxLayout()
-        filter_layout.setContentsMargins(43, 0, 0, 0)
-        filter_layout.setSpacing(8)
-        self.domain_filter = QComboBox()
-        self.domain_filter.setMinimumWidth(150)
-        self.year_filter = QComboBox()
-        self.year_filter.setMinimumWidth(100)
-        self.file_type_filter = QComboBox()
-        self.file_type_filter.setMinimumWidth(120)
-        for combo in (self.domain_filter, self.year_filter, self.file_type_filter):
-            combo.currentIndexChanged.connect(self._on_filter_changed)
-            filter_layout.addWidget(combo)
-        clear_filters = AppButton("Filter löschen", AppButton.SECONDARY)
-        clear_filters.clicked.connect(self._clear_search_filters)
-        filter_layout.addWidget(clear_filters)
-        filter_layout.addStretch()
-        search_outer_layout.addLayout(filter_layout)
         main_layout.addWidget(search_card)
         
         content_splitter = QSplitter(Qt.Horizontal)
@@ -244,7 +238,24 @@ class MainWindow(QMainWindow):
         if app is not None:
             self.theme_manager.apply(app)
 
+    def open_filter_popup(self):
+        if self.filter_popup.isVisible():
+            self.filter_popup.close()
+            return
+        self.filter_popup.adjustSize()
+        anchor = self.filter_button.mapToGlobal(self.filter_button.rect().bottomLeft())
+        available = self.screen().availableGeometry()
+        popup_x = min(anchor.x(), available.right() - self.filter_popup.width())
+        popup_y = anchor.y() + 6
+        if popup_y + self.filter_popup.height() > available.bottom():
+            button_top = self.filter_button.mapToGlobal(self.filter_button.rect().topLeft()).y()
+            popup_y = button_top - self.filter_popup.height() - 6
+        self.filter_popup.move(max(available.left(), popup_x), max(available.top(), popup_y))
+        self.filter_popup.show()
+        self.filter_popup.raise_()
+
     def open_settings_popup(self):
+        self.filter_popup.close()
         if self.settings_popup is not None and self.settings_popup.isVisible():
             self.settings_popup.close()
             return
@@ -603,18 +614,24 @@ class MainWindow(QMainWindow):
             selected_index = combo.findData(selected)
             combo.setCurrentIndex(max(0, selected_index))
             combo.blockSignals(False)
+        self._update_filter_button()
 
     def _on_filter_changed(self):
+        self._update_filter_button()
         if self.search_input.text().strip():
             self.on_search_text_changed(self.search_input.text())
 
+    def _update_filter_button(self):
+        active_count = self.filter_popup.active_filter_count()
+        self.filter_button.setText(
+            "Filter" if active_count == 0 else f"Filter ({active_count})"
+        )
+        self.filter_button.setProperty("filtersActive", active_count > 0)
+        self.filter_button.style().unpolish(self.filter_button)
+        self.filter_button.style().polish(self.filter_button)
+
     def _clear_search_filters(self):
-        for combo in (self.domain_filter, self.year_filter, self.file_type_filter):
-            combo.blockSignals(True)
-            combo.setCurrentIndex(0)
-            combo.blockSignals(False)
-        if self.search_input.text().strip():
-            self.on_search_text_changed(self.search_input.text())
+        self.filter_popup.clear_filters()
 
     def on_search_text_changed(self, text: str):
         self.search_generation += 1

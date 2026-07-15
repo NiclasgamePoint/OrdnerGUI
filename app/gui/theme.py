@@ -318,6 +318,12 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border-color: {accent};
     }}
 
+    QPushButton[buttonRole="secondary"][filtersActive="true"] {{
+        background-color: {item_selected};
+        color: #ffffff;
+        border-color: {accent};
+    }}
+
     QPushButton[buttonRole="secondary"]:disabled {{
         background-color: {surface};
         color: {muted};
@@ -490,6 +496,16 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QFrame#SettingsPopup {{
         background-color: transparent;
+    }}
+
+    QFrame#SearchFilterPopup {{
+        background-color: transparent;
+    }}
+
+    QFrame#SearchFilterBody {{
+        background-color: {card};
+        border: 1px solid {border};
+        border-radius: 12px;
     }}
 
     QFrame#SettingsBody {{
