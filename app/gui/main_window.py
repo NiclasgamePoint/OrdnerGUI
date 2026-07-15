@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QTabWidget, QLabel, QSplitter,
     QMessageBox, QProgressBar, QToolButton
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
 from PySide6.QtGui import QIcon
 from datetime import datetime
 
@@ -20,7 +20,7 @@ from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, DB_FILE, 
 from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
-from app.gui.theme_popup import ThemePopup
+from app.gui.settings_popup import SettingsPopup
 
 
 class IndexingWorker(QThread):
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         self.index_worker = None
         self.index_source = get_default_index_source()
         self.theme_manager = ThemeManager()
-        self.theme_popup = None
+        self.settings_popup = None
         
         self.init_ui()
         self.apply_theme()
@@ -64,9 +64,10 @@ class MainWindow(QMainWindow):
 
         top_bar = QWidget()
         top_bar.setObjectName("TopBar")
+        top_bar.setFixedHeight(48)
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(10, 4, 10, 4)
-        top_layout.setSpacing(6)
+        top_layout.setContentsMargins(14, 4, 10, 4)
+        top_layout.setSpacing(8)
 
         title_layout = QVBoxLayout()
         title_layout.setSpacing(0)
@@ -78,22 +79,24 @@ class MainWindow(QMainWindow):
 
         self.settings_button = QToolButton()
         self.settings_button.setObjectName("SettingsButton")
-        self.settings_button.setIconSize(QSize(14, 14))
+        self.settings_button.setFixedSize(32, 32)
+        self.settings_button.setIconSize(QSize(16, 16))
         icon = QIcon.fromTheme("preferences-system")
         if icon.isNull():
-            self.settings_button.setText("UI")
+            self.settings_button.setText("⚙")
         else:
             self.settings_button.setIcon(icon)
-        self.settings_button.setToolTip("Design-Einstellungen")
-        self.settings_button.clicked.connect(self.open_theme_settings)
+        self.settings_button.setToolTip("Einstellungen öffnen")
+        self.settings_button.clicked.connect(self.open_settings_popup)
         top_layout.addWidget(self.settings_button)
 
         main_layout.addWidget(top_bar)
 
         search_card = QWidget()
         search_card.setObjectName("SearchCard")
+        search_card.setFixedHeight(50)
         search_layout = QHBoxLayout(search_card)
-        search_layout.setContentsMargins(14, 12, 14, 12)
+        search_layout.setContentsMargins(12, 7, 12, 7)
         search_layout.setSpacing(8)
         
         search_label = QLabel("Vorgang-/Kundensuche:")
@@ -211,7 +214,7 @@ class MainWindow(QMainWindow):
         content_splitter.setStretchFactor(0, 1)
         content_splitter.setStretchFactor(1, 3)
         
-        main_layout.addWidget(content_splitter)
+        main_layout.addWidget(content_splitter, 1)
         
         status_card = QWidget()
         status_card.setObjectName("StatusCard")
@@ -233,18 +236,44 @@ class MainWindow(QMainWindow):
         if app is not None:
             self.theme_manager.apply(app)
 
-    def open_theme_settings(self):
-        self.theme_popup = ThemePopup(self.theme_manager.mode, self.theme_manager.accent, self)
-        self.theme_popup.themeChanged.connect(self.on_theme_popup_changed)
-        self.theme_popup.adjustSize()
+    def open_settings_popup(self):
+        if self.settings_popup is not None and self.settings_popup.isVisible():
+            self.settings_popup.close()
+            return
 
-        anchor = self.settings_button.mapToGlobal(self.settings_button.rect().bottomRight())
-        popup_x = anchor.x() - self.theme_popup.width()
-        popup_y = anchor.y() + 6
-        self.theme_popup.move(popup_x, popup_y)
-        self.theme_popup.show()
+        self.settings_popup = SettingsPopup(self.theme_manager.mode, self.theme_manager.accent, self)
+        self.settings_popup.appearanceChanged.connect(self.on_settings_appearance_changed)
+        self.settings_popup.destroyed.connect(self._clear_settings_popup)
+        self.settings_popup.resize(self.settings_popup.size_for_parent())
 
-    def on_theme_popup_changed(self, mode: str, accent: str):
+        self._center_settings_popup()
+        self.settings_popup.show()
+        self.settings_popup.raise_()
+
+    def _center_settings_popup(self):
+        if self.settings_popup is None:
+            return
+
+        center = self.mapToGlobal(self.rect().center())
+        popup_x = center.x() - (self.settings_popup.width() // 2)
+        popup_y = center.y() - (self.settings_popup.height() // 2)
+        self.settings_popup.move(popup_x, popup_y)
+
+    def _clear_settings_popup(self):
+        self.settings_popup = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.settings_popup is not None and self.settings_popup.isVisible():
+            self.settings_popup.resize(self.settings_popup.size_for_parent())
+            QTimer.singleShot(0, self._center_settings_popup)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self.settings_popup is not None and self.settings_popup.isVisible():
+            QTimer.singleShot(0, self._center_settings_popup)
+
+    def on_settings_appearance_changed(self, mode: str, accent: str):
         self.theme_manager.set_mode(mode)
         self.theme_manager.set_accent(accent)
         self.theme_manager.save()

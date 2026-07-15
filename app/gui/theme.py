@@ -139,8 +139,10 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QToolButton#SettingsButton {{
         background-color: {surface};
         border: 1px solid {border};
-        border-radius: 13px;
-        padding: 4px;
+        border-radius: 10px;
+        padding: 3px;
+        color: {text};
+        font-size: 17px;
     }}
     QToolButton#SettingsButton:hover {{
         border-color: {accent};
@@ -172,10 +174,27 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background-color: {surface};
         color: {text};
         border: 1px solid {border};
+        border-radius: 8px;
         selection-background-color: {item_selected};
-        selection-color: {text};
+        selection-color: #ffffff;
         outline: 0;
-        padding: 4px;
+        padding: 5px;
+    }}
+
+    QComboBox QAbstractItemView::item {{
+        min-height: 28px;
+        padding: 3px 8px;
+        border-radius: 6px;
+    }}
+
+    QComboBox:disabled {{
+        color: {muted};
+        background-color: {chip};
+    }}
+
+    QAbstractItemView {{
+        background-color: {surface};
+        color: {text};
     }}
 
     QMenu {{
@@ -210,7 +229,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
     }}
     QListWidget::item:selected {{
         background-color: {item_selected};
-        color: {text};
+        color: #ffffff;
     }}
 
     QPushButton {{
@@ -281,7 +300,11 @@ def build_stylesheet(mode: str, accent: str) -> str:
         color: {text};
     }}
 
-    QFrame#ThemePopup {{
+    QFrame#SettingsPopup {{
+        background-color: transparent;
+    }}
+
+    QFrame#SettingsBody {{
         background-color: {card};
         border: 1px solid {border};
         border-radius: 12px;
@@ -300,5 +323,36 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border: none;
         background: transparent;
         min-width: 46px;
+    }}
+
+    QLabel#PopupSectionTitle {{
+        font-size: 14px;
+        font-weight: 700;
+        color: {text};
+        border: none;
+        background: transparent;
+    }}
+
+    QListWidget#SettingsNav {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 10px;
+        padding: 6px;
+    }}
+
+    QListWidget#SettingsNav::item {{
+        padding: 0 12px;
+        margin: 1px 0;
+        border-radius: 8px;
+    }}
+
+    QListWidget#SettingsNav::item:hover {{
+        background-color: {item_hover};
+    }}
+
+    QListWidget#SettingsNav::item:selected {{
+        background-color: {item_selected};
+        color: #ffffff;
+        font-weight: 600;
     }}
     """
