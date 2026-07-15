@@ -9,22 +9,37 @@ import time
 import re
 import sys
 import json
+import hashlib
 from tempfile import TemporaryDirectory
 
 import openpyxl
 import xlrd
 from docx import Document
 from PyPDF2 import PdfReader
+from app.core.config import IndexOptions
 
 
 class IndexManager:
     SEARCH_LABEL_SQL = "COALESCE(NULLIF(project_name, ''), NULLIF(customer_name, ''), filename)"
-    CONTENT_INDEX_TYPES = {"pdf", "doc", "docx", "xls", "xlsx"}
-    MAX_EXTRACTED_CHARACTERS = 2_000_000
+    BINARY_CONTENT_TYPES = {"pdf", "doc", "docx", "xls", "xlsx"}
+    TEXT_CONTENT_TYPES = {
+        "txt", "csv", "md", "log", "json", "xml", "yaml", "yml", "ini"
+    }
+    CONTENT_INDEX_TYPES = BINARY_CONTENT_TYPES | TEXT_CONTENT_TYPES
+    SCHEMA_VERSION = "3"
+    EXTRACTOR_VERSION = "3"
+    APP_VERSION = "0.2"
 
-    def __init__(self, db_path: Path, initialize: bool = True):
+    def __init__(
+        self,
+        db_path: Path,
+        initialize: bool = True,
+        options: Optional[IndexOptions] = None,
+    ):
         self.db_path = db_path
         self.conn = None
+        self.options = options or IndexOptions()
+        self._ocr_language = None
         if initialize:
             self.init_db()
         else:
@@ -66,6 +81,23 @@ class IndexManager:
         """)
 
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS index_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS folders (
+                path TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                relative_path TEXT,
+                parent_path TEXT,
+                index_root TEXT NOT NULL
+            )
+        """)
+
+        cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS file_content_fts USING fts5(
                 path UNINDEXED,
                 content,
@@ -78,6 +110,12 @@ class IndexManager:
         self._ensure_column(cursor, "files", "project_name", "TEXT")
         self._ensure_column(cursor, "files", "relative_dir", "TEXT")
         self._ensure_column(cursor, "files", "index_root", "TEXT")
+        self._ensure_column(cursor, "files", "folder_path", "TEXT")
+        self._ensure_column(cursor, "files", "modified_ns", "INTEGER")
+        self._ensure_column(cursor, "files", "content_hash", "TEXT")
+        self._ensure_column(cursor, "files", "content_status", "TEXT")
+        self._ensure_column(cursor, "files", "content_error", "TEXT")
+        self._ensure_column(cursor, "files", "extractor_version", "TEXT")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_customer ON files(customer_name)
@@ -103,6 +141,8 @@ class IndexManager:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_index_root ON files(index_root)
         """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_folder_path ON files(folder_path)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_name ON folders(name)")
         
         self.conn.commit()
 
@@ -135,7 +175,10 @@ class IndexManager:
 
     def content_index_needs_rebuild(self, base_path: Path) -> bool:
         cursor = self.conn.cursor()
-        placeholders = ", ".join("?" for _ in self.CONTENT_INDEX_TYPES)
+        content_types = self.CONTENT_INDEX_TYPES & self.options.indexed_content_types
+        if not content_types:
+            return False
+        placeholders = ", ".join("?" for _ in content_types)
         cursor.execute(
             f"""
             SELECT 1 FROM files
@@ -144,9 +187,30 @@ class IndexManager:
               AND COALESCE(full_text_indexed, 0) = 0
             LIMIT 1
             """,
-            (str(base_path), *sorted(self.CONTENT_INDEX_TYPES)),
+            (str(base_path), *sorted(content_types)),
         )
         return cursor.fetchone() is not None
+
+    def get_metadata(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM index_metadata WHERE key = ?", (key,)
+        ).fetchone()
+        return str(row[0]) if row is not None else default
+
+    def set_metadata(self, key: str, value: str):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO index_metadata (key, value) VALUES (?, ?)",
+            (key, str(value)),
+        )
+
+    def index_is_current(self, base_path: Path) -> bool:
+        return (
+            self.has_index_for_root(base_path)
+            and self.get_metadata("schema_version") == self.SCHEMA_VERSION
+            and self.get_metadata("extractor_version") == self.EXTRACTOR_VERSION
+            and self.get_metadata("options_fingerprint") == self.options.fingerprint()
+            and not self.content_index_needs_rebuild(base_path)
+        )
     
     def index_directory(
         self,
@@ -154,49 +218,146 @@ class IndexManager:
         replace_existing: bool = False,
         should_cancel: Optional[Callable[[], bool]] = None,
     ):
-        if not base_path.exists():
+        return self.synchronize_directory(
+            base_path,
+            full_rebuild=replace_existing,
+            should_cancel=should_cancel,
+        )
+
+    def synchronize_directory(
+        self,
+        base_path: Path,
+        full_rebuild: bool = False,
+        should_cancel: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> int:
+        """Incrementally synchronize a source into this (usually staged) index."""
+        base_path = base_path.resolve()
+        if not base_path.exists() or not base_path.is_dir():
             raise FileNotFoundError(f"Index-Pfad existiert nicht: {base_path}")
 
         cursor = self.conn.cursor()
-        indexed_count = 0
-        root = str(base_path)
-
-        if replace_existing:
+        existing_root = self.get_metadata("index_root")
+        changed_count = 1 if full_rebuild else 0
+        if full_rebuild or (existing_root and existing_root != str(base_path)):
             cursor.execute("DELETE FROM file_content_fts")
             cursor.execute("DELETE FROM files")
+            cursor.execute("DELETE FROM folders")
             cursor.execute("DELETE FROM indexed_roots")
-        else:
-            cursor.execute(
-                "DELETE FROM file_content_fts WHERE path IN "
-                "(SELECT path FROM files WHERE index_root = ? OR path LIKE ?)",
-                (root, f"{root}{os.sep}%"),
-            )
-            cursor.execute("DELETE FROM files WHERE index_root = ?", (root,))
-            cursor.execute("DELETE FROM files WHERE path LIKE ?", (f"{root}{os.sep}%",))
-        
-        for filepath in base_path.rglob('*'):
+
+        cursor.execute("CREATE TEMP TABLE IF NOT EXISTS seen_files (path TEXT PRIMARY KEY)")
+        cursor.execute("DELETE FROM seen_files")
+        cursor.execute("CREATE TEMP TABLE IF NOT EXISTS seen_folders (path TEXT PRIMARY KEY)")
+        cursor.execute("DELETE FROM seen_folders")
+
+        processed_count = 0
+        excluded = self.options.excluded_folder_names
+        for current_root, directory_names, file_names in os.walk(base_path):
             if should_cancel is not None and should_cancel():
-                self.conn.rollback()
                 raise InterruptedError("Indexierung wurde abgebrochen")
-            if filepath.is_file():
+
+            directory_names[:] = [
+                name for name in directory_names if name.casefold() not in excluded
+            ]
+            current_path = Path(current_root)
+            relative = current_path.relative_to(base_path)
+            relative_text = "" if relative == Path(".") else str(relative)
+            parent_path = str(current_path.parent) if current_path != base_path else ""
+            folder_exists = cursor.execute(
+                "SELECT 1 FROM folders WHERE path = ?", (str(current_path),)
+            ).fetchone()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO folders
+                (path, name, relative_path, parent_path, index_root)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    str(current_path),
+                    current_path.name,
+                    relative_text,
+                    parent_path,
+                    str(base_path),
+                ),
+            )
+            cursor.execute("INSERT OR IGNORE INTO seen_folders(path) VALUES (?)", (str(current_path),))
+            if folder_exists is None:
+                changed_count += 1
+
+            for filename in file_names:
+                if should_cancel is not None and should_cancel():
+                    raise InterruptedError("Indexierung wurde abgebrochen")
+                filepath = current_path / filename
                 try:
-                    self._index_file(filepath, base_path, cursor)
-                    indexed_count += 1
-                except Exception as e:
-                    print(f"Fehler beim Indexieren von {filepath}: {e}")
+                    stat = filepath.stat()
+                except OSError as exc:
+                    print(f"Datei übersprungen ({filepath}): {exc}")
+                    continue
+
+                path_text = str(filepath)
+                cursor.execute("INSERT OR IGNORE INTO seen_files(path) VALUES (?)", (path_text,))
+                existing = cursor.execute(
+                    """
+                    SELECT file_size, modified_ns, extractor_version
+                    FROM files WHERE path = ?
+                    """,
+                    (path_text,),
+                ).fetchone()
+                unchanged = (
+                    not full_rebuild
+                    and existing is not None
+                    and existing["file_size"] == stat.st_size
+                    and existing["modified_ns"] == stat.st_mtime_ns
+                    and (
+                        filepath.suffix.lower().lstrip(".")
+                        not in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types)
+                        or existing["extractor_version"] == self.EXTRACTOR_VERSION
+                    )
+                )
+                if not unchanged:
+                    self._index_file(filepath, base_path, cursor, stat=stat)
+                    changed_count += 1
+
+                processed_count += 1
+                if progress_callback is not None:
+                    progress_callback(processed_count, path_text)
+                if processed_count % 250 == 0:
+                    self.conn.commit()
 
         cursor.execute(
-            "INSERT OR REPLACE INTO indexed_roots (root_path, last_indexed) VALUES (?, ?)",
-            (root, datetime.now().isoformat())
+            "DELETE FROM file_content_fts WHERE path IN "
+            "(SELECT path FROM files WHERE path NOT IN (SELECT path FROM seen_files))"
         )
-        
+        cursor.execute("DELETE FROM files WHERE path NOT IN (SELECT path FROM seen_files)")
+        changed_count += max(cursor.rowcount, 0)
+        cursor.execute("DELETE FROM folders WHERE path NOT IN (SELECT path FROM seen_folders)")
+        changed_count += max(cursor.rowcount, 0)
+        cursor.execute("DELETE FROM indexed_roots")
+        cursor.execute(
+            "INSERT INTO indexed_roots(root_path, last_indexed) VALUES (?, ?)",
+            (str(base_path), datetime.now().isoformat()),
+        )
+        self.set_metadata("schema_version", self.SCHEMA_VERSION)
+        self.set_metadata("extractor_version", self.EXTRACTOR_VERSION)
+        self.set_metadata("app_version", self.APP_VERSION)
+        self.set_metadata("options_fingerprint", self.options.fingerprint())
+        self.set_metadata("index_root", str(base_path))
+        self.set_metadata("built_at", datetime.now().isoformat())
+        self.set_metadata("build_mode", "full" if full_rebuild else "incremental")
+        self.set_metadata("file_count", str(processed_count))
         self.conn.commit()
-        print(f"✓ {indexed_count} Dateien indiziert")
-        return indexed_count
+        self.last_change_count = changed_count
+        return processed_count
     
-    def _index_file(self, filepath: Path, base_path: Path, cursor: sqlite3.Cursor):
+    def _index_file(
+        self,
+        filepath: Path,
+        base_path: Path,
+        cursor: sqlite3.Cursor,
+        stat=None,
+    ):
         try:
-            stat = filepath.stat()
+            stat = stat or filepath.stat()
             rel_path = str(filepath.relative_to(base_path))
             parts = rel_path.split(os.sep)
             
@@ -225,8 +386,9 @@ class IndexManager:
                 (path, filename, file_size, file_type, created_date, modified_date, 
                  year, service_type, customer_name, subfolder,
                  domain_folder, time_bucket, project_name, relative_dir, index_root,
-                 full_text_indexed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 full_text_indexed, folder_path, modified_ns, content_hash,
+                 content_status, content_error, extractor_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(filepath),
                 filepath.name,
@@ -244,40 +406,83 @@ class IndexManager:
                 relative_dir,
                 str(base_path),
                 0,
+                str(filepath.parent),
+                stat.st_mtime_ns,
+                "",
+                "not_applicable",
+                "",
+                "",
             ))
 
-            if file_type in self.CONTENT_INDEX_TYPES:
+            if file_type in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types):
                 cursor.execute("DELETE FROM file_content_fts WHERE path = ?", (str(filepath),))
-                content = self._extract_document_text(filepath, file_type)
+                max_bytes = self.options.max_file_size_mb * 1024 * 1024
+                if stat.st_size > max_bytes:
+                    content = ""
+                    status = "skipped_large"
+                    error = f"Datei größer als {self.options.max_file_size_mb} MB"
+                else:
+                    content, status, error = self._extract_document_with_status(
+                        filepath, file_type
+                    )
                 if content:
                     cursor.execute(
                         "INSERT INTO file_content_fts (path, content) VALUES (?, ?)",
                         (str(filepath), content),
                     )
                 cursor.execute(
-                    "UPDATE files SET full_text_indexed = 1 WHERE path = ?",
-                    (str(filepath),),
+                    """
+                    UPDATE files
+                    SET full_text_indexed = 1,
+                        content_hash = ?,
+                        content_status = ?,
+                        content_error = ?,
+                        extractor_version = ?
+                    WHERE path = ?
+                    """,
+                    (
+                        self._hash_file(filepath) if stat.st_size <= max_bytes else "",
+                        status,
+                        error,
+                        self.EXTRACTOR_VERSION,
+                        str(filepath),
+                    ),
                 )
         except Exception as e:
             print(f"Fehler beim Indexieren von {filepath}: {e}")
 
+    def _hash_file(self, filepath: Path) -> str:
+        digest = hashlib.sha256()
+        with filepath.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
     def _limit_text(self, text: str) -> str:
-        return text[:self.MAX_EXTRACTED_CHARACTERS]
+        return text[:self.options.max_extracted_characters]
+
+    def _extract_document_with_status(
+        self, filepath: Path, file_type: str
+    ) -> tuple[str, str, str]:
+        try:
+            content = self._extract_document_text(filepath, file_type)
+            return content, ("success" if content.strip() else "empty"), ""
+        except Exception as exc:
+            return "", "error", str(exc)
 
     def _extract_document_text(self, filepath: Path, file_type: str) -> str:
-        try:
-            if file_type == "pdf":
-                return self._extract_pdf_text(filepath)
-            if file_type == "docx":
-                return self._extract_docx_text(filepath)
-            if file_type == "doc":
-                return self._extract_doc_text(filepath)
-            if file_type == "xlsx":
-                return self._extract_xlsx_text(filepath)
-            if file_type == "xls":
-                return self._extract_xls_text(filepath)
-        except Exception as exc:
-            print(f"Textextraktion fehlgeschlagen ({filepath}): {exc}")
+        if file_type in self.TEXT_CONTENT_TYPES:
+            return self._limit_text(filepath.read_text(encoding="utf-8", errors="replace"))
+        if file_type == "pdf":
+            return self._extract_pdf_text(filepath)
+        if file_type == "docx":
+            return self._extract_docx_text(filepath)
+        if file_type == "doc":
+            return self._extract_doc_text(filepath)
+        if file_type == "xlsx":
+            return self._extract_xlsx_text(filepath)
+        if file_type == "xls":
+            return self._extract_xls_text(filepath)
         return ""
 
     def _extract_pdf_text(self, filepath: Path) -> str:
@@ -289,9 +494,12 @@ class IndexManager:
             if text:
                 parts.append(text)
                 length += len(text)
-            if length >= self.MAX_EXTRACTED_CHARACTERS:
+            if length >= self.options.max_extracted_characters:
                 break
-        return self._limit_text("\n".join(parts))
+        extracted = self._limit_text("\n".join(parts))
+        if extracted.strip() or not self.options.ocr_enabled:
+            return extracted
+        return self._ocr_pdf(filepath)
 
     def _extract_docx_text(self, filepath: Path) -> str:
         document = Document(str(filepath))
@@ -304,7 +512,7 @@ class IndexManager:
                     line = "\t".join(values)
                     parts.append(line)
                     length += len(line)
-                if length >= self.MAX_EXTRACTED_CHARACTERS:
+                if length >= self.options.max_extracted_characters:
                     return self._limit_text("\n".join(parts))
         return self._limit_text("\n".join(parts))
 
@@ -321,7 +529,7 @@ class IndexManager:
                         line = "\t".join(values)
                         parts.append(line)
                         length += len(line)
-                    if length >= self.MAX_EXTRACTED_CHARACTERS:
+                    if length >= self.options.max_extracted_characters:
                         return self._limit_text("\n".join(parts))
             return self._limit_text("\n".join(parts))
         finally:
@@ -344,7 +552,7 @@ class IndexManager:
                         line = "\t".join(values)
                         parts.append(line)
                         length += len(line)
-                    if length >= self.MAX_EXTRACTED_CHARACTERS:
+                    if length >= self.options.max_extracted_characters:
                         return self._limit_text("\n".join(parts))
             return self._limit_text("\n".join(parts))
         finally:
@@ -388,6 +596,91 @@ class IndexManager:
             if result.returncode == 0 and converted is not None:
                 return self._limit_text(converted.read_text(encoding="utf-8", errors="replace"))
         return ""
+
+    def _ocr_pdf(self, filepath: Path) -> str:
+        pdftoppm = shutil.which("pdftoppm")
+        tesseract = self._find_tesseract()
+        if pdftoppm is None or tesseract is None:
+            return ""
+
+        with TemporaryDirectory(prefix="papagui-ocr-") as temp_dir:
+            output_prefix = Path(temp_dir) / "page"
+            render = subprocess.run(
+                [
+                    pdftoppm,
+                    "-png",
+                    "-r",
+                    "150",
+                    "-f",
+                    "1",
+                    "-l",
+                    str(self.options.ocr_max_pages),
+                    str(filepath),
+                    str(output_prefix),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if render.returncode != 0:
+                return ""
+
+            parts = []
+            length = 0
+            for image_path in sorted(Path(temp_dir).glob("page-*.png")):
+                ocr = subprocess.run(
+                    [
+                        str(tesseract),
+                        str(image_path),
+                        "stdout",
+                        "-l",
+                        self._get_ocr_language(tesseract),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    timeout=120,
+                )
+                if ocr.returncode == 0 and ocr.stdout.strip():
+                    parts.append(ocr.stdout)
+                    length += len(ocr.stdout)
+                if length >= self.options.max_extracted_characters:
+                    break
+            return self._limit_text("\n".join(parts))
+
+    def _get_ocr_language(self, tesseract: Path) -> str:
+        if self._ocr_language is not None:
+            return self._ocr_language
+        try:
+            result = subprocess.run(
+                [str(tesseract), "--list-langs"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            languages = set(result.stdout.splitlines()[1:])
+        except Exception:
+            languages = set()
+        if "deu" in languages and "eng" in languages:
+            self._ocr_language = "deu+eng"
+        elif "deu" in languages:
+            self._ocr_language = "deu"
+        else:
+            self._ocr_language = "eng"
+        return self._ocr_language
+
+    def _find_tesseract(self) -> Optional[Path]:
+        found = shutil.which("tesseract")
+        if found:
+            return Path(found)
+        if sys.platform == "win32":
+            for environment_name in ("PROGRAMFILES", "LOCALAPPDATA"):
+                base = os.environ.get(environment_name)
+                if base:
+                    candidate = Path(base) / "Tesseract-OCR" / "tesseract.exe"
+                    if candidate.exists():
+                        return candidate
+        return None
 
     def _find_libreoffice(self) -> Optional[Path]:
         for name in ("libreoffice", "soffice"):
@@ -440,6 +733,62 @@ class IndexManager:
             })
         
         return results
+
+    def search_folders(self, query: str, limit: Optional[int] = None) -> List[Dict]:
+        cursor = self.conn.cursor()
+        sql = """
+            SELECT path, name, relative_path,
+                (SELECT COUNT(*) FROM files
+                 WHERE files.folder_path = folders.path
+                    OR files.path LIKE folders.path || ? || '%') AS file_count
+            FROM folders
+            WHERE name LIKE ? OR relative_path LIKE ?
+            ORDER BY name COLLATE NOCASE, relative_path COLLATE NOCASE
+        """
+        params = [os.sep, f"%{query}%", f"%{query}%"]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        cursor.execute(sql, params)
+        return [
+            {
+                "folder_path": row["path"],
+                "folder_name": row["name"],
+                "relative_path": row["relative_path"],
+                "file_count": row["file_count"],
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def get_folder_details(self, folder_path: str) -> Dict:
+        cursor = self.conn.cursor()
+        path = str(Path(folder_path))
+        pattern = f"{path}{os.sep}%"
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS file_count, MAX(modified_date) AS last_modified,
+                   COALESCE(SUM(file_size), 0) AS total_size
+            FROM files WHERE folder_path = ? OR path LIKE ?
+            """,
+            (path, pattern),
+        )
+        info = dict(cursor.fetchone())
+        cursor.execute(
+            """
+            SELECT path, filename, file_type, file_size, modified_date,
+                   domain_folder, time_bucket, relative_dir
+            FROM files WHERE folder_path = ? OR path LIKE ?
+            ORDER BY relative_dir, filename COLLATE NOCASE
+            """,
+            (path, pattern),
+        )
+        info["files"] = [dict(row) for row in cursor.fetchall()]
+        info["folder_name"] = Path(path).name
+        info["folder_path"] = path
+        info["service_types"] = sorted({
+            row["domain_folder"] for row in info["files"] if row["domain_folder"]
+        })
+        return info
     
     def get_customer_details(self, customer_name: str) -> Dict:
         cursor = self.conn.cursor()
@@ -626,9 +975,11 @@ class IndexManager:
         query: str,
         customer_name: Optional[str] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
+        limit: int = 200,
     ) -> List[Dict]:
         try:
-            results = self._search_extracted_content(query, customer_name)
+            results = self._search_extracted_content(query, customer_name, limit=limit)
+            indexed_result_paths = {result["path"] for result in results}
             if should_cancel is not None and should_cancel():
                 return results
 
@@ -664,7 +1015,11 @@ class IndexManager:
                 ]
                 stdout = self._run_ripgrep(command, should_cancel)
                 if stdout:
-                    results.extend(self._parse_rg_output(stdout))
+                    results.extend(
+                        result
+                        for result in self._parse_rg_output(stdout)
+                        if result["path"] not in indexed_result_paths
+                    )
 
             unique_results = []
             seen = set()
@@ -674,7 +1029,7 @@ class IndexManager:
                     continue
                 seen.add(key)
                 unique_results.append(result)
-                if len(unique_results) >= 200:
+                if len(unique_results) >= limit:
                     break
             return unique_results
         except Exception as e:

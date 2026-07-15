@@ -6,15 +6,19 @@ from PySide6.QtWidgets import (
     QFrame,
     QFileDialog,
     QHBoxLayout,
+    QFormLayout,
+    QCheckBox,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QLineEdit,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 from app.gui.widgets import AppButton, BusyIndicator
+from app.core.config import IndexOptions
 
 
 class SettingsPopup(QFrame):
@@ -23,6 +27,9 @@ class SettingsPopup(QFrame):
     appearanceChanged = Signal(str, str)
     dataPathChanged = Signal(str)
     reindexRequested = Signal()
+    cancelIndexRequested = Signal()
+    loadBackupRequested = Signal(str)
+    indexOptionsChanged = Signal(object)
 
     def __init__(
         self,
@@ -31,6 +38,8 @@ class SettingsPopup(QFrame):
         parent=None,
         data_path=None,
         indexing: bool = False,
+        backups=None,
+        index_options: IndexOptions | None = None,
     ):
         super().__init__(
             parent,
@@ -39,12 +48,14 @@ class SettingsPopup(QFrame):
         self.setObjectName("SettingsPopup")
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(520, 360)
+        self.setMinimumSize(640, 480)
 
         self.selected_mode = mode if mode in {"light", "dark"} else "light"
         self.selected_accent = QColor(accent).name() if QColor(accent).isValid() else "#2db89d"
         self.data_path = str(data_path or "")
         self.indexing = indexing
+        self.backups = list(backups or [])
+        self.index_options = index_options or IndexOptions()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -74,6 +85,10 @@ class SettingsPopup(QFrame):
         general_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(general_item)
 
+        index_item = QListWidgetItem("Indexierung")
+        index_item.setSizeHint(QSize(164, 42))
+        self.nav_list.addItem(index_item)
+
         appearance_item = QListWidgetItem("Aussehen")
         appearance_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(appearance_item)
@@ -85,6 +100,7 @@ class SettingsPopup(QFrame):
         split_layout.addWidget(self.stack, 1)
 
         self.stack.addWidget(self._build_general_page())
+        self.stack.addWidget(self._build_index_page())
         self.stack.addWidget(self._build_appearance_page())
 
         content_layout.addLayout(split_layout)
@@ -163,8 +179,29 @@ class SettingsPopup(QFrame):
         reindex_row.addWidget(self.reindex_button)
         self.index_busy_indicator = BusyIndicator()
         reindex_row.addWidget(self.index_busy_indicator)
+        self.cancel_index_button = AppButton("Abbrechen", AppButton.DANGER)
+        self.cancel_index_button.clicked.connect(self.cancelIndexRequested.emit)
+        reindex_row.addWidget(self.cancel_index_button)
         reindex_row.addStretch()
         layout.addLayout(reindex_row)
+
+        self.index_progress_label = QLabel("")
+        self.index_progress_label.setObjectName("PopupCaption")
+        self.index_progress_label.setWordWrap(True)
+        layout.addWidget(self.index_progress_label)
+
+        backup_label = QLabel("Alte Indexstände")
+        backup_label.setObjectName("PopupCaption")
+        layout.addWidget(backup_label)
+
+        backup_row = QHBoxLayout()
+        self.backup_combo = QComboBox()
+        backup_row.addWidget(self.backup_combo, 1)
+        self.load_backup_button = AppButton("Index laden", AppButton.SECONDARY)
+        self.load_backup_button.clicked.connect(self.load_selected_backup)
+        backup_row.addWidget(self.load_backup_button)
+        layout.addLayout(backup_row)
+        self.set_backups(self.backups)
 
         layout.addStretch()
         self.set_indexing(self.indexing)
@@ -185,6 +222,113 @@ class SettingsPopup(QFrame):
             self.index_busy_indicator.start()
         else:
             self.index_busy_indicator.stop()
+            self.index_progress_label.clear()
+        self.cancel_index_button.setVisible(indexing)
+        self.cancel_index_button.setEnabled(indexing)
+        self.load_backup_button.setEnabled(not indexing and bool(self.backups))
+
+    def set_index_progress(self, processed_count: int, filename: str):
+        self.index_progress_label.setText(
+            f"{processed_count} Dateien geprüft · {filename}"
+        )
+
+    def set_backups(self, backups):
+        self.backups = list(backups or [])
+        if not hasattr(self, "backup_combo"):
+            return
+        self.backup_combo.clear()
+        for backup in self.backups:
+            self.backup_combo.addItem(backup["label"], backup["path"])
+        if not self.backups:
+            self.backup_combo.addItem("Keine Sicherung vorhanden", "")
+        self.load_backup_button.setEnabled(bool(self.backups) and not self.indexing)
+
+    def load_selected_backup(self):
+        backup_path = self.backup_combo.currentData()
+        if backup_path:
+            self.loadBackupRequested.emit(str(backup_path))
+
+    def _build_index_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+
+        heading = QLabel("Indexierung")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+
+        form = QFormLayout()
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(10)
+
+        self.max_file_size_spin = QSpinBox()
+        self.max_file_size_spin.setRange(1, 10_240)
+        self.max_file_size_spin.setSuffix(" MB")
+        self.max_file_size_spin.setValue(self.index_options.max_file_size_mb)
+        form.addRow(self._form_label("Maximale Dokumentgröße"), self.max_file_size_spin)
+
+        self.max_characters_spin = QSpinBox()
+        self.max_characters_spin.setRange(10_000, 20_000_000)
+        self.max_characters_spin.setSingleStep(100_000)
+        self.max_characters_spin.setValue(self.index_options.max_extracted_characters)
+        form.addRow(self._form_label("Maximale Extraktlänge"), self.max_characters_spin)
+
+        self.result_limit_spin = QSpinBox()
+        self.result_limit_spin.setRange(10, 5_000)
+        self.result_limit_spin.setValue(self.index_options.result_limit)
+        form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
+
+        self.ocr_checkbox = QCheckBox("OCR für gescannte PDFs verwenden")
+        self.ocr_checkbox.setChecked(self.index_options.ocr_enabled)
+        form.addRow(self._form_label("OCR"), self.ocr_checkbox)
+
+        self.ocr_pages_spin = QSpinBox()
+        self.ocr_pages_spin.setRange(1, 1_000)
+        self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
+        form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
+
+        self.content_extensions_input = QLineEdit(self.index_options.content_extensions)
+        self.content_extensions_input.setPlaceholderText("pdf, docx, xlsx, txt, …")
+        form.addRow(self._form_label("Durchsuchbare Formate"), self.content_extensions_input)
+
+        self.excluded_folders_input = QLineEdit(self.index_options.excluded_folders)
+        self.excluded_folders_input.setPlaceholderText(".git, .venv, node_modules")
+        form.addRow(self._form_label("Ausgeschlossene Ordner"), self.excluded_folders_input)
+        layout.addLayout(form)
+
+        note = QLabel(
+            "Änderungen an Extraktion oder Ausschlüssen werden beim nächsten Indexlauf angewendet."
+        )
+        note.setObjectName("PopupCaption")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        save_row = QHBoxLayout()
+        save_row.addStretch()
+        save_button = AppButton("Indexeinstellungen speichern")
+        save_button.clicked.connect(self.save_index_options)
+        save_row.addWidget(save_button)
+        layout.addLayout(save_row)
+        layout.addStretch()
+        return page
+
+    def _form_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("PopupCaption")
+        return label
+
+    def save_index_options(self):
+        self.index_options = IndexOptions(
+            max_file_size_mb=self.max_file_size_spin.value(),
+            max_extracted_characters=self.max_characters_spin.value(),
+            result_limit=self.result_limit_spin.value(),
+            ocr_enabled=self.ocr_checkbox.isChecked(),
+            ocr_max_pages=self.ocr_pages_spin.value(),
+            content_extensions=self.content_extensions_input.text().strip(),
+            excluded_folders=self.excluded_folders_input.text().strip(),
+        )
+        self.indexOptionsChanged.emit(self.index_options)
 
     def choose_data_path(self):
         start_path = self.data_path_input.text().strip() or self.data_path
@@ -331,8 +475,8 @@ class SettingsPopup(QFrame):
         """Return a comfortable size that still fits into a smaller main window."""
         parent = self.parentWidget()
         if parent is None:
-            return QSize(700, 420)
+            return QSize(780, 560)
 
-        available_width = max(520, parent.width() - 48)
-        available_height = max(360, parent.height() - 48)
-        return QSize(min(720, available_width), min(460, available_height))
+        available_width = max(640, parent.width() - 48)
+        available_height = max(480, parent.height() - 48)
+        return QSize(min(820, available_width), min(600, available_height))

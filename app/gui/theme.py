@@ -164,7 +164,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background-color: {item_hover};
     }}
 
-    QLineEdit, QComboBox, QTextEdit, QListWidget, QTreeWidget, QTableWidget, QTabWidget::pane {{
+    QLineEdit, QComboBox, QSpinBox, QTextEdit, QListWidget, QTreeWidget, QTableWidget, QTabWidget::pane {{
         background-color: {surface};
         color: {text};
         border: 1px solid {border};
@@ -230,7 +230,31 @@ def build_stylesheet(mode: str, accent: str) -> str:
         color: {text};
     }}
 
-    QLineEdit:focus, QComboBox:focus, QTextEdit:focus {{
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTextEdit:focus {{
+        border-color: {accent};
+    }}
+
+    QSpinBox::up-button, QSpinBox::down-button {{
+        background-color: {chip};
+        border: none;
+        width: 18px;
+    }}
+
+    QCheckBox {{
+        color: {text};
+        spacing: 8px;
+    }}
+
+    QCheckBox::indicator {{
+        width: 16px;
+        height: 16px;
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 4px;
+    }}
+
+    QCheckBox::indicator:checked {{
+        background-color: {accent};
         border-color: {accent};
     }}
 

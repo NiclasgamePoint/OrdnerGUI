@@ -11,6 +11,10 @@
   - Textdateien (TXT, CSV, LOG, MD)
   - Word-Dokumente (DOCX)
 - **Volltextsuche**: ripgrep-Integration für Textdateien
+- **Lokaler Inhaltsindex**: SQLite FTS5 für PDF-, Word-, Excel- und Textdateien
+- **Inkrementelle Indexierung**: Verarbeitet nur neue, geänderte oder gelöschte Dateien
+- **Sichere Indexgenerationen**: Aufbau in einer separaten Datei mit drei Backups
+- **OCR-Fallback**: Optional für gescannte PDFs (Tesseract + Poppler)
 - **GUI**: PySide6-basiert mit modernem Interface
 
 ### Zu Implementieren (später)
@@ -23,39 +27,6 @@
 - Export-Funktionen
 - Backup-Management
 - Logging & Debugging-Tools
-
-## Installation
-
-### 1. Repository klonen
-```bash
-git clone https://github.com/NiclasgamePoint/OrdnerGUI.git
-```
-
-### 2. Virtuelle Umgebung erstellen
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Abhängigkeiten installieren
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Zusätzliche Abhängigkeiten (optional)
-```bash
-# Für Volltextsuche (ripgrep)
-sudo apt install ripgrep
-
-# Für PDF-Extraktion (optional)
-pip install PyPDF2
-```
-
-### Index zurücksetzen
-```bash
-rm data/index.db
-python main.py  # Index wird automatisch neu erstellt
-```
 
 ## Projektstruktur
 
@@ -82,7 +53,10 @@ PapaGUI/
 
 ### 1. **Dateiindexierung**
 - SQLite-Datenbank speichert Metadaten (Pfad, Dateiname, Größe, Datum, Kunde, etc.)
-- Automatische Indizierung beim Start (wenn nötig)
+- Automatischer inkrementeller Abgleich beim Start
+- Dokumentextrakte und normale Textdateien werden lokal mit FTS5 indexiert
+- Ein neuer Index wird separat aufgebaut und erst nach erfolgreicher Prüfung aktiviert
+- Bis zu drei ältere Indexstände können über die Einstellungen geladen werden
 - Ordnersystem bleibt als "Source of Truth"
 
 ### 2. **Suchstrategie**
@@ -93,4 +67,14 @@ PapaGUI/
 - Linke Seite: Kundensuche & -liste
 - Rechte Seite: Kundendetails + Datei-Viewer (Tabs)
 - Status-Bar für Rückmeldungen
+
+
+
+## Vorschläge
+
+### Papa
+- Dateipfad im Finder öffnen für Papa
+    - damit man es in den Mails finden kann
+- Imap server mit einbinden
+- Automatische indizierung
 

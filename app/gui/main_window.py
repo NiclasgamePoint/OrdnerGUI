@@ -22,9 +22,19 @@ from app.core.config import (
     WINDOW_HEIGHT,
     DB_FILE,
     get_configured_index_source,
+    load_index_options,
+    save_index_options,
     save_index_source,
 )
 from app.core.index_manager import IndexManager
+from app.core.index_store import (
+    activate_index,
+    available_backups,
+    create_build_path,
+    create_restore_build,
+    seed_build_database,
+    validate_index,
+)
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
@@ -32,28 +42,55 @@ from app.gui.widgets import AppButton
 
 
 class IndexingWorker(QThread):
-    progress = Signal(int)
+    progress = Signal(int, str)
     
-    def __init__(self, db_path: Path, base_path: Path, replace_existing: bool = False):
+    def __init__(self, db_path: Path, base_path: Path, options, full_rebuild: bool = False):
         super().__init__()
         self.db_path = db_path
         self.base_path = base_path
-        self.replace_existing = replace_existing
+        self.options = options
+        self.full_rebuild = full_rebuild
         self.error = ""
         self.indexed_count = 0
+        self.changed_count = 0
+        self.build_path = None
+        self.no_changes = False
+        self.cancelled = False
     
     def run(self):
-        manager = IndexManager(self.db_path)
+        build_path = create_build_path(self.db_path)
+        self.build_path = build_path
+        manager = None
         try:
-            self.indexed_count = manager.index_directory(
-                self.base_path,
-                replace_existing=self.replace_existing,
-                should_cancel=self.isInterruptionRequested,
+            seed_build_database(
+                self.db_path,
+                build_path,
+                incremental=not self.full_rebuild,
             )
+            manager = IndexManager(build_path, options=self.options)
+            self.indexed_count = manager.synchronize_directory(
+                self.base_path,
+                full_rebuild=self.full_rebuild,
+                should_cancel=self.isInterruptionRequested,
+                progress_callback=self.progress.emit,
+            )
+            self.changed_count = getattr(manager, "last_change_count", self.indexed_count)
+            manager.close()
+            manager = None
+            validate_index(build_path)
+            if self.changed_count == 0 and self.db_path.exists():
+                build_path.unlink(missing_ok=True)
+                self.build_path = None
+                self.no_changes = True
         except Exception as exc:
             self.error = str(exc)
+            self.cancelled = isinstance(exc, InterruptedError)
         finally:
-            manager.close()
+            if manager is not None:
+                manager.close()
+            if self.error and build_path.exists():
+                build_path.unlink(missing_ok=True)
+                self.build_path = None
 
 
 class SearchWorker(QThread):
@@ -61,25 +98,29 @@ class SearchWorker(QThread):
 
     completed = Signal(int, str, object, str)
 
-    def __init__(self, db_path: Path, generation: int, category: str, query: str):
+    def __init__(
+        self, db_path: Path, generation: int, category: str, query: str, result_limit: int
+    ):
         super().__init__()
         self.db_path = db_path
         self.generation = generation
         self.category = category
         self.query = query
+        self.result_limit = result_limit
 
     def run(self):
         manager = None
         try:
             manager = IndexManager(self.db_path, initialize=False)
             if self.category == "folders":
-                results = manager.search_customers(self.query, limit=200)
+                results = manager.search_folders(self.query, limit=self.result_limit)
             elif self.category == "files":
-                results = manager.search_files(self.query, limit=200)
+                results = manager.search_files(self.query, limit=self.result_limit)
             elif self.category == "text":
                 results = manager.search_in_text(
                     self.query,
                     should_cancel=self.isInterruptionRequested,
+                    limit=self.result_limit,
                 )
             else:
                 raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
@@ -104,6 +145,7 @@ class MainWindow(QMainWindow):
         self.current_customer = None
         self.index_worker = None
         self.index_source = get_configured_index_source()
+        self.index_options = load_index_options()
         self.pending_index_source = None
         self.theme_manager = ThemeManager()
         self.settings_popup = None
@@ -314,10 +356,15 @@ class MainWindow(QMainWindow):
             self,
             data_path=self.index_source,
             indexing=self.index_worker is not None and self.index_worker.isRunning(),
+            backups=available_backups(DB_FILE),
+            index_options=self.index_options,
         )
         self.settings_popup.appearanceChanged.connect(self.on_settings_appearance_changed)
         self.settings_popup.dataPathChanged.connect(self.on_settings_data_path_changed)
         self.settings_popup.reindexRequested.connect(self.on_settings_reindex_requested)
+        self.settings_popup.cancelIndexRequested.connect(self.cancel_background_indexing)
+        self.settings_popup.loadBackupRequested.connect(self.on_load_backup_requested)
+        self.settings_popup.indexOptionsChanged.connect(self.on_index_options_changed)
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
 
@@ -374,7 +421,7 @@ class MainWindow(QMainWindow):
         self.pending_index_source = new_source
         self._start_background_indexing(
             new_source,
-            replace_existing=True,
+            full_rebuild=True,
             status_text=f"Baue Index für {new_source} neu auf …",
         )
 
@@ -390,31 +437,43 @@ class MainWindow(QMainWindow):
             return
         self._start_background_indexing(
             self.index_source,
-            replace_existing=True,
+            full_rebuild=True,
             status_text=f"Baue Index für {self.index_source.name} neu auf …",
         )
 
     def _start_background_indexing(
         self,
         source: Path,
-        replace_existing: bool,
+        full_rebuild: bool,
         status_text: str,
     ):
         if self.index_worker is not None and self.index_worker.isRunning():
             return
-        self.search_generation += 1
-        self._cancel_outdated_searches()
-        self.search_debounce.stop()
-        self.search_input.setEnabled(False)
-        self.search_button.setEnabled(False)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
         self.status_label.setText(status_text)
         if self.settings_popup is not None:
             self.settings_popup.set_indexing(True)
-        self.index_worker = IndexingWorker(DB_FILE, source, replace_existing=replace_existing)
+        self.index_worker = IndexingWorker(
+            DB_FILE,
+            source,
+            self.index_options,
+            full_rebuild=full_rebuild,
+        )
+        self.index_worker.progress.connect(self.on_indexing_progress)
         self.index_worker.finished.connect(self.on_indexing_complete)
         self.index_worker.start()
+
+    def on_indexing_progress(self, processed_count: int, current_path: str):
+        filename = Path(current_path).name
+        self.status_label.setText(f"Indexierung im Hintergrund: {processed_count} Dateien · {filename}")
+        if self.settings_popup is not None:
+            self.settings_popup.set_index_progress(processed_count, filename)
+
+    def cancel_background_indexing(self):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            self.index_worker.requestInterruption()
+            self.status_label.setText("Indexierung wird abgebrochen …")
     
     def check_and_index(self):
         if not self.index_source.exists():
@@ -427,34 +486,41 @@ class MainWindow(QMainWindow):
             )
             return
 
-        needs_index = (not DB_FILE.exists() or DB_FILE.stat().st_size == 0)
-        if not needs_index:
-            needs_index = not self.index_manager.has_index_for_root(self.index_source)
-        if not needs_index:
-            needs_index = self.index_manager.content_index_needs_rebuild(self.index_source)
-
-        if needs_index:
-            self._start_background_indexing(
-                self.index_source,
-                replace_existing=True,
-                status_text="Indexiere Dateien und Dokumentinhalte …",
-            )
-        else:
-            self.status_label.setText(f"Index geladen ✓ ({self.index_source.name})")
+        full_rebuild = not self.index_manager.index_is_current(self.index_source)
+        self._start_background_indexing(
+            self.index_source,
+            full_rebuild=full_rebuild,
+            status_text=(
+                "Erstelle neuen Dokumentindex im Hintergrund …"
+                if full_rebuild
+                else "Prüfe Datenquelle im Hintergrund auf Änderungen …"
+            ),
+        )
     
     def on_indexing_complete(self):
         worker = self.index_worker
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
-        self.search_input.setEnabled(True)
-        self.search_button.setEnabled(True)
         if self.settings_popup is not None:
             self.settings_popup.set_indexing(False)
-        if worker is not None and worker.error:
+        if worker is not None and worker.cancelled:
+            self.status_label.setText("Indexierung abgebrochen · bisheriger Index bleibt aktiv")
+            self.pending_index_source = None
+        elif worker is not None and worker.error:
             self.status_label.setText(f"Indexierung fehlgeschlagen: {worker.error}")
             QMessageBox.warning(self, "Indexierung fehlgeschlagen", worker.error)
             self.pending_index_source = None
+        elif worker is not None and worker.no_changes:
+            self.status_label.setText(f"Index aktuell ✓ ({worker.indexed_count} Dateien)")
         else:
+            try:
+                self._activate_built_index(worker.build_path)
+            except Exception as exc:
+                self.status_label.setText(f"Indexwechsel fehlgeschlagen: {exc}")
+                QMessageBox.warning(self, "Indexwechsel fehlgeschlagen", str(exc))
+                self.pending_index_source = None
+                self.index_worker = None
+                return
             if self.pending_index_source is not None:
                 self.index_source = self.pending_index_source
                 save_index_source(self.index_source)
@@ -464,7 +530,50 @@ class MainWindow(QMainWindow):
             self.current_customer = None
             self.file_list.clear()
             self.status_label.setText(f"Index fertig geladen ✓ ({count} Dateien)")
+            if self.settings_popup is not None:
+                self.settings_popup.set_backups(available_backups(DB_FILE))
         self.index_worker = None
+
+    def _activate_built_index(self, build_path: Path):
+        if build_path is None:
+            return
+        self.search_generation += 1
+        self._cancel_outdated_searches()
+        for search_worker in tuple(self.search_workers):
+            search_worker.wait()
+        self.index_manager.close()
+        try:
+            activate_index(DB_FILE, build_path)
+        finally:
+            self.index_manager = IndexManager(DB_FILE)
+
+    def on_index_options_changed(self, options):
+        self.index_options = options
+        save_index_options(options)
+        self.status_label.setText("Indexeinstellungen gespeichert")
+
+    def on_load_backup_requested(self, backup_path_value: str):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            QMessageBox.information(
+                self, "Indexierung läuft", "Bitte die laufende Indexierung zuerst abschließen."
+            )
+            return
+        try:
+            build_path = create_restore_build(DB_FILE, Path(backup_path_value))
+            metadata = validate_index(build_path)
+            self._activate_built_index(build_path)
+            restored_root = metadata.get("index_root", "")
+            if restored_root:
+                self.index_source = Path(restored_root)
+                save_index_source(self.index_source)
+            self._reset_search_results()
+            self.file_list.clear()
+            self.status_label.setText("Alter Index wurde geladen ✓")
+            if self.settings_popup is not None:
+                self.settings_popup.data_path_input.setText(str(self.index_source))
+                self.settings_popup.set_backups(available_backups(DB_FILE))
+        except Exception as exc:
+            QMessageBox.warning(self, "Index konnte nicht geladen werden", str(exc))
     
     def _create_result_groups(self, parent_layout: QVBoxLayout):
         self.result_groups = {}
@@ -574,7 +683,13 @@ class MainWindow(QMainWindow):
             self._launch_search(category, query, generation)
 
     def _launch_search(self, category: str, query: str, generation: int):
-        worker = SearchWorker(DB_FILE, generation, category, query)
+        worker = SearchWorker(
+            DB_FILE,
+            generation,
+            category,
+            query,
+            self.index_options.result_limit,
+        )
         worker.completed.connect(self._on_search_completed)
         worker.finished.connect(lambda worker=worker: self._release_search_worker(worker))
         self.search_workers.add(worker)
@@ -606,21 +721,21 @@ class MainWindow(QMainWindow):
         self._update_search_status()
 
     def _show_folder_results(self, results):
-        aggregated = {}
-        for result in results:
-            name = result.get("customer_name") or "Unbekannt"
-            aggregated[name] = aggregated.get(name, 0) + int(result.get("file_count") or 0)
-
         items = []
-        for name, file_count in sorted(aggregated.items(), key=lambda entry: entry[0].lower())[:100]:
-            item = QListWidgetItem(f"{name}  ·  {file_count} Dateien")
-            item.setData(self.RESULT_KIND_ROLE, "customer")
-            item.setData(self.RESULT_VALUE_ROLE, name)
+        for result in results[: self.index_options.result_limit]:
+            name = result.get("folder_name") or "Unbekannt"
+            file_count = int(result.get("file_count") or 0)
+            relative_path = result.get("relative_path") or ""
+            suffix = f"  ·  {relative_path}" if relative_path and relative_path != name else ""
+            item = QListWidgetItem(f"{name}  ·  {file_count} Dateien{suffix}")
+            item.setData(self.RESULT_KIND_ROLE, "folder")
+            item.setData(self.RESULT_VALUE_ROLE, result["folder_path"])
+            item.setToolTip(result["folder_path"])
             items.append(item)
         if not items:
-            items.append(self._placeholder_item("Keine Ordner oder Kunden gefunden"))
+            items.append(self._placeholder_item("Keine Ordner gefunden"))
         self._replace_group_items("folders", items)
-        self.search_counts["folders"] = len(aggregated)
+        self.search_counts["folders"] = len(results)
 
     def _show_file_results(self, results):
         items = []
@@ -673,8 +788,8 @@ class MainWindow(QMainWindow):
             heading.setText(base_title if count is None else f"{base_title} ({count})")
 
     def on_search_result_clicked(self, item: QListWidgetItem):
-        if item.data(self.RESULT_KIND_ROLE) == "customer":
-            self.show_customer_details(item.data(self.RESULT_VALUE_ROLE))
+        if item.data(self.RESULT_KIND_ROLE) == "folder":
+            self.show_folder_details(item.data(self.RESULT_VALUE_ROLE))
 
     def on_search_result_double_clicked(self, item: QListWidgetItem):
         if item.data(self.RESULT_KIND_ROLE) in {"file", "text"}:
@@ -707,6 +822,28 @@ class MainWindow(QMainWindow):
             self.file_list.addItem(item)
         
         self.status_label.setText(f"✓ Kunde: {customer_name} mit {details['file_count']} Dateien")
+
+    def show_folder_details(self, folder_path: str):
+        self.current_customer = None
+        details = self.index_manager.get_folder_details(folder_path)
+        self.customer_name_label.setText(details["folder_name"])
+        self.file_count_label.setText(str(details["file_count"]))
+        self.size_label.setText(f"{details['total_size'] / 1024 / 1024:.2f} MB")
+        if details["last_modified"]:
+            modified = datetime.fromisoformat(details["last_modified"])
+            self.modified_label.setText(modified.strftime("%d.%m.%Y %H:%M"))
+        else:
+            self.modified_label.setText("-")
+        self.service_types_label.setText(", ".join(details["service_types"]) or "-")
+        self.file_list.clear()
+        for file_info in details["files"]:
+            item = QListWidgetItem(file_info["filename"])
+            item.setData(Qt.UserRole, file_info["path"])
+            item.setToolTip(file_info["path"])
+            self.file_list.addItem(item)
+        self.status_label.setText(
+            f"✓ Ordner: {details['folder_name']} mit {details['file_count']} Dateien"
+        )
     
     def on_file_selected(self, item: QListWidgetItem):
         filepath = item.data(Qt.UserRole)

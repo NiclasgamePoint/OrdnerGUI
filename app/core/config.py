@@ -1,4 +1,7 @@
 from pathlib import Path
+from dataclasses import asdict, dataclass
+import hashlib
+import json
 from PySide6.QtCore import QSettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -19,6 +22,37 @@ SETTINGS_APP = "UI"
 INDEX_SOURCE_KEY = "data/index_source"
 
 
+@dataclass
+class IndexOptions:
+    max_file_size_mb: int = 100
+    max_extracted_characters: int = 2_000_000
+    result_limit: int = 200
+    ocr_enabled: bool = True
+    ocr_max_pages: int = 25
+    content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
+    excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
+
+    @property
+    def excluded_folder_names(self) -> set[str]:
+        return {
+            value.strip().casefold()
+            for value in self.excluded_folders.split(",")
+            if value.strip()
+        }
+
+    @property
+    def indexed_content_types(self) -> set[str]:
+        return {
+            value.strip().lower().lstrip(".")
+            for value in self.content_extensions.split(",")
+            if value.strip()
+        }
+
+    def fingerprint(self) -> str:
+        payload = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def get_default_index_source() -> Path:
     """Standardquelle für die Indexierung (reale Projektdaten)."""
     return BAUVORHABEN_DIR
@@ -37,4 +71,40 @@ def save_index_source(path: Path):
     """Persist the selected data source in a platform-native settings store."""
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
     settings.setValue(INDEX_SOURCE_KEY, str(path))
+    settings.sync()
+
+
+def load_index_options() -> IndexOptions:
+    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    defaults = IndexOptions()
+    return IndexOptions(
+        max_file_size_mb=int(settings.value("index/max_file_size_mb", defaults.max_file_size_mb)),
+        max_extracted_characters=int(
+            settings.value("index/max_extracted_characters", defaults.max_extracted_characters)
+        ),
+        result_limit=int(settings.value("search/result_limit", defaults.result_limit)),
+        ocr_enabled=str(settings.value("index/ocr_enabled", defaults.ocr_enabled)).lower()
+        in {"1", "true", "yes"},
+        ocr_max_pages=int(settings.value("index/ocr_max_pages", defaults.ocr_max_pages)),
+        content_extensions=str(
+            settings.value("index/content_extensions", defaults.content_extensions)
+        ),
+        excluded_folders=str(
+            settings.value("index/excluded_folders", defaults.excluded_folders)
+        ),
+    )
+
+
+def save_index_options(options: IndexOptions):
+    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    values = asdict(options)
+    settings.setValue("index/max_file_size_mb", values["max_file_size_mb"])
+    settings.setValue(
+        "index/max_extracted_characters", values["max_extracted_characters"]
+    )
+    settings.setValue("search/result_limit", values["result_limit"])
+    settings.setValue("index/ocr_enabled", values["ocr_enabled"])
+    settings.setValue("index/ocr_max_pages", values["ocr_max_pages"])
+    settings.setValue("index/content_extensions", values["content_extensions"])
+    settings.setValue("index/excluded_folders", values["excluded_folders"])
     settings.sync()
