@@ -2,15 +2,25 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 import os
-from typing import List, Dict, Tuple, Optional
+from typing import Callable, List, Dict, Optional
 import subprocess
 import shutil
 import time
-from typing import Callable
+import re
+import sys
+import json
+from tempfile import TemporaryDirectory
+
+import openpyxl
+import xlrd
+from docx import Document
+from PyPDF2 import PdfReader
 
 
 class IndexManager:
     SEARCH_LABEL_SQL = "COALESCE(NULLIF(project_name, ''), NULLIF(customer_name, ''), filename)"
+    CONTENT_INDEX_TYPES = {"pdf", "doc", "docx", "xls", "xlsx"}
+    MAX_EXTRACTED_CHARACTERS = 2_000_000
 
     def __init__(self, db_path: Path, initialize: bool = True):
         self.db_path = db_path
@@ -52,6 +62,14 @@ class IndexManager:
             CREATE TABLE IF NOT EXISTS indexed_roots (
                 root_path TEXT PRIMARY KEY,
                 last_indexed TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS file_content_fts USING fts5(
+                path UNINDEXED,
+                content,
+                tokenize = 'unicode61 remove_diacritics 2'
             )
         """)
 
@@ -114,8 +132,28 @@ class IndexManager:
         root = str(base_path)
         cursor.execute("SELECT 1 FROM indexed_roots WHERE root_path = ? LIMIT 1", (root,))
         return cursor.fetchone() is not None
+
+    def content_index_needs_rebuild(self, base_path: Path) -> bool:
+        cursor = self.conn.cursor()
+        placeholders = ", ".join("?" for _ in self.CONTENT_INDEX_TYPES)
+        cursor.execute(
+            f"""
+            SELECT 1 FROM files
+            WHERE index_root = ?
+              AND file_type IN ({placeholders})
+              AND COALESCE(full_text_indexed, 0) = 0
+            LIMIT 1
+            """,
+            (str(base_path), *sorted(self.CONTENT_INDEX_TYPES)),
+        )
+        return cursor.fetchone() is not None
     
-    def index_directory(self, base_path: Path, replace_existing: bool = False):
+    def index_directory(
+        self,
+        base_path: Path,
+        replace_existing: bool = False,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ):
         if not base_path.exists():
             raise FileNotFoundError(f"Index-Pfad existiert nicht: {base_path}")
 
@@ -124,13 +162,22 @@ class IndexManager:
         root = str(base_path)
 
         if replace_existing:
+            cursor.execute("DELETE FROM file_content_fts")
             cursor.execute("DELETE FROM files")
             cursor.execute("DELETE FROM indexed_roots")
         else:
+            cursor.execute(
+                "DELETE FROM file_content_fts WHERE path IN "
+                "(SELECT path FROM files WHERE index_root = ? OR path LIKE ?)",
+                (root, f"{root}{os.sep}%"),
+            )
             cursor.execute("DELETE FROM files WHERE index_root = ?", (root,))
             cursor.execute("DELETE FROM files WHERE path LIKE ?", (f"{root}{os.sep}%",))
         
         for filepath in base_path.rglob('*'):
+            if should_cancel is not None and should_cancel():
+                self.conn.rollback()
+                raise InterruptedError("Indexierung wurde abgebrochen")
             if filepath.is_file():
                 try:
                     self._index_file(filepath, base_path, cursor)
@@ -177,8 +224,9 @@ class IndexManager:
                 INSERT OR REPLACE INTO files 
                 (path, filename, file_size, file_type, created_date, modified_date, 
                  year, service_type, customer_name, subfolder,
-                 domain_folder, time_bucket, project_name, relative_dir, index_root)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 domain_folder, time_bucket, project_name, relative_dir, index_root,
+                 full_text_indexed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(filepath),
                 filepath.name,
@@ -194,10 +242,168 @@ class IndexManager:
                 time_bucket,
                 project_name,
                 relative_dir,
-                str(base_path)
+                str(base_path),
+                0,
             ))
+
+            if file_type in self.CONTENT_INDEX_TYPES:
+                cursor.execute("DELETE FROM file_content_fts WHERE path = ?", (str(filepath),))
+                content = self._extract_document_text(filepath, file_type)
+                if content:
+                    cursor.execute(
+                        "INSERT INTO file_content_fts (path, content) VALUES (?, ?)",
+                        (str(filepath), content),
+                    )
+                cursor.execute(
+                    "UPDATE files SET full_text_indexed = 1 WHERE path = ?",
+                    (str(filepath),),
+                )
         except Exception as e:
             print(f"Fehler beim Indexieren von {filepath}: {e}")
+
+    def _limit_text(self, text: str) -> str:
+        return text[:self.MAX_EXTRACTED_CHARACTERS]
+
+    def _extract_document_text(self, filepath: Path, file_type: str) -> str:
+        try:
+            if file_type == "pdf":
+                return self._extract_pdf_text(filepath)
+            if file_type == "docx":
+                return self._extract_docx_text(filepath)
+            if file_type == "doc":
+                return self._extract_doc_text(filepath)
+            if file_type == "xlsx":
+                return self._extract_xlsx_text(filepath)
+            if file_type == "xls":
+                return self._extract_xls_text(filepath)
+        except Exception as exc:
+            print(f"Textextraktion fehlgeschlagen ({filepath}): {exc}")
+        return ""
+
+    def _extract_pdf_text(self, filepath: Path) -> str:
+        reader = PdfReader(str(filepath))
+        parts = []
+        length = 0
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            if text:
+                parts.append(text)
+                length += len(text)
+            if length >= self.MAX_EXTRACTED_CHARACTERS:
+                break
+        return self._limit_text("\n".join(parts))
+
+    def _extract_docx_text(self, filepath: Path) -> str:
+        document = Document(str(filepath))
+        parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
+        length = sum(map(len, parts))
+        for table in document.tables:
+            for row in table.rows:
+                values = [cell.text for cell in row.cells if cell.text]
+                if values:
+                    line = "\t".join(values)
+                    parts.append(line)
+                    length += len(line)
+                if length >= self.MAX_EXTRACTED_CHARACTERS:
+                    return self._limit_text("\n".join(parts))
+        return self._limit_text("\n".join(parts))
+
+    def _extract_xlsx_text(self, filepath: Path) -> str:
+        workbook = openpyxl.load_workbook(str(filepath), read_only=True, data_only=True)
+        try:
+            parts = []
+            length = 0
+            for worksheet in workbook.worksheets:
+                parts.append(worksheet.title)
+                for row in worksheet.iter_rows(values_only=True):
+                    values = [str(value) for value in row if value is not None]
+                    if values:
+                        line = "\t".join(values)
+                        parts.append(line)
+                        length += len(line)
+                    if length >= self.MAX_EXTRACTED_CHARACTERS:
+                        return self._limit_text("\n".join(parts))
+            return self._limit_text("\n".join(parts))
+        finally:
+            workbook.close()
+
+    def _extract_xls_text(self, filepath: Path) -> str:
+        workbook = xlrd.open_workbook(str(filepath), on_demand=True)
+        try:
+            parts = []
+            length = 0
+            for worksheet in workbook.sheets():
+                parts.append(worksheet.name)
+                for row_index in range(worksheet.nrows):
+                    values = [
+                        str(worksheet.cell_value(row_index, column_index))
+                        for column_index in range(worksheet.ncols)
+                        if worksheet.cell_value(row_index, column_index) != ""
+                    ]
+                    if values:
+                        line = "\t".join(values)
+                        parts.append(line)
+                        length += len(line)
+                    if length >= self.MAX_EXTRACTED_CHARACTERS:
+                        return self._limit_text("\n".join(parts))
+            return self._limit_text("\n".join(parts))
+        finally:
+            workbook.release_resources()
+
+    def _extract_doc_text(self, filepath: Path) -> str:
+        for executable_name in ("catdoc", "antiword"):
+            executable = shutil.which(executable_name)
+            if executable:
+                result = subprocess.run(
+                    [executable, str(filepath)],
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    timeout=30,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return self._limit_text(result.stdout)
+
+        libreoffice = self._find_libreoffice()
+        if libreoffice is None:
+            return ""
+
+        with TemporaryDirectory(prefix="papagui-doc-index-") as temp_dir:
+            output_dir = Path(temp_dir)
+            result = subprocess.run(
+                [
+                    str(libreoffice),
+                    "--headless",
+                    "--convert-to",
+                    "txt:Text",
+                    "--outdir",
+                    str(output_dir),
+                    str(filepath),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            converted = next(output_dir.glob("*.txt"), None)
+            if result.returncode == 0 and converted is not None:
+                return self._limit_text(converted.read_text(encoding="utf-8", errors="replace"))
+        return ""
+
+    def _find_libreoffice(self) -> Optional[Path]:
+        for name in ("libreoffice", "soffice"):
+            found = shutil.which(name)
+            if found:
+                return Path(found)
+
+        candidates = []
+        if sys.platform == "darwin":
+            candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
+        elif sys.platform == "win32":
+            for environment_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+                base = os.environ.get(environment_name)
+                if base:
+                    candidates.append(Path(base) / "LibreOffice" / "program" / "soffice.exe")
+        return next((path for path in candidates if path.exists()), None)
     
     def search_customers(self, query: str, limit: Optional[int] = None) -> List[Dict]:
         cursor = self.conn.cursor()
@@ -321,18 +527,69 @@ class IndexManager:
         roots = [row[0] for row in cursor.fetchall()]
         return [[root] for root in roots]
 
-    def _parse_rg_output(self, stdout: str) -> List[Tuple[Path, int]]:
-        parsed: List[Tuple[Path, int]] = []
+    def _parse_rg_output(self, stdout: str) -> List[Dict]:
+        parsed = []
         for line in stdout.splitlines():
-            parts = line.split(":", 2)
-            if len(parts) < 3:
-                continue
-            file_path, line_num, _ = parts
             try:
-                parsed.append((Path(file_path), int(line_num)))
-            except ValueError:
+                event = json.loads(line)
+            except json.JSONDecodeError:
                 continue
+            if event.get("type") != "match":
+                continue
+            data = event.get("data", {})
+            path_data = data.get("path", {})
+            lines_data = data.get("lines", {})
+            file_path = path_data.get("text")
+            if not file_path:
+                continue
+            parsed.append({
+                "path": file_path,
+                "line": data.get("line_number"),
+                "excerpt": (lines_data.get("text") or "").strip(),
+                "source": "text",
+            })
         return parsed
+
+    def _build_fts_query(self, query: str) -> str:
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
+        return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"*' for token in tokens)
+
+    def _search_extracted_content(
+        self,
+        query: str,
+        customer_name: Optional[str],
+        limit: int = 200,
+    ) -> List[Dict]:
+        fts_query = self._build_fts_query(query)
+        if not fts_query:
+            return []
+
+        sql = f"""
+            SELECT
+                file_content_fts.path AS path,
+                snippet(file_content_fts, 1, '', '', ' … ', 18) AS excerpt
+            FROM file_content_fts
+            JOIN files ON files.path = file_content_fts.path
+            WHERE file_content_fts MATCH ?
+        """
+        params = [fts_query]
+        if customer_name:
+            sql += f" AND {self.SEARCH_LABEL_SQL} = ?"
+            params.append(customer_name)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+
+        cursor = self.conn.cursor()
+        cursor.execute(sql, params)
+        return [
+            {
+                "path": row["path"],
+                "line": None,
+                "excerpt": (row["excerpt"] or "").replace("\n", " ").strip(),
+                "source": "document",
+            }
+            for row in cursor.fetchall()
+        ]
     
     def _run_ripgrep(
         self,
@@ -369,26 +626,30 @@ class IndexManager:
         query: str,
         customer_name: Optional[str] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
-    ) -> List[Tuple[Path, int]]:
-        if not shutil.which('rg'):
-            print("⚠ ripgrep nicht installiert. Bitte installieren: apt install ripgrep")
-            return []
-        
+    ) -> List[Dict]:
         try:
+            results = self._search_extracted_content(query, customer_name)
+            if should_cancel is not None and should_cancel():
+                return results
+
+            rg_path = shutil.which("rg")
+            if rg_path is None:
+                return results
+
             target_groups = self._iter_text_search_targets(customer_name)
             if not target_groups:
-                return []
+                return results
 
-            results: List[Tuple[Path, int]] = []
             for targets in target_groups:
                 if should_cancel is not None and should_cancel():
                     break
                 command = [
-                    'rg',
+                    rg_path,
+                    '--json',
                     '--line-number',
-                    '--ignore-case',
                     '--no-messages',
                     '--smart-case',
+                    '--fixed-strings',
                     '--glob', '*.txt',
                     '--glob', '*.csv',
                     '--glob', '*.md',
@@ -405,7 +666,17 @@ class IndexManager:
                 if stdout:
                     results.extend(self._parse_rg_output(stdout))
 
-            return results
+            unique_results = []
+            seen = set()
+            for result in results:
+                key = (result["path"], result.get("line"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_results.append(result)
+                if len(unique_results) >= 200:
+                    break
+            return unique_results
         except Exception as e:
             print(f"Fehler bei Volltextsuche: {e}")
             return []

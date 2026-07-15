@@ -8,7 +8,7 @@ if __name__ == "__main__" and __package__ is None:
 
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QPushButton,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
     QMessageBox, QProgressBar, QToolButton
 )
@@ -28,6 +28,7 @@ from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
+from app.gui.widgets import AppButton
 
 
 class IndexingWorker(QThread):
@@ -47,6 +48,7 @@ class IndexingWorker(QThread):
             self.indexed_count = manager.index_directory(
                 self.base_path,
                 replace_existing=self.replace_existing,
+                should_cancel=self.isInterruptionRequested,
             )
         except Exception as exc:
             self.error = str(exc)
@@ -142,7 +144,7 @@ class MainWindow(QMainWindow):
         self.search_input.textChanged.connect(self.on_search_text_changed)
         self.search_input.returnPressed.connect(self.start_full_search)
 
-        self.search_button = QPushButton("Suchen")
+        self.search_button = AppButton("Suchen")
         self.search_button.setObjectName("SearchButton")
         self.search_button.setMinimumWidth(120)
         self.search_button.clicked.connect(self.start_full_search)
@@ -311,9 +313,11 @@ class MainWindow(QMainWindow):
             self.theme_manager.accent,
             self,
             data_path=self.index_source,
+            indexing=self.index_worker is not None and self.index_worker.isRunning(),
         )
         self.settings_popup.appearanceChanged.connect(self.on_settings_appearance_changed)
         self.settings_popup.dataPathChanged.connect(self.on_settings_data_path_changed)
+        self.settings_popup.reindexRequested.connect(self.on_settings_reindex_requested)
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
 
@@ -367,6 +371,37 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Datenquelle aktiv ✓ ({new_source.name})")
             return
 
+        self.pending_index_source = new_source
+        self._start_background_indexing(
+            new_source,
+            replace_existing=True,
+            status_text=f"Baue Index für {new_source} neu auf …",
+        )
+
+    def on_settings_reindex_requested(self):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            if self.settings_popup is not None:
+                self.settings_popup.set_indexing(True)
+            return
+        if not self.index_source.exists() or not self.index_source.is_dir():
+            if self.settings_popup is not None:
+                self.settings_popup.set_indexing(False)
+            QMessageBox.warning(self, "Indexierung", "Die konfigurierte Datenquelle existiert nicht.")
+            return
+        self._start_background_indexing(
+            self.index_source,
+            replace_existing=True,
+            status_text=f"Baue Index für {self.index_source.name} neu auf …",
+        )
+
+    def _start_background_indexing(
+        self,
+        source: Path,
+        replace_existing: bool,
+        status_text: str,
+    ):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            return
         self.search_generation += 1
         self._cancel_outdated_searches()
         self.search_debounce.stop()
@@ -374,9 +409,10 @@ class MainWindow(QMainWindow):
         self.search_button.setEnabled(False)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
-        self.status_label.setText(f"Baue Index für {new_source} neu auf …")
-        self.pending_index_source = new_source
-        self.index_worker = IndexingWorker(DB_FILE, new_source, replace_existing=True)
+        self.status_label.setText(status_text)
+        if self.settings_popup is not None:
+            self.settings_popup.set_indexing(True)
+        self.index_worker = IndexingWorker(DB_FILE, source, replace_existing=replace_existing)
         self.index_worker.finished.connect(self.on_indexing_complete)
         self.index_worker.start()
     
@@ -394,14 +430,15 @@ class MainWindow(QMainWindow):
         needs_index = (not DB_FILE.exists() or DB_FILE.stat().st_size == 0)
         if not needs_index:
             needs_index = not self.index_manager.has_index_for_root(self.index_source)
+        if not needs_index:
+            needs_index = self.index_manager.content_index_needs_rebuild(self.index_source)
 
         if needs_index:
-            self.status_label.setText("Indexiere Dateien...")
-            self.progress_bar.setVisible(True)
-            
-            self.index_worker = IndexingWorker(DB_FILE, self.index_source)
-            self.index_worker.finished.connect(self.on_indexing_complete)
-            self.index_worker.start()
+            self._start_background_indexing(
+                self.index_source,
+                replace_existing=True,
+                status_text="Indexiere Dateien und Dokumentinhalte …",
+            )
         else:
             self.status_label.setText(f"Index geladen ✓ ({self.index_source.name})")
     
@@ -411,6 +448,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.search_input.setEnabled(True)
         self.search_button.setEnabled(True)
+        if self.settings_popup is not None:
+            self.settings_popup.set_indexing(False)
         if worker is not None and worker.error:
             self.status_label.setText(f"Indexierung fehlgeschlagen: {worker.error}")
             QMessageBox.warning(self, "Indexierung fehlgeschlagen", worker.error)
@@ -600,11 +639,19 @@ class MainWindow(QMainWindow):
 
     def _show_text_results(self, results):
         items = []
-        for filepath, line_num in results[:100]:
-            item = QListWidgetItem(f"{filepath.name}  ·  Zeile {line_num}")
+        for result in results[:100]:
+            filepath = Path(result["path"])
+            line_num = result.get("line")
+            location = f"Zeile {line_num}" if line_num else "Dokumentinhalt"
+            excerpt = result.get("excerpt") or ""
+            suffix = f"  ·  {excerpt}" if excerpt else ""
+            item = QListWidgetItem(f"{filepath.name}  ·  {location}{suffix}")
             item.setData(self.RESULT_KIND_ROLE, "text")
             item.setData(self.RESULT_VALUE_ROLE, str(filepath))
-            item.setToolTip(str(filepath))
+            tooltip = str(filepath)
+            if excerpt:
+                tooltip += f"\n\n{excerpt}"
+            item.setToolTip(tooltip)
             items.append(item)
         if not items:
             items.append(self._placeholder_item("Keine Texttreffer gefunden"))
@@ -672,6 +719,9 @@ class MainWindow(QMainWindow):
             worker.requestInterruption()
         for worker in tuple(self.search_workers):
             worker.wait()
+        if self.index_worker is not None and self.index_worker.isRunning():
+            self.index_worker.requestInterruption()
+            self.index_worker.wait()
         self.index_manager.close()
         event.accept()
 

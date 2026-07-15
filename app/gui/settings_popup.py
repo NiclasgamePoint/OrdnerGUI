@@ -10,11 +10,11 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QLineEdit,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
+from app.gui.widgets import AppButton, BusyIndicator
 
 
 class SettingsPopup(QFrame):
@@ -22,8 +22,16 @@ class SettingsPopup(QFrame):
 
     appearanceChanged = Signal(str, str)
     dataPathChanged = Signal(str)
+    reindexRequested = Signal()
 
-    def __init__(self, mode: str, accent: str, parent=None, data_path=None):
+    def __init__(
+        self,
+        mode: str,
+        accent: str,
+        parent=None,
+        data_path=None,
+        indexing: bool = False,
+    ):
         super().__init__(
             parent,
             Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint,
@@ -36,6 +44,7 @@ class SettingsPopup(QFrame):
         self.selected_mode = mode if mode in {"light", "dark"} else "light"
         self.selected_accent = QColor(accent).name() if QColor(accent).isValid() else "#2db89d"
         self.data_path = str(data_path or "")
+        self.indexing = indexing
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -82,9 +91,7 @@ class SettingsPopup(QFrame):
 
         close_row = QHBoxLayout()
         close_row.addStretch()
-        close_button = QPushButton("Schließen")
-        close_button.setObjectName("GhostButton")
-        close_button.setMinimumWidth(96)
+        close_button = AppButton("Schließen", AppButton.SECONDARY, minimum_width=96)
         close_button.clicked.connect(self.close)
         close_row.addWidget(close_button)
         content_layout.addLayout(close_row)
@@ -115,8 +122,7 @@ class SettingsPopup(QFrame):
         self.data_path_input.textChanged.connect(self._clear_path_error)
         path_row.addWidget(self.data_path_input, 1)
 
-        browse_button = QPushButton("Durchsuchen")
-        browse_button.setObjectName("GhostButton")
+        browse_button = AppButton("Durchsuchen", AppButton.SECONDARY)
         browse_button.clicked.connect(self.choose_data_path)
         path_row.addWidget(browse_button)
         layout.addLayout(path_row)
@@ -135,12 +141,50 @@ class SettingsPopup(QFrame):
 
         apply_row = QHBoxLayout()
         apply_row.addStretch()
-        apply_button = QPushButton("Pfad übernehmen")
+        apply_button = AppButton("Pfad übernehmen")
         apply_button.clicked.connect(self.apply_data_path)
         apply_row.addWidget(apply_button)
         layout.addLayout(apply_row)
+
+        index_label = QLabel("Suchindex")
+        index_label.setObjectName("PopupCaption")
+        layout.addWidget(index_label)
+
+        index_hint = QLabel(
+            "Erstellt Metadaten und durchsuchbare Inhalte für PDF-, Word- und Excel-Dateien neu."
+        )
+        index_hint.setObjectName("PopupCaption")
+        index_hint.setWordWrap(True)
+        layout.addWidget(index_hint)
+
+        reindex_row = QHBoxLayout()
+        self.reindex_button = AppButton("Index neu aufbauen", AppButton.SECONDARY)
+        self.reindex_button.clicked.connect(self.request_reindex)
+        reindex_row.addWidget(self.reindex_button)
+        self.index_busy_indicator = BusyIndicator()
+        reindex_row.addWidget(self.index_busy_indicator)
+        reindex_row.addStretch()
+        layout.addLayout(reindex_row)
+
         layout.addStretch()
+        self.set_indexing(self.indexing)
         return page
+
+    def request_reindex(self):
+        if self.indexing:
+            return
+        self.set_indexing(True)
+        self.reindexRequested.emit()
+
+    def set_indexing(self, indexing: bool):
+        self.indexing = indexing
+        if not hasattr(self, "reindex_button"):
+            return
+        self.reindex_button.set_busy(indexing)
+        if indexing:
+            self.index_busy_indicator.start()
+        else:
+            self.index_busy_indicator.stop()
 
     def choose_data_path(self):
         start_path = self.data_path_input.text().strip() or self.data_path
@@ -232,8 +276,7 @@ class SettingsPopup(QFrame):
         self.preview.setFixedSize(44, 26)
         chooser_row.addWidget(self.preview)
 
-        self.pick_button = QPushButton("Farbe wählen")
-        self.pick_button.setObjectName("GhostButton")
+        self.pick_button = AppButton("Farbe wählen", AppButton.SECONDARY)
         self.pick_button.clicked.connect(self.pick_custom_color)
         chooser_row.addWidget(self.pick_button)
         chooser_row.addStretch()

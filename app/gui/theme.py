@@ -270,6 +270,41 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background-color: {accent_pressed};
     }}
 
+    QPushButton:disabled {{
+        background-color: {border};
+        color: {muted};
+    }}
+
+    QPushButton[buttonRole="secondary"] {{
+        background-color: {chip};
+        color: {text};
+        border: 1px solid {border};
+    }}
+
+    QPushButton[buttonRole="secondary"]:hover {{
+        background-color: {item_hover};
+        border-color: {accent};
+    }}
+
+    QPushButton[buttonRole="secondary"]:disabled {{
+        background-color: {surface};
+        color: {muted};
+        border-color: {border};
+    }}
+
+    QPushButton[buttonRole="danger"] {{
+        background-color: #c84d4d;
+        color: #ffffff;
+    }}
+
+    QLabel#BusyIndicator {{
+        color: {accent};
+        background: transparent;
+        border: none;
+        font-size: 18px;
+        font-weight: 700;
+    }}
+
     QPushButton#GhostButton {{
         background-color: {chip};
         color: {text};
