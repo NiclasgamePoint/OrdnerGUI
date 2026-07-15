@@ -14,11 +14,13 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QSpinBox,
     QStackedWidget,
+    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 from app.gui.widgets import AppButton, BusyIndicator
 from app.core.config import IndexOptions
+from app.core.index_diagnostics import IndexDiagnostics
 
 
 class SettingsPopup(QFrame):
@@ -40,6 +42,7 @@ class SettingsPopup(QFrame):
         indexing: bool = False,
         backups=None,
         index_options: IndexOptions | None = None,
+        diagnostics: IndexDiagnostics | None = None,
     ):
         super().__init__(
             parent,
@@ -56,6 +59,7 @@ class SettingsPopup(QFrame):
         self.indexing = indexing
         self.backups = list(backups or [])
         self.index_options = index_options or IndexOptions()
+        self.diagnostics = diagnostics
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -89,6 +93,10 @@ class SettingsPopup(QFrame):
         index_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(index_item)
 
+        diagnostics_item = QListWidgetItem("Diagnose")
+        diagnostics_item.setSizeHint(QSize(164, 42))
+        self.nav_list.addItem(diagnostics_item)
+
         appearance_item = QListWidgetItem("Aussehen")
         appearance_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(appearance_item)
@@ -101,6 +109,7 @@ class SettingsPopup(QFrame):
 
         self.stack.addWidget(self._build_general_page())
         self.stack.addWidget(self._build_index_page())
+        self.stack.addWidget(self._build_diagnostics_page())
         self.stack.addWidget(self._build_appearance_page())
 
         content_layout.addLayout(split_layout)
@@ -312,6 +321,60 @@ class SettingsPopup(QFrame):
         layout.addLayout(save_row)
         layout.addStretch()
         return page
+
+    def _build_diagnostics_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(10)
+
+        heading = QLabel("Index-Diagnose")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+
+        self.diagnostics_text = QPlainTextEdit()
+        self.diagnostics_text.setObjectName("DiagnosticsText")
+        self.diagnostics_text.setReadOnly(True)
+        layout.addWidget(self.diagnostics_text, 1)
+        self.set_diagnostics(self.diagnostics)
+        return page
+
+    def set_diagnostics(self, diagnostics: IndexDiagnostics | None):
+        self.diagnostics = diagnostics
+        if not hasattr(self, "diagnostics_text"):
+            return
+        if diagnostics is None:
+            self.diagnostics_text.setPlainText("Noch keine Diagnosedaten vorhanden.")
+            return
+
+        status_labels = {
+            "success": "Erfolgreich",
+            "empty": "Ohne extrahierbaren Text",
+            "error": "Fehler",
+            "skipped_large": "Wegen Größe übersprungen",
+            "not_applicable": "Nur Metadaten",
+        }
+        lines = [
+            f"Integrität: {diagnostics.integrity}",
+            f"Quelle: {diagnostics.root_path or '-'}",
+            f"Letzter Lauf: {diagnostics.built_at or '-'}",
+            f"Modus: {diagnostics.build_mode or '-'}",
+            f"Dauer: {diagnostics.duration_seconds:.2f} Sekunden",
+            f"Geprüfte Dateien: {diagnostics.file_count}",
+            f"Erkannte Ordner: {diagnostics.folder_count}",
+            f"Änderungen: {diagnostics.changed_count}",
+            f"Volltext-Extrakte: {diagnostics.content_count}",
+            f"Indexgröße: {diagnostics.database_size / 1024 / 1024:.2f} MB",
+            "",
+            "Extraktionsstatus:",
+        ]
+        for status, count in sorted(diagnostics.status_counts.items()):
+            lines.append(f"  {status_labels.get(status, status)}: {count}")
+        if diagnostics.errors:
+            lines.extend(["", "Letzte Extraktionsfehler:"])
+            for entry in diagnostics.errors:
+                lines.append(f"  {entry['path']}: {entry['error']}")
+        self.diagnostics_text.setPlainText("\n".join(lines))
 
     def _form_label(self, text: str) -> QLabel:
         label = QLabel(text)

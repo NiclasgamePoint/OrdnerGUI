@@ -10,6 +10,7 @@ import re
 import sys
 import json
 import hashlib
+import logging
 from tempfile import TemporaryDirectory
 
 import openpyxl
@@ -17,6 +18,10 @@ import xlrd
 from docx import Document
 from PyPDF2 import PdfReader
 from app.core.config import IndexOptions
+from app.core.search_models import SearchFilters, SearchPage
+
+
+logger = logging.getLogger(__name__)
 
 
 class IndexManager:
@@ -232,7 +237,9 @@ class IndexManager:
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> int:
         """Incrementally synchronize a source into this (usually staged) index."""
+        started_at = time.monotonic()
         base_path = base_path.resolve()
+        logger.info("Indexabgleich gestartet: root=%s full_rebuild=%s", base_path, full_rebuild)
         if not base_path.exists() or not base_path.is_dir():
             raise FileNotFoundError(f"Index-Pfad existiert nicht: {base_path}")
 
@@ -291,7 +298,7 @@ class IndexManager:
                 try:
                     stat = filepath.stat()
                 except OSError as exc:
-                    print(f"Datei übersprungen ({filepath}): {exc}")
+                    logger.warning("Datei übersprungen: path=%s error=%s", filepath, exc)
                     continue
 
                 path_text = str(filepath)
@@ -345,8 +352,16 @@ class IndexManager:
         self.set_metadata("built_at", datetime.now().isoformat())
         self.set_metadata("build_mode", "full" if full_rebuild else "incremental")
         self.set_metadata("file_count", str(processed_count))
+        self.set_metadata("changed_count", str(changed_count))
+        self.set_metadata("duration_seconds", f"{time.monotonic() - started_at:.3f}")
         self.conn.commit()
         self.last_change_count = changed_count
+        logger.info(
+            "Indexabgleich abgeschlossen: files=%s changes=%s duration=%.3fs",
+            processed_count,
+            changed_count,
+            time.monotonic() - started_at,
+        )
         return processed_count
     
     def _index_file(
@@ -448,8 +463,8 @@ class IndexManager:
                         str(filepath),
                     ),
                 )
-        except Exception as e:
-            print(f"Fehler beim Indexieren von {filepath}: {e}")
+        except Exception:
+            logger.exception("Fehler beim Indexieren: path=%s", filepath)
 
     def _hash_file(self, filepath: Path) -> str:
         digest = hashlib.sha256()
@@ -735,22 +750,94 @@ class IndexManager:
         return results
 
     def search_folders(self, query: str, limit: Optional[int] = None) -> List[Dict]:
+        return self.search_folders_page(query, SearchFilters(), 1, limit or 200).items
+
+    def _metadata_filter_clause(
+        self, filters: SearchFilters, alias: str = "files"
+    ) -> tuple[str, list[str]]:
+        clauses = []
+        params = []
+        if filters.domain_folder:
+            clauses.append(f"{alias}.domain_folder = ? COLLATE NOCASE")
+            params.append(filters.domain_folder)
+        if filters.year:
+            clauses.append(f"{alias}.time_bucket = ? COLLATE NOCASE")
+            params.append(filters.year)
+        if filters.file_type:
+            clauses.append(f"{alias}.file_type = ? COLLATE NOCASE")
+            params.append(filters.file_type.lstrip("."))
+        return (" AND " + " AND ".join(clauses) if clauses else "", params)
+
+    def get_search_facets(self) -> Dict[str, List[str]]:
+        values = {}
+        for key, column in (
+            ("domains", "domain_folder"),
+            ("years", "time_bucket"),
+            ("file_types", "file_type"),
+        ):
+            rows = self.conn.execute(
+                f"""
+                SELECT DISTINCT {column} FROM files
+                WHERE COALESCE({column}, '') <> ''
+                ORDER BY {column} COLLATE NOCASE
+                """
+            )
+            values[key] = [str(row[0]) for row in rows]
+        values["years"] = sorted(
+            values["years"], key=lambda value: (not value.isdigit(), value), reverse=True
+        )
+        return values
+
+    def search_folders_page(
+        self,
+        query: str,
+        filters: SearchFilters,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> SearchPage:
         cursor = self.conn.cursor()
-        sql = """
+        filter_sql, filter_params = self._metadata_filter_clause(filters, "f")
+        exists_sql = f"""
+            EXISTS (
+                SELECT 1 FROM files f
+                WHERE (f.folder_path = folders.path OR f.path LIKE folders.path || ? || '%')
+                {filter_sql}
+            )
+        """
+        where_sql = f"(folders.name LIKE ? OR folders.relative_path LIKE ?) AND {exists_sql}"
+        common_params = [f"%{query}%", f"%{query}%", os.sep, *filter_params]
+        total = int(cursor.execute(
+            f"SELECT COUNT(*) FROM folders WHERE {where_sql}", common_params
+        ).fetchone()[0])
+        offset = max(0, page - 1) * page_size
+        sql = f"""
             SELECT path, name, relative_path,
                 (SELECT COUNT(*) FROM files
                  WHERE files.folder_path = folders.path
                     OR files.path LIKE folders.path || ? || '%') AS file_count
             FROM folders
-            WHERE name LIKE ? OR relative_path LIKE ?
-            ORDER BY name COLLATE NOCASE, relative_path COLLATE NOCASE
+            WHERE {where_sql}
+            ORDER BY
+                CASE
+                    WHEN name = ? COLLATE NOCASE THEN 0
+                    WHEN name LIKE ? THEN 1
+                    WHEN name LIKE ? THEN 2
+                    ELSE 3
+                END,
+                name COLLATE NOCASE, relative_path COLLATE NOCASE
+            LIMIT ? OFFSET ?
         """
-        params = [os.sep, f"%{query}%", f"%{query}%"]
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
+        params = [
+            os.sep,
+            *common_params,
+            query,
+            f"{query}%",
+            f"%{query}%",
+            page_size,
+            offset,
+        ]
         cursor.execute(sql, params)
-        return [
+        items = [
             {
                 "folder_path": row["path"],
                 "folder_name": row["name"],
@@ -759,6 +846,7 @@ class IndexManager:
             }
             for row in cursor.fetchall()
         ]
+        return SearchPage(items, total, page, page_size)
 
     def get_folder_details(self, folder_path: str) -> Dict:
         cursor = self.conn.cursor()
@@ -842,23 +930,44 @@ class IndexManager:
         customer_name: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> List[Dict]:
+        return self.search_files_page(
+            query, SearchFilters(), 1, limit or 200, customer_name=customer_name
+        ).items
+
+    def search_files_page(
+        self,
+        query: str,
+        filters: SearchFilters,
+        page: int = 1,
+        page_size: int = 25,
+        customer_name: Optional[str] = None,
+    ) -> SearchPage:
         cursor = self.conn.cursor()
-        
-        sql = "SELECT * FROM files WHERE (filename LIKE ? OR relative_dir LIKE ?)"
-        params = [f"%{query}%"]
-        params.append(f"%{query}%")
-        
+        filter_sql, filter_params = self._metadata_filter_clause(filters)
+        where = "(filename LIKE ? OR relative_dir LIKE ?)" + filter_sql
+        params: list = [f"%{query}%", f"%{query}%", *filter_params]
         if customer_name:
-            sql += f" AND {self.SEARCH_LABEL_SQL} = ?"
+            where += f" AND {self.SEARCH_LABEL_SQL} = ?"
             params.append(customer_name)
-        
-        sql += " ORDER BY time_bucket DESC, domain_folder, filename"
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
-        
-        cursor.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        total = int(cursor.execute(f"SELECT COUNT(*) FROM files WHERE {where}", params).fetchone()[0])
+        offset = max(0, page - 1) * page_size
+        sql = f"""
+            SELECT * FROM files WHERE {where}
+            ORDER BY
+                CASE
+                    WHEN filename = ? COLLATE NOCASE THEN 0
+                    WHEN filename LIKE ? THEN 1
+                    WHEN filename LIKE ? THEN 2
+                    ELSE 3
+                END,
+                modified_date DESC, filename COLLATE NOCASE
+            LIMIT ? OFFSET ?
+        """
+        cursor.execute(
+            sql,
+            [*params, query, f"{query}%", f"%{query}%", page_size, offset],
+        )
+        return SearchPage([dict(row) for row in cursor.fetchall()], total, page, page_size)
 
     def _iter_text_search_targets(self, customer_name: Optional[str]) -> List[List[str]]:
         cursor = self.conn.cursor()
@@ -908,6 +1017,7 @@ class IndexManager:
         query: str,
         customer_name: Optional[str],
         limit: int = 200,
+        filters: Optional[SearchFilters] = None,
     ) -> List[Dict]:
         fts_query = self._build_fts_query(query)
         if not fts_query:
@@ -922,6 +1032,9 @@ class IndexManager:
             WHERE file_content_fts MATCH ?
         """
         params = [fts_query]
+        filter_sql, filter_params = self._metadata_filter_clause(filters or SearchFilters())
+        sql += filter_sql
+        params.extend(filter_params)
         if customer_name:
             sql += f" AND {self.SEARCH_LABEL_SQL} = ?"
             params.append(customer_name)
@@ -976,9 +1089,12 @@ class IndexManager:
         customer_name: Optional[str] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         limit: int = 200,
+        filters: Optional[SearchFilters] = None,
     ) -> List[Dict]:
         try:
-            results = self._search_extracted_content(query, customer_name, limit=limit)
+            results = self._search_extracted_content(
+                query, customer_name, limit=limit, filters=filters
+            )
             indexed_result_paths = {result["path"] for result in results}
             if should_cancel is not None and should_cancel():
                 return results
@@ -1032,9 +1148,32 @@ class IndexManager:
                 if len(unique_results) >= limit:
                     break
             return unique_results
-        except Exception as e:
-            print(f"Fehler bei Volltextsuche: {e}")
+        except Exception:
+            logger.exception("Fehler bei Volltextsuche: query=%r", query)
             return []
+
+    def search_text_page(
+        self,
+        query: str,
+        filters: SearchFilters,
+        page: int = 1,
+        page_size: int = 25,
+        maximum: int = 200,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> SearchPage:
+        all_results = self.search_in_text(
+            query,
+            should_cancel=should_cancel,
+            limit=maximum,
+            filters=filters,
+        )
+        offset = max(0, page - 1) * page_size
+        return SearchPage(
+            all_results[offset:offset + page_size],
+            len(all_results),
+            page,
+            page_size,
+        )
     
     def close(self):
         """Schließt die Datenbankverbindung"""

@@ -3,7 +3,7 @@
 ### Implementiert (v0.1)
 - **Kundensuche**: Suche nach Kundennamen mit lokaler Indexierung
 - **Dateiindex**: SQLite-basierter Index für schnelle Metadaten-Abfragen
-- **Dateisystem-Browser**: Ordnerstruktur: `[Jahr]/[Dienstleistungstyp]/[Kundenname]/[Subfolder]`
+- **Dateisystem-Browser**: Ordnerstruktur: `[Dienstleistungstyp]/[Jahr]/[Kundenname & Ort]/[Subfolder]`
 - **Multi-Format Viewer**:
   - PDFs (Basis + Text-Extract)
   - Bilder (JPG, PNG, GIF, BMP)

@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
-    QMessageBox, QProgressBar, QToolButton
+    QMessageBox, QProgressBar, QToolButton, QComboBox, QCompleter
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QStringListModel
 from PySide6.QtGui import QIcon
 from datetime import datetime
 
@@ -27,6 +27,8 @@ from app.core.config import (
     save_index_source,
 )
 from app.core.index_manager import IndexManager
+from app.core.index_diagnostics import IndexDiagnosticsService
+from app.core.search_models import SearchFilters, SearchHistory
 from app.core.index_store import (
     activate_index,
     available_backups,
@@ -38,7 +40,7 @@ from app.core.index_store import (
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
-from app.gui.widgets import AppButton
+from app.gui.widgets import AppButton, HighlightDelegate, SearchResultSection
 
 
 class IndexingWorker(QThread):
@@ -99,7 +101,15 @@ class SearchWorker(QThread):
     completed = Signal(int, str, object, str)
 
     def __init__(
-        self, db_path: Path, generation: int, category: str, query: str, result_limit: int
+        self,
+        db_path: Path,
+        generation: int,
+        category: str,
+        query: str,
+        result_limit: int,
+        filters: SearchFilters,
+        page: int,
+        page_size: int,
     ):
         super().__init__()
         self.db_path = db_path
@@ -107,20 +117,30 @@ class SearchWorker(QThread):
         self.category = category
         self.query = query
         self.result_limit = result_limit
+        self.filters = filters
+        self.page = page
+        self.page_size = page_size
 
     def run(self):
         manager = None
         try:
             manager = IndexManager(self.db_path, initialize=False)
             if self.category == "folders":
-                results = manager.search_folders(self.query, limit=self.result_limit)
+                results = manager.search_folders_page(
+                    self.query, self.filters, self.page, self.page_size
+                )
             elif self.category == "files":
-                results = manager.search_files(self.query, limit=self.result_limit)
+                results = manager.search_files_page(
+                    self.query, self.filters, self.page, self.page_size
+                )
             elif self.category == "text":
-                results = manager.search_in_text(
+                results = manager.search_text_page(
                     self.query,
+                    self.filters,
+                    self.page,
+                    self.page_size,
+                    maximum=self.result_limit,
                     should_cancel=self.isInterruptionRequested,
-                    limit=self.result_limit,
                 )
             else:
                 raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
@@ -148,16 +168,21 @@ class MainWindow(QMainWindow):
         self.index_options = load_index_options()
         self.pending_index_source = None
         self.theme_manager = ThemeManager()
+        self.diagnostics_service = IndexDiagnosticsService()
         self.settings_popup = None
         self.search_generation = 0
         self.search_workers = set()
         self.search_counts = {"folders": None, "files": None, "text": None}
+        self.search_pages = {"folders": 1, "files": 1, "text": 1}
+        self.search_page_size = 25
+        self.search_history = SearchHistory()
         self.search_debounce = QTimer(self)
         self.search_debounce.setSingleShot(True)
         self.search_debounce.setInterval(250)
         self.search_debounce.timeout.connect(self._start_live_folder_search)
         
         self.init_ui()
+        self._refresh_search_facets()
         self.apply_theme()
         self.check_and_index()
     
@@ -171,8 +196,11 @@ class MainWindow(QMainWindow):
 
         search_card = QWidget()
         search_card.setObjectName("SearchCard")
-        search_card.setFixedHeight(50)
-        search_layout = QHBoxLayout(search_card)
+        search_card.setFixedHeight(92)
+        search_outer_layout = QVBoxLayout(search_card)
+        search_outer_layout.setContentsMargins(12, 7, 12, 7)
+        search_outer_layout.setSpacing(6)
+        search_layout = QHBoxLayout()
         search_layout.setContentsMargins(12, 7, 12, 7)
         search_layout.setSpacing(8)
         
@@ -185,6 +213,11 @@ class MainWindow(QMainWindow):
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self.on_search_text_changed)
         self.search_input.returnPressed.connect(self.start_full_search)
+        self.history_model = QStringListModel(self.search_history.entries(), self)
+        self.search_completer = QCompleter(self.history_model, self)
+        self.search_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.search_completer.setFilterMode(Qt.MatchContains)
+        self.search_input.setCompleter(self.search_completer)
 
         self.search_button = AppButton("Suchen")
         self.search_button.setObjectName("SearchButton")
@@ -208,7 +241,25 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.search_button)
         search_layout.addStretch(1)
         search_layout.addWidget(self.settings_button)
-        
+        search_outer_layout.addLayout(search_layout)
+
+        filter_layout = QHBoxLayout()
+        filter_layout.setContentsMargins(43, 0, 0, 0)
+        filter_layout.setSpacing(8)
+        self.domain_filter = QComboBox()
+        self.domain_filter.setMinimumWidth(150)
+        self.year_filter = QComboBox()
+        self.year_filter.setMinimumWidth(100)
+        self.file_type_filter = QComboBox()
+        self.file_type_filter.setMinimumWidth(120)
+        for combo in (self.domain_filter, self.year_filter, self.file_type_filter):
+            combo.currentIndexChanged.connect(self._on_filter_changed)
+            filter_layout.addWidget(combo)
+        clear_filters = AppButton("Filter löschen", AppButton.SECONDARY)
+        clear_filters.clicked.connect(self._clear_search_filters)
+        filter_layout.addWidget(clear_filters)
+        filter_layout.addStretch()
+        search_outer_layout.addLayout(filter_layout)
         main_layout.addWidget(search_card)
         
         content_splitter = QSplitter(Qt.Horizontal)
@@ -358,6 +409,7 @@ class MainWindow(QMainWindow):
             indexing=self.index_worker is not None and self.index_worker.isRunning(),
             backups=available_backups(DB_FILE),
             index_options=self.index_options,
+            diagnostics=self.diagnostics_service.inspect(DB_FILE),
         )
         self.settings_popup.appearanceChanged.connect(self.on_settings_appearance_changed)
         self.settings_popup.dataPathChanged.connect(self.on_settings_data_path_changed)
@@ -532,6 +584,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Index fertig geladen ✓ ({count} Dateien)")
             if self.settings_popup is not None:
                 self.settings_popup.set_backups(available_backups(DB_FILE))
+                self.settings_popup.set_diagnostics(self.diagnostics_service.inspect(DB_FILE))
         self.index_worker = None
 
     def _activate_built_index(self, build_path: Path):
@@ -577,6 +630,7 @@ class MainWindow(QMainWindow):
     
     def _create_result_groups(self, parent_layout: QVBoxLayout):
         self.result_groups = {}
+        self.result_sections = {}
         self.result_group_titles = {}
         results_splitter = QSplitter(Qt.Vertical)
         results_splitter.setObjectName("ResultsSplitter")
@@ -587,26 +641,19 @@ class MainWindow(QMainWindow):
             ("files", "Dateinamen"),
             ("text", "Dokumentinhalte"),
         ):
-            section = QWidget()
+            section = SearchResultSection(title)
             section.setObjectName("ResultSection")
-            section_layout = QVBoxLayout(section)
-            section_layout.setContentsMargins(0, 0, 0, 0)
-            section_layout.setSpacing(5)
-
-            heading = QLabel(title)
-            heading.setObjectName("SearchGroupTitle")
-            section_layout.addWidget(heading)
-
-            result_list = QListWidget()
-            result_list.setObjectName("ResultList")
-            result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            result_list = section.list_widget
             result_list.itemClicked.connect(self.on_search_result_clicked)
             result_list.itemDoubleClicked.connect(self.on_search_result_double_clicked)
-            section_layout.addWidget(result_list)
+            section.pageRequested.connect(
+                lambda page, category=category: self._request_result_page(category, page)
+            )
 
             results_splitter.addWidget(section)
             self.result_groups[category] = result_list
-            self.result_group_titles[category] = (heading, title)
+            self.result_sections[category] = section
+            self.result_group_titles[category] = (section.heading, title)
 
         results_splitter.setSizes([200, 200, 200])
         parent_layout.addWidget(results_splitter)
@@ -631,7 +678,50 @@ class MainWindow(QMainWindow):
             "text", [self._placeholder_item("Mit Enter oder ‚Suchen‘ starten")]
         )
         self.search_counts = {"folders": None, "files": None, "text": None}
+        self.search_pages = {"folders": 1, "files": 1, "text": 1}
+        for section in self.result_sections.values():
+            section.reset_title()
         self._refresh_result_group_titles()
+
+    def _current_search_filters(self) -> SearchFilters:
+        return SearchFilters(
+            domain_folder=str(self.domain_filter.currentData() or ""),
+            year=str(self.year_filter.currentData() or ""),
+            file_type=str(self.file_type_filter.currentData() or ""),
+        )
+
+    def _refresh_search_facets(self):
+        try:
+            facets = self.index_manager.get_search_facets()
+        except Exception:
+            return
+        configurations = (
+            (self.domain_filter, "Alle Themen", facets.get("domains", [])),
+            (self.year_filter, "Alle Jahre", facets.get("years", [])),
+            (self.file_type_filter, "Alle Dateitypen", facets.get("file_types", [])),
+        )
+        for combo, empty_label, values in configurations:
+            selected = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(empty_label, "")
+            for value in values:
+                combo.addItem(str(value), str(value))
+            selected_index = combo.findData(selected)
+            combo.setCurrentIndex(max(0, selected_index))
+            combo.blockSignals(False)
+
+    def _on_filter_changed(self):
+        if self.search_input.text().strip():
+            self.on_search_text_changed(self.search_input.text())
+
+    def _clear_search_filters(self):
+        for combo in (self.domain_filter, self.year_filter, self.file_type_filter):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        if self.search_input.text().strip():
+            self.on_search_text_changed(self.search_input.text())
 
     def on_search_text_changed(self, text: str):
         self.search_generation += 1
@@ -639,6 +729,7 @@ class MainWindow(QMainWindow):
         self.search_debounce.stop()
         query = text.strip()
         self.search_counts = {"folders": None, "files": None, "text": None}
+        self.search_pages = {"folders": 1, "files": 1, "text": 1}
         self._refresh_result_group_titles()
 
         if not query:
@@ -671,8 +762,10 @@ class MainWindow(QMainWindow):
         self.search_generation += 1
         self._cancel_outdated_searches()
         generation = self.search_generation
+        self.history_model.setStringList(self.search_history.add(query))
         self.current_customer = None
         self.search_counts = {"folders": None, "files": None, "text": None}
+        self.search_pages = {"folders": 1, "files": 1, "text": 1}
         self._refresh_result_group_titles()
 
         for category in self.result_groups:
@@ -680,20 +773,34 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText("Durchsuche Ordner, Dateinamen und Dokumentinhalte parallel …")
         for category in ("folders", "files", "text"):
-            self._launch_search(category, query, generation)
+            self._launch_search(category, query, generation, page=1)
 
-    def _launch_search(self, category: str, query: str, generation: int):
+    def _launch_search(self, category: str, query: str, generation: int, page: int = 1):
         worker = SearchWorker(
             DB_FILE,
             generation,
             category,
             query,
             self.index_options.result_limit,
+            self._current_search_filters(),
+            page,
+            self.search_page_size,
         )
         worker.completed.connect(self._on_search_completed)
         worker.finished.connect(lambda worker=worker: self._release_search_worker(worker))
         self.search_workers.add(worker)
         worker.start()
+
+    def _request_result_page(self, category: str, page: int):
+        section = self.result_sections[category]
+        if page < 1 or page > section.page_count:
+            return
+        query = self.search_input.text().strip()
+        if not query:
+            return
+        self.search_pages[category] = page
+        self._replace_group_items(category, [self._placeholder_item("Seite wird geladen …")])
+        self._launch_search(category, query, self.search_generation, page=page)
 
     def _cancel_outdated_searches(self):
         for worker in tuple(self.search_workers):
@@ -712,12 +819,17 @@ class MainWindow(QMainWindow):
             item.setToolTip(error)
             self._replace_group_items(category, [item])
             self.search_counts[category] = 0
-        elif category == "folders":
-            self._show_folder_results(results)
-        elif category == "files":
-            self._show_file_results(results)
-        elif category == "text":
-            self._show_text_results(results)
+        else:
+            page = results
+            self.search_pages[category] = page.page
+            self.search_counts[category] = page.total
+            self.result_sections[category].set_page(page.page, page.page_count, page.total)
+            if category == "folders":
+                self._show_folder_results(page.items)
+            elif category == "files":
+                self._show_file_results(page.items)
+            elif category == "text":
+                self._show_text_results(page.items)
         self._update_search_status()
 
     def _show_folder_results(self, results):
@@ -731,11 +843,11 @@ class MainWindow(QMainWindow):
             item.setData(self.RESULT_KIND_ROLE, "folder")
             item.setData(self.RESULT_VALUE_ROLE, result["folder_path"])
             item.setToolTip(result["folder_path"])
+            item.setData(HighlightDelegate.QUERY_ROLE, self.search_input.text().strip())
             items.append(item)
         if not items:
             items.append(self._placeholder_item("Keine Ordner gefunden"))
         self._replace_group_items("folders", items)
-        self.search_counts["folders"] = len(results)
 
     def _show_file_results(self, results):
         items = []
@@ -746,11 +858,11 @@ class MainWindow(QMainWindow):
             item.setData(self.RESULT_KIND_ROLE, "file")
             item.setData(self.RESULT_VALUE_ROLE, file_info["path"])
             item.setToolTip(file_info["path"])
+            item.setData(HighlightDelegate.QUERY_ROLE, self.search_input.text().strip())
             items.append(item)
         if not items:
             items.append(self._placeholder_item("Keine Dateinamen gefunden"))
         self._replace_group_items("files", items)
-        self.search_counts["files"] = len(results)
 
     def _show_text_results(self, results):
         items = []
@@ -767,11 +879,11 @@ class MainWindow(QMainWindow):
             if excerpt:
                 tooltip += f"\n\n{excerpt}"
             item.setToolTip(tooltip)
+            item.setData(HighlightDelegate.QUERY_ROLE, self.search_input.text().strip())
             items.append(item)
         if not items:
             items.append(self._placeholder_item("Keine Texttreffer gefunden"))
         self._replace_group_items("text", items)
-        self.search_counts["text"] = len(results)
 
     def _update_search_status(self):
         labels = {"folders": "Ordner", "files": "Dateien", "text": "Text"}
@@ -785,7 +897,8 @@ class MainWindow(QMainWindow):
     def _refresh_result_group_titles(self):
         for category, (heading, base_title) in self.result_group_titles.items():
             count = self.search_counts[category]
-            heading.setText(base_title if count is None else f"{base_title} ({count})")
+            if count is None:
+                heading.setText(base_title)
 
     def on_search_result_clicked(self, item: QListWidgetItem):
         if item.data(self.RESULT_KIND_ROLE) == "folder":
