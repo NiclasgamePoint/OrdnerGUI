@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from app.core.config import IndexOptions
 from app.core.index_diagnostics import IndexDiagnosticsService
@@ -46,7 +47,9 @@ class IndexingTests(unittest.TestCase):
     def test_incremental_run_detects_no_changes_and_records_diagnostics(self):
         manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
         manager.synchronize_directory(self.root, full_rebuild=True)
-        manager.synchronize_directory(self.root, full_rebuild=False)
+        with patch.object(manager, "_index_file", wraps=manager._index_file) as index_file:
+            manager.synchronize_directory(self.root, full_rebuild=False)
+            index_file.assert_not_called()
         self.assertEqual(manager.last_change_count, 0)
         manager.close()
 
@@ -56,6 +59,20 @@ class IndexingTests(unittest.TestCase):
         self.assertGreaterEqual(diagnostics.folder_count, 13)
         self.assertEqual(diagnostics.changed_count, 0)
         self.assertEqual(diagnostics.status_counts.get("success"), 4)
+
+    def test_incremental_run_processes_only_new_and_modified_files(self):
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+        changed_file = self.root / "DEKRA" / "2026" / "Musterkunde DEKRA" / "bericht-DEKRA.txt"
+        changed_file.write_text("Geänderter und längerer Inhalt", encoding="utf-8")
+        new_file = changed_file.parent / "neu.txt"
+        new_file.write_text("Neue Datei", encoding="utf-8")
+
+        with patch.object(manager, "_index_file", wraps=manager._index_file) as index_file:
+            manager.synchronize_directory(self.root, full_rebuild=False)
+            indexed_paths = {call.args[0] for call in index_file.call_args_list}
+        self.assertEqual(indexed_paths, {changed_file, new_file})
+        manager.close()
 
     def test_ranked_filtered_search_is_paginated(self):
         manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))

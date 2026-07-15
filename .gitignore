@@ -29,6 +29,7 @@ htmlcov/
 *.sqlite
 *.sqlite3
 data/index.db
+data/index_job.*
 Bauvorhaben/
 
 # Logs

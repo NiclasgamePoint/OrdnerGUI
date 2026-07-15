@@ -25,6 +25,7 @@ Weitere Fachthemen können als neue Ordner der ersten Ebene ergänzt werden und 
 - Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
 - Optionaler OCR-Fallback für gescannte PDFs
 - Inkrementelle Indexierung im Hintergrund
+- Indexläufe laufen als eigener Prozess auch nach dem Schließen der GUI weiter
 - Sicherer Indexaufbau in einer temporären Datenbank, atomarer Wechsel und drei Sicherungen
 - Automatische, plattformübergreifende Überwachung der Datenquelle
 - Indexdiagnose mit Integrität, Laufzeit, Datei-/Ordnerzahlen und Extraktionsfehlern

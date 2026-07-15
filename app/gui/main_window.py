@@ -47,7 +47,7 @@ from app.gui.widgets import (
     SearchFilterPopup,
     SearchResultSection,
 )
-from app.gui.workers import IndexingWorker, SearchWorker
+from app.gui.workers import IndexJobController, SearchWorker
 from app.services import FileSystemMonitor
 
 
@@ -61,11 +61,22 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
         
         self.index_options = load_index_options()
+        self.index_controller = IndexJobController(DB_FILE, parent=self)
+        self.index_controller.adopt_running_job()
         self.index_manager = IndexManager(DB_FILE, options=self.index_options)
         self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
         self.current_customer = None
-        self.index_worker = None
         self.index_source = get_configured_index_source()
+        previous_job = self.index_controller.current_state()
+        indexed_root = self.index_manager.get_metadata("index_root")
+        if (
+            previous_job.get("status") == "completed"
+            and previous_job.get("activated_by") == "worker"
+            and indexed_root
+            and indexed_root == previous_job.get("source")
+        ):
+            self.index_source = Path(indexed_root)
+            save_index_source(self.index_source)
         self.pending_index_source = None
         self.theme_manager = ThemeManager()
         self.diagnostics_service = IndexDiagnosticsService()
@@ -84,6 +95,9 @@ class MainWindow(QMainWindow):
         self.pending_filesystem_sync = False
         
         self.init_ui()
+        self.index_controller.progress.connect(self.on_indexing_progress)
+        self.index_controller.ready.connect(self.on_index_ready)
+        self.index_controller.finished.connect(self.on_indexing_complete)
         self._refresh_search_facets()
         self.apply_theme()
         self.check_and_index()
@@ -265,7 +279,7 @@ class MainWindow(QMainWindow):
             self.theme_manager.accent,
             self,
             data_path=self.index_source,
-            indexing=self.index_worker is not None and self.index_worker.isRunning(),
+            indexing=self.index_controller.is_active(),
             backups=available_backups(DB_FILE),
             index_options=self.index_options,
             diagnostics=self.diagnostics_service.inspect(DB_FILE),
@@ -317,7 +331,7 @@ class MainWindow(QMainWindow):
         if not new_source.exists() or not new_source.is_dir():
             QMessageBox.warning(self, "Datenquelle", "Der ausgewählte Datenordner ist ungültig.")
             return
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             QMessageBox.information(
                 self,
                 "Indexierung läuft",
@@ -337,7 +351,7 @@ class MainWindow(QMainWindow):
         )
 
     def on_settings_reindex_requested(self):
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             if self.settings_popup is not None:
                 self.settings_popup.set_indexing(True)
             return
@@ -346,10 +360,15 @@ class MainWindow(QMainWindow):
                 self.settings_popup.set_indexing(False)
             QMessageBox.warning(self, "Indexierung", "Die konfigurierte Datenquelle existiert nicht.")
             return
+        full_rebuild = not self.index_manager.index_is_current(self.index_source)
         self._start_background_indexing(
             self.index_source,
-            full_rebuild=True,
-            status_text=f"Baue Index für {self.index_source.name} neu auf …",
+            full_rebuild=full_rebuild,
+            status_text=(
+                f"Baue Index für {self.index_source.name} neu auf …"
+                if full_rebuild
+                else f"Prüfe {self.index_source.name} auf neue und geänderte Dateien …"
+            ),
         )
 
     def _start_background_indexing(
@@ -358,22 +377,21 @@ class MainWindow(QMainWindow):
         full_rebuild: bool,
         status_text: str,
     ):
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             return
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
         self.status_label.setText(status_text)
         if self.settings_popup is not None:
             self.settings_popup.set_indexing(True)
-        self.index_worker = IndexingWorker(
-            DB_FILE,
-            source,
-            self.index_options,
-            full_rebuild=full_rebuild,
-        )
-        self.index_worker.progress.connect(self.on_indexing_progress)
-        self.index_worker.finished.connect(self.on_indexing_complete)
-        self.index_worker.start()
+        try:
+            self.index_controller.start(source, full_rebuild)
+        except Exception as exc:
+            self.progress_bar.setVisible(False)
+            if self.settings_popup is not None:
+                self.settings_popup.set_indexing(False)
+            self.status_label.setText(f"Indexierung konnte nicht gestartet werden: {exc}")
+            QMessageBox.warning(self, "Indexierung", str(exc))
 
     def on_indexing_progress(self, processed_count: int, current_path: str):
         filename = Path(current_path).name
@@ -382,11 +400,23 @@ class MainWindow(QMainWindow):
             self.settings_popup.set_index_progress(processed_count, filename)
 
     def cancel_background_indexing(self):
-        if self.index_worker is not None and self.index_worker.isRunning():
-            self.index_worker.requestInterruption()
+        if self.index_controller.is_active():
+            self.index_controller.cancel()
             self.status_label.setText("Indexierung wird abgebrochen …")
     
     def check_and_index(self):
+        if self.index_controller.is_active():
+            state = self.index_controller.current_state()
+            source_value = state.get("source")
+            if source_value:
+                candidate = Path(source_value)
+                if candidate != self.index_source:
+                    self.pending_index_source = candidate
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setVisible(True)
+            self.status_label.setText("Laufende Hintergrundindexierung wieder verbunden …")
+            self.index_controller.poll()
+            return
         if not self.index_source.exists():
             self.status_label.setText(f"Indexquelle nicht gefunden: {self.index_source}")
             QMessageBox.warning(
@@ -408,36 +438,54 @@ class MainWindow(QMainWindow):
             ),
         )
     
-    def on_indexing_complete(self):
-        worker = self.index_worker
+    def on_index_ready(self, state):
+        build_path_value = str(state.get("build_path") or "")
+        if not build_path_value:
+            return
+        self.status_label.setText("Index ist fertig · aktiviere neue Generation …")
+        try:
+            self._activate_built_index(Path(build_path_value))
+            self.index_controller.acknowledge_activation()
+        except Exception as exc:
+            self.status_label.setText(
+                "Index fertig · Aktivierung erfolgt nach dem Schließen des Programms"
+            )
+            QMessageBox.warning(
+                self,
+                "Index wartet auf Aktivierung",
+                f"Der neue Index ist fertig, konnte aber noch nicht aktiviert werden:\n{exc}\n\n"
+                "Nach dem Schließen des Programms wird der Wechsel automatisch erneut versucht.",
+            )
+
+    def on_indexing_complete(self, state):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
         if self.settings_popup is not None:
             self.settings_popup.set_indexing(False)
-        if worker is not None and worker.cancelled:
+        status = str(state.get("status") or "")
+        if status == "cancelled":
             self.status_label.setText("Indexierung abgebrochen · bisheriger Index bleibt aktiv")
             self.pending_index_source = None
-        elif worker is not None and worker.error:
-            self.status_label.setText(f"Indexierung fehlgeschlagen: {worker.error}")
-            QMessageBox.warning(self, "Indexierung fehlgeschlagen", worker.error)
+        elif status == "error":
+            error = str(state.get("error") or "Unbekannter Fehler")
+            self.status_label.setText(f"Indexierung fehlgeschlagen: {error}")
+            QMessageBox.warning(self, "Indexierung fehlgeschlagen", error)
             self.pending_index_source = None
-        elif worker is not None and worker.no_changes:
-            self.status_label.setText(f"Index aktuell ✓ ({worker.indexed_count} Dateien)")
-        else:
-            try:
-                self._activate_built_index(worker.build_path)
-            except Exception as exc:
-                self.status_label.setText(f"Indexwechsel fehlgeschlagen: {exc}")
-                QMessageBox.warning(self, "Indexwechsel fehlgeschlagen", str(exc))
-                self.pending_index_source = None
-                self.index_worker = None
-                return
+        elif status == "no_changes":
+            count = int(state.get("indexed_count") or state.get("processed_count") or 0)
+            self.status_label.setText(f"Index aktuell ✓ ({count} Dateien geprüft)")
+        elif status == "completed":
+            if state.get("activated_by") == "worker":
+                self._reload_active_index()
             if self.pending_index_source is not None:
                 self.index_source = self.pending_index_source
                 save_index_source(self.index_source)
                 self.pending_index_source = None
                 self._start_filesystem_monitor()
-            count = worker.indexed_count if worker is not None else 0
+            elif state.get("source"):
+                self.index_source = Path(str(state["source"]))
+                save_index_source(self.index_source)
+            count = int(state.get("indexed_count") or 0)
             self._reset_search_results()
             self.current_customer = None
             self.file_list.clear()
@@ -445,7 +493,6 @@ class MainWindow(QMainWindow):
             if self.settings_popup is not None:
                 self.settings_popup.set_backups(available_backups(DB_FILE))
                 self.settings_popup.set_diagnostics(self.diagnostics_service.inspect(DB_FILE))
-        self.index_worker = None
         if self.pending_filesystem_sync:
             self.pending_filesystem_sync = False
             QTimer.singleShot(0, self._start_incremental_filesystem_sync)
@@ -470,7 +517,7 @@ class MainWindow(QMainWindow):
         self.filesystem_monitor.start()
 
     def _on_filesystem_changes(self, changes):
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             self.pending_filesystem_sync = True
             return
         self.status_label.setText(
@@ -479,7 +526,7 @@ class MainWindow(QMainWindow):
         self._start_incremental_filesystem_sync()
 
     def _start_incremental_filesystem_sync(self):
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             self.pending_filesystem_sync = True
             return
         self._start_background_indexing(
@@ -502,6 +549,15 @@ class MainWindow(QMainWindow):
             self.index_manager = IndexManager(DB_FILE, options=self.index_options)
         self._refresh_search_facets()
 
+    def _reload_active_index(self):
+        self.search_generation += 1
+        self._cancel_outdated_searches()
+        for search_worker in tuple(self.search_workers):
+            search_worker.wait()
+        self.index_manager.close()
+        self.index_manager = IndexManager(DB_FILE, options=self.index_options)
+        self._refresh_search_facets()
+
     def on_index_options_changed(self, options):
         self.index_options = options
         self.index_manager.options = options
@@ -510,7 +566,7 @@ class MainWindow(QMainWindow):
         self._start_filesystem_monitor()
 
     def on_load_backup_requested(self, backup_path_value: str):
-        if self.index_worker is not None and self.index_worker.isRunning():
+        if self.index_controller.is_active():
             QMessageBox.information(
                 self, "Indexierung läuft", "Bitte die laufende Indexierung zuerst abschließen."
             )
@@ -868,14 +924,12 @@ class MainWindow(QMainWindow):
             worker.requestInterruption()
         for worker in tuple(self.search_workers):
             worker.wait()
-        if self.index_worker is not None and self.index_worker.isRunning():
-            self.index_worker.requestInterruption()
-            self.index_worker.wait()
         if self.filesystem_monitor is not None and self.filesystem_monitor.isRunning():
             self.filesystem_monitor.requestInterruption()
             self.filesystem_monitor.wait()
         self.index_manager.close()
         self.customer_repository.close()
+        self.index_controller.release_owner()
         event.accept()
 
 

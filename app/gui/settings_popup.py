@@ -176,14 +176,15 @@ class SettingsPopup(QFrame):
         layout.addWidget(index_label)
 
         index_hint = QLabel(
-            "Erstellt Metadaten und durchsuchbare Inhalte für PDF-, Word- und Excel-Dateien neu."
+            "Verarbeitet nur neue oder geänderte Dateien. Der Lauf wird nach dem Schließen "
+            "des Programms im Hintergrund fortgesetzt."
         )
         index_hint.setObjectName("PopupCaption")
         index_hint.setWordWrap(True)
         layout.addWidget(index_hint)
 
         reindex_row = QHBoxLayout()
-        self.reindex_button = AppButton("Index neu aufbauen", AppButton.SECONDARY)
+        self.reindex_button = AppButton("Index aktualisieren", AppButton.SECONDARY)
         self.reindex_button.clicked.connect(self.request_reindex)
         reindex_row.addWidget(self.reindex_button)
         self.index_busy_indicator = BusyIndicator()
