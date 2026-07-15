@@ -9,17 +9,18 @@ if __name__ == "__main__" and __package__ is None:
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QListWidget, QListWidgetItem, QTabWidget, QLabel, QSplitter, QTextEdit,
-    QFileDialog, QMessageBox, QProgressBar, QFileIconProvider
+    QListWidget, QListWidgetItem, QTabWidget, QLabel, QSplitter,
+    QMessageBox, QProgressBar, QToolButton
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QIcon, QPixmap
-import threading
+from PySide6.QtGui import QIcon
 from datetime import datetime
 
 from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, DB_FILE, get_default_index_source
 from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
+from app.gui.theme import ThemeManager
+from app.gui.theme_popup import ThemePopup
 
 
 class IndexingWorker(QThread):
@@ -46,18 +47,57 @@ class MainWindow(QMainWindow):
         self.current_customer = None
         self.index_worker = None
         self.index_source = get_default_index_source()
+        self.theme_manager = ThemeManager()
+        self.theme_popup = None
         
         self.init_ui()
+        self.apply_theme()
         self.check_and_index()
     
     def init_ui(self):
         main_widget = QWidget()
+        main_widget.setObjectName("RootWidget")
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout()
-        
-        search_layout = QHBoxLayout()
+        main_layout.setContentsMargins(16, 14, 16, 14)
+        main_layout.setSpacing(12)
+
+        top_bar = QWidget()
+        top_bar.setObjectName("TopBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(10, 4, 10, 4)
+        top_layout.setSpacing(6)
+
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(0)
+        page_title = QLabel("PapaGUI")
+        page_title.setObjectName("PageTitle")
+        title_layout.addWidget(page_title)
+        top_layout.addLayout(title_layout)
+        top_layout.addStretch()
+
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("SettingsButton")
+        self.settings_button.setIconSize(QSize(14, 14))
+        icon = QIcon.fromTheme("preferences-system")
+        if icon.isNull():
+            self.settings_button.setText("UI")
+        else:
+            self.settings_button.setIcon(icon)
+        self.settings_button.setToolTip("Design-Einstellungen")
+        self.settings_button.clicked.connect(self.open_theme_settings)
+        top_layout.addWidget(self.settings_button)
+
+        main_layout.addWidget(top_bar)
+
+        search_card = QWidget()
+        search_card.setObjectName("SearchCard")
+        search_layout = QHBoxLayout(search_card)
+        search_layout.setContentsMargins(14, 12, 14, 12)
+        search_layout.setSpacing(8)
         
         search_label = QLabel("Vorgang-/Kundensuche:")
+        search_label.setObjectName("StatCaption")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Kunde, Projekt, Ordner oder Dateiname eingeben...")
         self.search_input.textChanged.connect(self.on_search_changed)
@@ -79,49 +119,79 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.search_text_input)
         search_layout.addWidget(search_text_btn)
         
-        main_layout.addLayout(search_layout)
+        main_layout.addWidget(search_card)
         
         content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.setChildrenCollapsible(False)
         
-        left_layout = QVBoxLayout()
-        left_layout.addWidget(QLabel("Vorgänge/Kunden:"))
+        left_card = QWidget()
+        left_card.setObjectName("SideCard")
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
+        left_title = QLabel("Vorgänge/Kunden")
+        left_title.setObjectName("StatValue")
+        left_layout.addWidget(left_title)
         self.customer_list = QListWidget()
         self.customer_list.itemClicked.connect(self.on_customer_selected)
         left_layout.addWidget(self.customer_list)
-        
-        left_widget = QWidget()
-        left_widget.setLayout(left_layout)
-        
+
+        details_card = QWidget()
+        details_card.setObjectName("DetailsCard")
+        details_outer_layout = QVBoxLayout(details_card)
+        details_outer_layout.setContentsMargins(12, 12, 12, 12)
+        details_outer_layout.setSpacing(10)
+
         right_widget = QTabWidget()
         
         details_layout = QVBoxLayout()
+        details_layout.setContentsMargins(8, 8, 8, 8)
+        details_layout.setSpacing(10)
         
         info_layout = QHBoxLayout()
-        info_layout.addWidget(QLabel("Vorgang/Kunde:"))
+        info_layout.setSpacing(14)
+
+        name_caption = QLabel("Vorgang/Kunde")
+        name_caption.setObjectName("StatCaption")
+        info_layout.addWidget(name_caption)
         self.customer_name_label = QLabel("-")
-        self.customer_name_label.setStyleSheet("font-weight: bold;")
+        self.customer_name_label.setObjectName("StatValue")
         info_layout.addWidget(self.customer_name_label)
         
-        info_layout.addWidget(QLabel("Dateien:"))
+        files_caption = QLabel("Dateien")
+        files_caption.setObjectName("StatCaption")
+        info_layout.addWidget(files_caption)
         self.file_count_label = QLabel("0")
+        self.file_count_label.setObjectName("StatValue")
         info_layout.addWidget(self.file_count_label)
         
-        info_layout.addWidget(QLabel("Größe:"))
+        size_caption = QLabel("Größe")
+        size_caption.setObjectName("StatCaption")
+        info_layout.addWidget(size_caption)
         self.size_label = QLabel("0 B")
+        self.size_label.setObjectName("StatValue")
         info_layout.addWidget(self.size_label)
         
-        info_layout.addWidget(QLabel("Zuletzt geändert:"))
+        modified_caption = QLabel("Zuletzt geändert")
+        modified_caption.setObjectName("StatCaption")
+        info_layout.addWidget(modified_caption)
         self.modified_label = QLabel("-")
+        self.modified_label.setObjectName("StatValue")
         info_layout.addWidget(self.modified_label)
         
         info_layout.addStretch()
         details_layout.addLayout(info_layout)
         
-        details_layout.addWidget(QLabel("Fachordner:"))
+        folder_caption = QLabel("Fachordner")
+        folder_caption.setObjectName("StatCaption")
+        details_layout.addWidget(folder_caption)
         self.service_types_label = QLabel("-")
+        self.service_types_label.setObjectName("StatValue")
         details_layout.addWidget(self.service_types_label)
         
-        details_layout.addWidget(QLabel("Dateien:"))
+        file_caption = QLabel("Dateien")
+        file_caption.setObjectName("StatCaption")
+        details_layout.addWidget(file_caption)
         self.file_list = QListWidget()
         self.file_list.itemDoubleClicked.connect(self.on_file_selected)
         details_layout.addWidget(self.file_list)
@@ -133,15 +203,20 @@ class MainWindow(QMainWindow):
         
         right_widget.addTab(details_widget, "Kundendetails")
         right_widget.addTab(self.file_viewer, "Datei-Viewer")
+
+        details_outer_layout.addWidget(right_widget)
         
-        content_splitter.addWidget(left_widget)
-        content_splitter.addWidget(right_widget)
+        content_splitter.addWidget(left_card)
+        content_splitter.addWidget(details_card)
         content_splitter.setStretchFactor(0, 1)
-        content_splitter.setStretchFactor(1, 2)
+        content_splitter.setStretchFactor(1, 3)
         
         main_layout.addWidget(content_splitter)
         
-        status_layout = QHBoxLayout()
+        status_card = QWidget()
+        status_card.setObjectName("StatusCard")
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(12, 10, 12, 10)
         self.status_label = QLabel("Bereit...")
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -149,9 +224,31 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.status_label)
         status_layout.addWidget(self.progress_bar)
         
-        main_layout.addLayout(status_layout)
+        main_layout.addWidget(status_card)
         
         main_widget.setLayout(main_layout)
+
+    def apply_theme(self):
+        app = QApplication.instance()
+        if app is not None:
+            self.theme_manager.apply(app)
+
+    def open_theme_settings(self):
+        self.theme_popup = ThemePopup(self.theme_manager.mode, self.theme_manager.accent, self)
+        self.theme_popup.themeChanged.connect(self.on_theme_popup_changed)
+        self.theme_popup.adjustSize()
+
+        anchor = self.settings_button.mapToGlobal(self.settings_button.rect().bottomRight())
+        popup_x = anchor.x() - self.theme_popup.width()
+        popup_y = anchor.y() + 6
+        self.theme_popup.move(popup_x, popup_y)
+        self.theme_popup.show()
+
+    def on_theme_popup_changed(self, mode: str, accent: str):
+        self.theme_manager.set_mode(mode)
+        self.theme_manager.set_accent(accent)
+        self.theme_manager.save()
+        self.apply_theme()
     
     def check_and_index(self):
         if not self.index_source.exists():

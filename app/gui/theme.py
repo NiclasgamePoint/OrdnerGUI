@@ -1,0 +1,304 @@
+from PySide6.QtCore import QSettings
+from PySide6.QtGui import QColor
+
+
+def _safe_color(value: str, fallback: str) -> str:
+    color = QColor(value)
+    if not color.isValid():
+        return fallback
+    return color.name()
+
+
+def _tint(color_hex: str, lighter: bool, amount: int) -> str:
+    color = QColor(color_hex)
+    if not color.isValid():
+        return color_hex
+    if lighter:
+        return color.lighter(amount).name()
+    return color.darker(amount).name()
+
+
+class ThemeManager:
+    """Centralized theme handling with persisted mode/accent settings."""
+
+    SETTINGS_ORG = "PapaGUI"
+    SETTINGS_APP = "UI"
+    DEFAULT_MODE = "light"
+    DEFAULT_ACCENT = "#2db89d"
+
+    def __init__(self):
+        self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        self.mode = self.DEFAULT_MODE
+        self.accent = self.DEFAULT_ACCENT
+        self.load()
+
+    def load(self):
+        mode = str(self.settings.value("theme_mode", self.DEFAULT_MODE)).strip().lower()
+        accent = str(self.settings.value("accent_color", self.DEFAULT_ACCENT)).strip()
+
+        if mode not in {"light", "dark"}:
+            mode = self.DEFAULT_MODE
+
+        self.mode = mode
+        self.accent = _safe_color(accent, self.DEFAULT_ACCENT)
+
+    def save(self):
+        self.settings.setValue("theme_mode", self.mode)
+        self.settings.setValue("accent_color", self.accent)
+
+    def set_mode(self, mode: str):
+        normalized = mode.strip().lower()
+        if normalized in {"light", "dark"}:
+            self.mode = normalized
+
+    def set_accent(self, color_hex: str):
+        self.accent = _safe_color(color_hex, self.DEFAULT_ACCENT)
+
+    def apply(self, app):
+        app.setStyleSheet(build_stylesheet(self.mode, self.accent))
+
+
+def build_stylesheet(mode: str, accent: str) -> str:
+    mode = mode.lower()
+    accent = _safe_color(accent, ThemeManager.DEFAULT_ACCENT)
+    accent_soft = _tint(accent, lighter=(mode == "dark"), amount=130 if mode == "dark" else 165)
+    accent_hover = _tint(accent, lighter=(mode == "dark"), amount=112 if mode == "dark" else 108)
+    accent_pressed = _tint(accent, lighter=False, amount=118)
+
+    if mode == "dark":
+        bg = "#11161b"
+        surface = "#1a222a"
+        card = "#202b35"
+        text = "#e9f1f8"
+        muted = "#9fb3c5"
+        border = "#30404d"
+        item_hover = "#263641"
+        item_selected = accent_soft
+        line = "#2a3945"
+        chip = "#22303b"
+    else:
+        bg = "#eaf0ef"
+        surface = "#f5f8f7"
+        card = "#ffffff"
+        text = "#1d2a34"
+        muted = "#667b88"
+        border = "#d7e3e1"
+        item_hover = "#edf5f3"
+        item_selected = accent_soft
+        line = "#dce8e6"
+        chip = "#f0f6f5"
+
+    return f"""
+    QMainWindow, QWidget#RootWidget {{
+        background-color: {bg};
+        color: {text};
+        font-family: 'Segoe UI', 'Noto Sans', sans-serif;
+        font-size: 13px;
+    }}
+
+    QWidget#TopBar,
+    QWidget#SearchCard,
+    QWidget#SideCard,
+    QWidget#DetailsCard,
+    QWidget#StatusCard {{
+        background-color: {card};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+
+    QLabel#PageTitle {{
+        font-size: 15px;
+        font-weight: 700;
+        color: {text};
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#PageSubtitle {{
+        font-size: 12px;
+        color: {muted};
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#StatValue {{
+        font-size: 16px;
+        font-weight: 700;
+        color: {text};
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#StatCaption {{
+        font-size: 11px;
+        color: {muted};
+        border: none;
+        background: transparent;
+    }}
+
+    QToolButton#SettingsButton {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 13px;
+        padding: 4px;
+    }}
+    QToolButton#SettingsButton:hover {{
+        border-color: {accent};
+        background-color: {item_hover};
+    }}
+
+    QLineEdit, QComboBox, QTextEdit, QListWidget, QTableWidget, QTabWidget::pane {{
+        background-color: {surface};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 10px;
+        padding: 7px;
+    }}
+
+    QComboBox::drop-down {{
+        border: none;
+        width: 20px;
+    }}
+
+    QComboBox::down-arrow {{
+        image: none;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 6px solid {muted};
+        margin-right: 6px;
+    }}
+
+    QComboBox QAbstractItemView {{
+        background-color: {surface};
+        color: {text};
+        border: 1px solid {border};
+        selection-background-color: {item_selected};
+        selection-color: {text};
+        outline: 0;
+        padding: 4px;
+    }}
+
+    QMenu {{
+        background-color: {surface};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 8px;
+        padding: 4px;
+    }}
+
+    QMenu::item {{
+        padding: 6px 10px;
+        border-radius: 6px;
+    }}
+
+    QMenu::item:selected {{
+        background-color: {item_selected};
+        color: {text};
+    }}
+
+    QLineEdit:focus, QComboBox:focus, QTextEdit:focus {{
+        border-color: {accent};
+    }}
+
+    QListWidget::item {{
+        padding: 8px;
+        margin: 1px;
+        border-radius: 8px;
+    }}
+    QListWidget::item:hover {{
+        background-color: {item_hover};
+    }}
+    QListWidget::item:selected {{
+        background-color: {item_selected};
+        color: {text};
+    }}
+
+    QPushButton {{
+        background-color: {accent};
+        color: #ffffff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 14px;
+        font-weight: 600;
+    }}
+    QPushButton:hover {{
+        background-color: {accent_hover};
+    }}
+    QPushButton:pressed {{
+        background-color: {accent_pressed};
+    }}
+
+    QPushButton#GhostButton {{
+        background-color: {chip};
+        color: {text};
+        border: 1px solid {border};
+    }}
+    QPushButton#GhostButton:hover {{
+        border-color: {accent};
+    }}
+
+    QProgressBar {{
+        border: 1px solid {border};
+        border-radius: 8px;
+        background-color: {surface};
+        color: {text};
+        text-align: center;
+    }}
+
+    QProgressBar::chunk {{
+        background-color: {accent};
+        border-radius: 6px;
+    }}
+
+    QTabBar::tab {{
+        background-color: {surface};
+        color: {muted};
+        border: 1px solid {border};
+        border-bottom: none;
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+        padding: 8px 12px;
+        margin-right: 4px;
+    }}
+    QTabBar::tab:selected {{
+        color: {text};
+        background-color: {card};
+        border-color: {accent};
+    }}
+
+    QSplitter::handle {{
+        background-color: {line};
+        width: 2px;
+    }}
+
+    QScrollArea {{
+        border: none;
+        background: transparent;
+    }}
+
+    QDialog {{
+        background-color: {card};
+        color: {text};
+    }}
+
+    QFrame#ThemePopup {{
+        background-color: {card};
+        border: 1px solid {border};
+        border-radius: 12px;
+    }}
+
+    QLabel#PopupTitle {{
+        font-size: 13px;
+        font-weight: 700;
+        color: {text};
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#PopupCaption {{
+        color: {muted};
+        border: none;
+        background: transparent;
+        min-width: 46px;
+    }}
+    """
