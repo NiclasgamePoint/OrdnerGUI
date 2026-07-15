@@ -1,5 +1,6 @@
 PySide6
 openpyxl
+xlrd
 python-docx
 Pillow
 PyPDF2

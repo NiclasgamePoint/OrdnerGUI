@@ -347,6 +347,21 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border: none;
     }}
 
+    QLabel#ViewerMeta {{
+        color: {muted};
+        font-size: 12px;
+        background: transparent;
+        border: none;
+    }}
+
+    QPdfView#PdfView,
+    QPdfView#PdfView QWidget#qt_scrollarea_viewport {{
+        background-color: {surface};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 8px;
+    }}
+
     QScrollBar:vertical {{
         background-color: {surface};
         width: 12px;

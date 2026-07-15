@@ -585,12 +585,9 @@ class MainWindow(QMainWindow):
         
         self.file_list.clear()
         for file_info in details['files']:
-            bucket = file_info.get('time_bucket') or file_info.get('year') or '-'
-            folder = file_info.get('domain_folder') or file_info.get('service_type') or '-'
-            subfolder = file_info.get('subfolder') or '-'
-            item_text = f"{folder}/{bucket}/{subfolder}/{file_info['filename']}"
-            item = QListWidgetItem(item_text)
+            item = QListWidgetItem(file_info['filename'])
             item.setData(Qt.UserRole, file_info['path'])
+            item.setToolTip(file_info['path'])
             self.file_list.addItem(item)
         
         self.status_label.setText(f"✓ Kunde: {customer_name} mit {details['file_count']} Dateien")
