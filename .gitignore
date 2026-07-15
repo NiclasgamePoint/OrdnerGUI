@@ -27,6 +27,7 @@ htmlcov/
 *.sqlite3
 data/mock/
 data/index.db
+Bauvorhaben/
 
 # Logs
 *.log
