@@ -41,6 +41,7 @@ from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
 from app.gui.widgets import AppButton, HighlightDelegate, SearchResultSection
+from app.services import FileSystemMonitor
 
 
 class IndexingWorker(QThread):
@@ -180,11 +181,14 @@ class MainWindow(QMainWindow):
         self.search_debounce.setSingleShot(True)
         self.search_debounce.setInterval(250)
         self.search_debounce.timeout.connect(self._start_live_folder_search)
+        self.filesystem_monitor = None
+        self.pending_filesystem_sync = False
         
         self.init_ui()
         self._refresh_search_facets()
         self.apply_theme()
         self.check_and_index()
+        self._start_filesystem_monitor()
     
     def init_ui(self):
         main_widget = QWidget()
@@ -577,6 +581,7 @@ class MainWindow(QMainWindow):
                 self.index_source = self.pending_index_source
                 save_index_source(self.index_source)
                 self.pending_index_source = None
+                self._start_filesystem_monitor()
             count = worker.indexed_count if worker is not None else 0
             self._reset_search_results()
             self.current_customer = None
@@ -586,6 +591,47 @@ class MainWindow(QMainWindow):
                 self.settings_popup.set_backups(available_backups(DB_FILE))
                 self.settings_popup.set_diagnostics(self.diagnostics_service.inspect(DB_FILE))
         self.index_worker = None
+        if self.pending_filesystem_sync:
+            self.pending_filesystem_sync = False
+            QTimer.singleShot(0, self._start_incremental_filesystem_sync)
+
+    def _start_filesystem_monitor(self):
+        if self.filesystem_monitor is not None:
+            self.filesystem_monitor.requestInterruption()
+            self.filesystem_monitor.wait()
+            self.filesystem_monitor.deleteLater()
+        self.filesystem_monitor = None
+        if not self.index_source.exists() or not self.index_source.is_dir():
+            return
+        self.filesystem_monitor = FileSystemMonitor(
+            self.index_source,
+            excluded_folders=self.index_options.excluded_folder_names,
+            parent=self,
+        )
+        self.filesystem_monitor.changesDetected.connect(self._on_filesystem_changes)
+        self.filesystem_monitor.scanFailed.connect(
+            lambda error: self.status_label.setText(f"Dateiüberwachung: {error}")
+        )
+        self.filesystem_monitor.start()
+
+    def _on_filesystem_changes(self, changes):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            self.pending_filesystem_sync = True
+            return
+        self.status_label.setText(
+            f"{changes.total} Dateiänderungen erkannt · Index wird aktualisiert …"
+        )
+        self._start_incremental_filesystem_sync()
+
+    def _start_incremental_filesystem_sync(self):
+        if self.index_worker is not None and self.index_worker.isRunning():
+            self.pending_filesystem_sync = True
+            return
+        self._start_background_indexing(
+            self.index_source,
+            full_rebuild=False,
+            status_text="Aktualisiere Index nach Dateiänderungen …",
+        )
 
     def _activate_built_index(self, build_path: Path):
         if build_path is None:
@@ -604,6 +650,7 @@ class MainWindow(QMainWindow):
         self.index_options = options
         save_index_options(options)
         self.status_label.setText("Indexeinstellungen gespeichert")
+        self._start_filesystem_monitor()
 
     def on_load_backup_requested(self, backup_path_value: str):
         if self.index_worker is not None and self.index_worker.isRunning():
@@ -972,6 +1019,9 @@ class MainWindow(QMainWindow):
         if self.index_worker is not None and self.index_worker.isRunning():
             self.index_worker.requestInterruption()
             self.index_worker.wait()
+        if self.filesystem_monitor is not None and self.filesystem_monitor.isRunning():
+            self.filesystem_monitor.requestInterruption()
+            self.filesystem_monitor.wait()
         self.index_manager.close()
         event.accept()
 

@@ -1098,6 +1098,8 @@ class IndexManager:
             indexed_result_paths = {result["path"] for result in results}
             if should_cancel is not None and should_cancel():
                 return results
+            if filters is not None and filters.active:
+                return results
 
             rg_path = shutil.which("rg")
             if rg_path is None:

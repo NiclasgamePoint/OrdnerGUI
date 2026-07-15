@@ -7,6 +7,7 @@ import unittest
 from app.core.config import IndexOptions
 from app.core.index_diagnostics import IndexDiagnosticsService
 from app.core.index_manager import IndexManager
+from app.core.search_models import SearchFilters
 
 
 class IndexingTests(unittest.TestCase):
@@ -55,6 +56,28 @@ class IndexingTests(unittest.TestCase):
         self.assertGreaterEqual(diagnostics.folder_count, 13)
         self.assertEqual(diagnostics.changed_count, 0)
         self.assertEqual(diagnostics.status_counts.get("success"), 4)
+
+    def test_ranked_filtered_search_is_paginated(self):
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        page = manager.search_files_page(
+            "bericht",
+            SearchFilters(domain_folder="DEKRA", year="2026", file_type="txt"),
+            page=1,
+            page_size=2,
+        )
+        self.assertEqual(page.total, 1)
+        self.assertEqual(page.items[0]["domain_folder"], "DEKRA")
+        text_page = manager.search_text_page(
+            "Prüftext",
+            SearchFilters(domain_folder="Elektroplanung"),
+            page=1,
+            page_size=1,
+        )
+        self.assertEqual(text_page.total, 1)
+        self.assertIn("Elektroplanung", text_page.items[0]["path"])
+        manager.close()
 
 
 if __name__ == "__main__":
