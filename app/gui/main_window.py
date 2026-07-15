@@ -25,19 +25,59 @@ from app.gui.settings_popup import SettingsPopup
 
 class IndexingWorker(QThread):
     progress = Signal(int)
-    finished = Signal()
     
-    def __init__(self, manager: IndexManager, base_path: Path):
+    def __init__(self, db_path: Path, base_path: Path):
         super().__init__()
-        self.manager = manager
+        self.db_path = db_path
         self.base_path = base_path
     
     def run(self):
-        self.manager.index_directory(self.base_path)
-        self.finished.emit()
+        manager = IndexManager(self.db_path)
+        try:
+            manager.index_directory(self.base_path)
+        finally:
+            manager.close()
+
+
+class SearchWorker(QThread):
+    """Run one search type with its own thread-local database connection."""
+
+    completed = Signal(int, str, object, str)
+
+    def __init__(self, db_path: Path, generation: int, category: str, query: str):
+        super().__init__()
+        self.db_path = db_path
+        self.generation = generation
+        self.category = category
+        self.query = query
+
+    def run(self):
+        manager = None
+        try:
+            manager = IndexManager(self.db_path, initialize=False)
+            if self.category == "folders":
+                results = manager.search_customers(self.query, limit=200)
+            elif self.category == "files":
+                results = manager.search_files(self.query, limit=200)
+            elif self.category == "text":
+                results = manager.search_in_text(
+                    self.query,
+                    should_cancel=self.isInterruptionRequested,
+                )
+            else:
+                raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
+            self.completed.emit(self.generation, self.category, results, "")
+        except Exception as exc:
+            self.completed.emit(self.generation, self.category, [], str(exc))
+        finally:
+            if manager is not None:
+                manager.close()
 
 
 class MainWindow(QMainWindow):
+    RESULT_KIND_ROLE = Qt.UserRole
+    RESULT_VALUE_ROLE = Qt.UserRole + 1
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
@@ -49,6 +89,13 @@ class MainWindow(QMainWindow):
         self.index_source = get_default_index_source()
         self.theme_manager = ThemeManager()
         self.settings_popup = None
+        self.search_generation = 0
+        self.search_workers = set()
+        self.search_counts = {"folders": None, "files": None, "text": None}
+        self.search_debounce = QTimer(self)
+        self.search_debounce.setSingleShot(True)
+        self.search_debounce.setInterval(250)
+        self.search_debounce.timeout.connect(self._start_live_folder_search)
         
         self.init_ui()
         self.apply_theme()
@@ -99,28 +146,23 @@ class MainWindow(QMainWindow):
         search_layout.setContentsMargins(12, 7, 12, 7)
         search_layout.setSpacing(8)
         
-        search_label = QLabel("Vorgang-/Kundensuche:")
+        search_label = QLabel("Suche:")
         search_label.setObjectName("StatCaption")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Kunde, Projekt, Ordner oder Dateiname eingeben...")
-        self.search_input.textChanged.connect(self.on_search_changed)
-        
-        self.search_file_input = QLineEdit()
-        self.search_file_input.setPlaceholderText("Dateiname suchen...")
-        self.search_file_input.textChanged.connect(self.on_file_search_changed)
-        
-        self.search_text_input = QLineEdit()
-        self.search_text_input.setPlaceholderText("Text in Dateien suchen (ripgrep)...")
-        search_text_btn = QPushButton("Suchen")
-        search_text_btn.clicked.connect(self.on_text_search)
+        self.search_input.setPlaceholderText(
+            "Kunde, Ordner, Dateiname oder Dokumentinhalt durchsuchen ..."
+        )
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        self.search_input.returnPressed.connect(self.start_full_search)
+
+        self.search_button = QPushButton("Suchen")
+        self.search_button.setObjectName("SearchButton")
+        self.search_button.clicked.connect(self.start_full_search)
         
         search_layout.addWidget(search_label)
-        search_layout.addWidget(self.search_input)
-        search_layout.addWidget(QLabel("Dateiname:"))
-        search_layout.addWidget(self.search_file_input)
-        search_layout.addWidget(QLabel("Text:"))
-        search_layout.addWidget(self.search_text_input)
-        search_layout.addWidget(search_text_btn)
+        search_layout.addWidget(self.search_input, 1)
+        search_layout.addWidget(self.search_button)
         
         main_layout.addWidget(search_card)
         
@@ -129,15 +171,14 @@ class MainWindow(QMainWindow):
         
         left_card = QWidget()
         left_card.setObjectName("SideCard")
+        left_card.setMinimumWidth(320)
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(12, 12, 12, 12)
         left_layout.setSpacing(8)
-        left_title = QLabel("Vorgänge/Kunden")
+        left_title = QLabel("Suchergebnisse")
         left_title.setObjectName("StatValue")
         left_layout.addWidget(left_title)
-        self.customer_list = QListWidget()
-        self.customer_list.itemClicked.connect(self.on_customer_selected)
-        left_layout.addWidget(self.customer_list)
+        self._create_result_groups(left_layout)
 
         details_card = QWidget()
         details_card.setObjectName("DetailsCard")
@@ -213,6 +254,7 @@ class MainWindow(QMainWindow):
         content_splitter.addWidget(details_card)
         content_splitter.setStretchFactor(0, 1)
         content_splitter.setStretchFactor(1, 3)
+        content_splitter.setSizes([340, 1040])
         
         main_layout.addWidget(content_splitter, 1)
         
@@ -298,7 +340,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Indexiere Dateien...")
             self.progress_bar.setVisible(True)
             
-            self.index_worker = IndexingWorker(self.index_manager, self.index_source)
+            self.index_worker = IndexingWorker(DB_FILE, self.index_source)
             self.index_worker.finished.connect(self.on_indexing_complete)
             self.index_worker.start()
         else:
@@ -309,26 +351,215 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Index fertig geladen ✓")
         self.index_worker = None
     
-    def on_search_changed(self, text: str):
-        self.customer_list.clear()
-        
-        if len(text) < 1:
+    def _create_result_groups(self, parent_layout: QVBoxLayout):
+        self.result_groups = {}
+        self.result_group_titles = {}
+        results_splitter = QSplitter(Qt.Vertical)
+        results_splitter.setObjectName("ResultsSplitter")
+        results_splitter.setChildrenCollapsible(False)
+
+        for category, title in (
+            ("folders", "Ordner & Kunden"),
+            ("files", "Dateinamen"),
+            ("text", "Dokumentinhalte"),
+        ):
+            section = QWidget()
+            section.setObjectName("ResultSection")
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(5)
+
+            heading = QLabel(title)
+            heading.setObjectName("SearchGroupTitle")
+            section_layout.addWidget(heading)
+
+            result_list = QListWidget()
+            result_list.setObjectName("ResultList")
+            result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            result_list.itemClicked.connect(self.on_search_result_clicked)
+            result_list.itemDoubleClicked.connect(self.on_search_result_double_clicked)
+            section_layout.addWidget(result_list)
+
+            results_splitter.addWidget(section)
+            self.result_groups[category] = result_list
+            self.result_group_titles[category] = (heading, title)
+
+        results_splitter.setSizes([200, 200, 200])
+        parent_layout.addWidget(results_splitter)
+        self._reset_search_results()
+
+    def _replace_group_items(self, category: str, items):
+        result_list = self.result_groups[category]
+        result_list.clear()
+        for item in items:
+            result_list.addItem(item)
+
+    def _placeholder_item(self, text: str) -> QListWidgetItem:
+        item = QListWidgetItem(text)
+        item.setFlags(item.flags() & ~Qt.ItemIsEnabled & ~Qt.ItemIsSelectable)
+        return item
+
+    def _reset_search_results(self):
+        self._replace_group_items("folders", [self._placeholder_item("Suchbegriff eingeben")])
+        enter_hint = self._placeholder_item("Mit Enter oder ‚Suchen‘ starten")
+        self._replace_group_items("files", [enter_hint])
+        self._replace_group_items(
+            "text", [self._placeholder_item("Mit Enter oder ‚Suchen‘ starten")]
+        )
+        self.search_counts = {"folders": None, "files": None, "text": None}
+        self._refresh_result_group_titles()
+
+    def on_search_text_changed(self, text: str):
+        self.search_generation += 1
+        self._cancel_outdated_searches()
+        self.search_debounce.stop()
+        query = text.strip()
+        self.search_counts = {"folders": None, "files": None, "text": None}
+        self._refresh_result_group_titles()
+
+        if not query:
+            self._reset_search_results()
+            self.status_label.setText("Bereit ...")
             return
-        
-        results = self.index_manager.search_customers(text)
-        
-        unique_customers = set()
+
+        self._replace_group_items("folders", [self._placeholder_item("Suche läuft …")])
+        self._replace_group_items(
+            "files", [self._placeholder_item("Mit Enter oder ‚Suchen‘ starten")]
+        )
+        self._replace_group_items(
+            "text", [self._placeholder_item("Mit Enter oder ‚Suchen‘ starten")]
+        )
+        self.status_label.setText("Ordner- und Kundensuche wird vorbereitet …")
+        self.search_debounce.start()
+
+    def _start_live_folder_search(self):
+        query = self.search_input.text().strip()
+        if query:
+            self._launch_search("folders", query, self.search_generation)
+
+    def start_full_search(self):
+        query = self.search_input.text().strip()
+        if len(query) < 2:
+            self.status_label.setText("Bitte mindestens 2 Zeichen für die vollständige Suche eingeben.")
+            return
+
+        self.search_debounce.stop()
+        self.search_generation += 1
+        self._cancel_outdated_searches()
+        generation = self.search_generation
+        self.current_customer = None
+        self.search_counts = {"folders": None, "files": None, "text": None}
+        self._refresh_result_group_titles()
+
+        for category in self.result_groups:
+            self._replace_group_items(category, [self._placeholder_item("Suche läuft …")])
+
+        self.status_label.setText("Durchsuche Ordner, Dateinamen und Dokumentinhalte parallel …")
+        for category in ("folders", "files", "text"):
+            self._launch_search(category, query, generation)
+
+    def _launch_search(self, category: str, query: str, generation: int):
+        worker = SearchWorker(DB_FILE, generation, category, query)
+        worker.completed.connect(self._on_search_completed)
+        worker.finished.connect(lambda worker=worker: self._release_search_worker(worker))
+        self.search_workers.add(worker)
+        worker.start()
+
+    def _cancel_outdated_searches(self):
+        for worker in tuple(self.search_workers):
+            worker.requestInterruption()
+
+    def _release_search_worker(self, worker: SearchWorker):
+        self.search_workers.discard(worker)
+        worker.deleteLater()
+
+    def _on_search_completed(self, generation: int, category: str, results, error: str):
+        if generation != self.search_generation:
+            return
+
+        if error:
+            item = self._placeholder_item(f"Fehler: {error}")
+            item.setToolTip(error)
+            self._replace_group_items(category, [item])
+            self.search_counts[category] = 0
+        elif category == "folders":
+            self._show_folder_results(results)
+        elif category == "files":
+            self._show_file_results(results)
+        elif category == "text":
+            self._show_text_results(results)
+        self._update_search_status()
+
+    def _show_folder_results(self, results):
+        aggregated = {}
         for result in results:
-            unique_customers.add(result['customer_name'])
-        
-        for customer in sorted(unique_customers):
-            item = QListWidgetItem(customer)
-            self.customer_list.addItem(item)
-        
-        self.status_label.setText(f"✓ {len(unique_customers)} Kunden gefunden")
-    
-    def on_customer_selected(self, item: QListWidgetItem):
-        customer_name = item.text()
+            name = result.get("customer_name") or "Unbekannt"
+            aggregated[name] = aggregated.get(name, 0) + int(result.get("file_count") or 0)
+
+        items = []
+        for name, file_count in sorted(aggregated.items(), key=lambda entry: entry[0].lower())[:100]:
+            item = QListWidgetItem(f"{name}  ·  {file_count} Dateien")
+            item.setData(self.RESULT_KIND_ROLE, "customer")
+            item.setData(self.RESULT_VALUE_ROLE, name)
+            items.append(item)
+        if not items:
+            items.append(self._placeholder_item("Keine Ordner oder Kunden gefunden"))
+        self._replace_group_items("folders", items)
+        self.search_counts["folders"] = len(aggregated)
+
+    def _show_file_results(self, results):
+        items = []
+        for file_info in results[:100]:
+            relative_dir = file_info.get("relative_dir") or ""
+            suffix = f"  ·  {relative_dir}" if relative_dir else ""
+            item = QListWidgetItem(f"{file_info['filename']}{suffix}")
+            item.setData(self.RESULT_KIND_ROLE, "file")
+            item.setData(self.RESULT_VALUE_ROLE, file_info["path"])
+            item.setToolTip(file_info["path"])
+            items.append(item)
+        if not items:
+            items.append(self._placeholder_item("Keine Dateinamen gefunden"))
+        self._replace_group_items("files", items)
+        self.search_counts["files"] = len(results)
+
+    def _show_text_results(self, results):
+        items = []
+        for filepath, line_num in results[:100]:
+            item = QListWidgetItem(f"{filepath.name}  ·  Zeile {line_num}")
+            item.setData(self.RESULT_KIND_ROLE, "text")
+            item.setData(self.RESULT_VALUE_ROLE, str(filepath))
+            item.setToolTip(str(filepath))
+            items.append(item)
+        if not items:
+            items.append(self._placeholder_item("Keine Texttreffer gefunden"))
+        self._replace_group_items("text", items)
+        self.search_counts["text"] = len(results)
+
+    def _update_search_status(self):
+        labels = {"folders": "Ordner/Kunden", "files": "Dateien", "text": "Text"}
+        parts = []
+        for category in ("folders", "files", "text"):
+            count = self.search_counts[category]
+            parts.append(f"{labels[category]}: {'…' if count is None else count}")
+        self.status_label.setText("  ·  ".join(parts))
+        self._refresh_result_group_titles()
+
+    def _refresh_result_group_titles(self):
+        for category, (heading, base_title) in self.result_group_titles.items():
+            count = self.search_counts[category]
+            heading.setText(base_title if count is None else f"{base_title} ({count})")
+
+    def on_search_result_clicked(self, item: QListWidgetItem):
+        if item.data(self.RESULT_KIND_ROLE) == "customer":
+            self.show_customer_details(item.data(self.RESULT_VALUE_ROLE))
+
+    def on_search_result_double_clicked(self, item: QListWidgetItem):
+        if item.data(self.RESULT_KIND_ROLE) in {"file", "text"}:
+            filepath = item.data(self.RESULT_VALUE_ROLE)
+            if filepath:
+                self.file_viewer.open_file(Path(filepath))
+
+    def show_customer_details(self, customer_name: str):
         self.current_customer = customer_name
         
         details = self.index_manager.get_customer_details(customer_name)
@@ -357,45 +588,17 @@ class MainWindow(QMainWindow):
         
         self.status_label.setText(f"✓ Kunde: {customer_name} mit {details['file_count']} Dateien")
     
-    def on_file_search_changed(self, text: str):
-        if len(text) < 2:
-            return
-        
-        results = self.index_manager.search_files(text, self.current_customer)
-        
-        self.file_list.clear()
-        for file_info in results:
-            item_text = f"{file_info['filename']} ({file_info['file_type']})"
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, file_info['path'])
-            self.file_list.addItem(item)
-        
-        self.status_label.setText(f"✓ {len(results)} Dateien gefunden")
-    
-    def on_text_search(self):
-        query = self.search_text_input.text()
-        if len(query) < 2:
-            QMessageBox.warning(self, "Suche", "Suchtext muss mindestens 2 Zeichen lang sein")
-            return
-        
-        self.status_label.setText("Suche in Textdateien...")
-        results = self.index_manager.search_in_text(query, self.current_customer)
-        
-        self.file_list.clear()
-        for filepath, line_num in results[:50]:
-            item_text = f"{filepath.name} (Zeile {line_num})"
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, str(filepath))
-            self.file_list.addItem(item)
-        
-        self.status_label.setText(f"✓ {len(results)} Treffer gefunden")
-    
     def on_file_selected(self, item: QListWidgetItem):
         filepath = item.data(Qt.UserRole)
         if filepath:
             self.file_viewer.open_file(Path(filepath))
     
     def closeEvent(self, event):
+        self.search_debounce.stop()
+        for worker in tuple(self.search_workers):
+            worker.requestInterruption()
+        for worker in tuple(self.search_workers):
+            worker.wait()
         self.index_manager.close()
         event.accept()
 

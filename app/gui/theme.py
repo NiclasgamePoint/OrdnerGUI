@@ -149,7 +149,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background-color: {item_hover};
     }}
 
-    QLineEdit, QComboBox, QTextEdit, QListWidget, QTableWidget, QTabWidget::pane {{
+    QLineEdit, QComboBox, QTextEdit, QListWidget, QTreeWidget, QTableWidget, QTabWidget::pane {{
         background-color: {surface};
         color: {text};
         border: 1px solid {border};
@@ -219,17 +219,25 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border-color: {accent};
     }}
 
-    QListWidget::item {{
+    QListWidget::item, QTreeWidget::item {{
         padding: 8px;
         margin: 1px;
         border-radius: 8px;
     }}
-    QListWidget::item:hover {{
+    QListWidget::item:hover, QTreeWidget::item:hover {{
         background-color: {item_hover};
     }}
-    QListWidget::item:selected {{
+    QListWidget::item:selected, QTreeWidget::item:selected {{
         background-color: {item_selected};
         color: #ffffff;
+    }}
+
+    QTreeWidget#ResultsTree {{
+        padding: 5px;
+    }}
+
+    QTreeWidget#ResultsTree::item:disabled {{
+        color: {muted};
     }}
 
     QPushButton {{
@@ -331,6 +339,20 @@ def build_stylesheet(mode: str, accent: str) -> str:
         color: {text};
         border: none;
         background: transparent;
+    }}
+
+    QLabel#SearchGroupTitle {{
+        color: {text};
+        font-size: 12px;
+        font-weight: 700;
+        padding: 2px 4px;
+        border: none;
+        background: transparent;
+    }}
+
+    QSplitter#ResultsSplitter::handle {{
+        background-color: transparent;
+        height: 8px;
     }}
 
     QListWidget#SettingsNav {{

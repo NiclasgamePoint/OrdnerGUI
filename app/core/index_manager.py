@@ -5,15 +5,21 @@ import os
 from typing import List, Dict, Tuple, Optional
 import subprocess
 import shutil
+import time
+from typing import Callable
 
 
 class IndexManager:
     SEARCH_LABEL_SQL = "COALESCE(NULLIF(project_name, ''), NULLIF(customer_name, ''), filename)"
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, initialize: bool = True):
         self.db_path = db_path
         self.conn = None
-        self.init_db()
+        if initialize:
+            self.init_db()
+        else:
+            self.conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            self.conn.row_factory = sqlite3.Row
     
     def init_db(self):
         self.conn = sqlite3.connect(str(self.db_path))
@@ -189,12 +195,11 @@ class IndexManager:
         except Exception as e:
             print(f"Fehler beim Indexieren von {filepath}: {e}")
     
-    def search_customers(self, query: str) -> List[Dict]:
+    def search_customers(self, query: str, limit: Optional[int] = None) -> List[Dict]:
         cursor = self.conn.cursor()
         
         q = f"%{query}%"
-        cursor.execute(
-            f"""
+        sql = f"""
             SELECT
                 {self.SEARCH_LABEL_SQL} AS customer_name,
                 domain_folder AS service_type,
@@ -203,15 +208,17 @@ class IndexManager:
             FROM files
             WHERE (
                 {self.SEARCH_LABEL_SQL} LIKE ?
-                OR filename LIKE ?
                 OR relative_dir LIKE ?
-                OR path LIKE ?
+                OR domain_folder LIKE ?
             )
             GROUP BY customer_name, service_type, year
             ORDER BY customer_name
-            """,
-            (q, q, q, q)
-        )
+        """
+        params = [q, q, q]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        cursor.execute(sql, params)
         
         results = []
         for row in cursor.fetchall():
@@ -270,7 +277,12 @@ class IndexManager:
         
         return info
     
-    def search_files(self, query: str, customer_name: Optional[str] = None) -> List[Dict]:
+    def search_files(
+        self,
+        query: str,
+        customer_name: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict]:
         cursor = self.conn.cursor()
         
         sql = "SELECT * FROM files WHERE (filename LIKE ? OR relative_dir LIKE ?)"
@@ -282,6 +294,9 @@ class IndexManager:
             params.append(customer_name)
         
         sql += " ORDER BY time_bucket DESC, domain_folder, filename"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
         
         cursor.execute(sql, params)
         return [dict(row) for row in cursor.fetchall()]
@@ -315,7 +330,42 @@ class IndexManager:
                 continue
         return parsed
     
-    def search_in_text(self, query: str, customer_name: Optional[str] = None) -> List[Tuple[Path, int]]:
+    def _run_ripgrep(
+        self,
+        command: List[str],
+        should_cancel: Optional[Callable[[], bool]],
+    ) -> str:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        deadline = time.monotonic() + 25
+        while True:
+            try:
+                stdout, _ = process.communicate(timeout=0.1)
+                return stdout
+            except subprocess.TimeoutExpired:
+                if should_cancel is not None and should_cancel():
+                    process.terminate()
+                    try:
+                        process.communicate(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate()
+                    return ""
+                if time.monotonic() >= deadline:
+                    process.kill()
+                    process.communicate()
+                    return ""
+
+    def search_in_text(
+        self,
+        query: str,
+        customer_name: Optional[str] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> List[Tuple[Path, int]]:
         if not shutil.which('rg'):
             print("⚠ ripgrep nicht installiert. Bitte installieren: apt install ripgrep")
             return []
@@ -327,6 +377,8 @@ class IndexManager:
 
             results: List[Tuple[Path, int]] = []
             for targets in target_groups:
+                if should_cancel is not None and should_cancel():
+                    break
                 command = [
                     'rg',
                     '--line-number',
@@ -345,17 +397,9 @@ class IndexManager:
                     query,
                     *targets,
                 ]
-                try:
-                    result = subprocess.run(
-                        command,
-                        capture_output=True,
-                        text=True,
-                        timeout=25
-                    )
-                    if result.stdout:
-                        results.extend(self._parse_rg_output(result.stdout))
-                except subprocess.TimeoutExpired:
-                    continue
+                stdout = self._run_ripgrep(command, should_cancel)
+                if stdout:
+                    results.extend(self._parse_rg_output(stdout))
 
             return results
         except Exception as e:
