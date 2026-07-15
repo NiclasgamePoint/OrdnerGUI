@@ -17,7 +17,7 @@ from PySide6.QtGui import QIcon, QPixmap
 import threading
 from datetime import datetime
 
-from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, MOCK_DATA_DIR, DB_FILE
+from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, MOCK_DATA_DIR, DB_FILE, get_default_index_source
 from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
 
@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.index_manager = IndexManager(DB_FILE)
         self.current_customer = None
         self.index_worker = None
+        self.index_source = get_default_index_source()
         
         self.init_ui()
         self.check_and_index()
@@ -56,9 +57,9 @@ class MainWindow(QMainWindow):
         
         search_layout = QHBoxLayout()
         
-        search_label = QLabel("Kundensuche:")
+        search_label = QLabel("Vorgang-/Kundensuche:")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Kundennamen eingeben...")
+        self.search_input.setPlaceholderText("Kunde, Projekt, Ordner oder Dateiname eingeben...")
         self.search_input.textChanged.connect(self.on_search_changed)
         
         self.search_file_input = QLineEdit()
@@ -83,7 +84,7 @@ class MainWindow(QMainWindow):
         content_splitter = QSplitter(Qt.Horizontal)
         
         left_layout = QVBoxLayout()
-        left_layout.addWidget(QLabel("Kunden:"))
+        left_layout.addWidget(QLabel("Vorgänge/Kunden:"))
         self.customer_list = QListWidget()
         self.customer_list.itemClicked.connect(self.on_customer_selected)
         left_layout.addWidget(self.customer_list)
@@ -96,7 +97,7 @@ class MainWindow(QMainWindow):
         details_layout = QVBoxLayout()
         
         info_layout = QHBoxLayout()
-        info_layout.addWidget(QLabel("Kundenname:"))
+        info_layout.addWidget(QLabel("Vorgang/Kunde:"))
         self.customer_name_label = QLabel("-")
         self.customer_name_label.setStyleSheet("font-weight: bold;")
         info_layout.addWidget(self.customer_name_label)
@@ -116,7 +117,7 @@ class MainWindow(QMainWindow):
         info_layout.addStretch()
         details_layout.addLayout(info_layout)
         
-        details_layout.addWidget(QLabel("Dienstleistungstypen:"))
+        details_layout.addWidget(QLabel("Fachordner:"))
         self.service_types_label = QLabel("-")
         details_layout.addWidget(self.service_types_label)
         
@@ -153,20 +154,30 @@ class MainWindow(QMainWindow):
         main_widget.setLayout(main_layout)
     
     def check_and_index(self):
-        if not DB_FILE.exists() or DB_FILE.stat().st_size == 0:
-            if not MOCK_DATA_DIR.exists():
+        if not self.index_source.exists() and self.index_source == MOCK_DATA_DIR:
+            from app.core.mock_data_generator import generate_mock_data
+            self.status_label.setText("Generiere Mock-Daten...")
+            generate_mock_data(MOCK_DATA_DIR, num_customers=5)
+
+        needs_index = (not DB_FILE.exists() or DB_FILE.stat().st_size == 0)
+        if not needs_index:
+            needs_index = not self.index_manager.has_index_for_root(self.index_source)
+
+        if needs_index:
+            if not self.index_source.exists():
                 from app.core.mock_data_generator import generate_mock_data
                 self.status_label.setText("Generiere Mock-Daten...")
                 generate_mock_data(MOCK_DATA_DIR, num_customers=5)
+                self.index_source = MOCK_DATA_DIR
             
             self.status_label.setText("Indexiere Dateien...")
             self.progress_bar.setVisible(True)
             
-            self.index_worker = IndexingWorker(self.index_manager, MOCK_DATA_DIR)
+            self.index_worker = IndexingWorker(self.index_manager, self.index_source)
             self.index_worker.finished.connect(self.on_indexing_complete)
             self.index_worker.start()
         else:
-            self.status_label.setText("Index geladen ✓")
+            self.status_label.setText(f"Index geladen ✓ ({self.index_source.name})")
     
     def on_indexing_complete(self):
         self.progress_bar.setVisible(False)
@@ -211,7 +222,10 @@ class MainWindow(QMainWindow):
         
         self.file_list.clear()
         for file_info in details['files']:
-            item_text = f"{file_info['year']}/{file_info['service_type']}/{file_info['subfolder'] or '-'}/{file_info['filename']}"
+            bucket = file_info.get('time_bucket') or file_info.get('year') or '-'
+            folder = file_info.get('domain_folder') or file_info.get('service_type') or '-'
+            subfolder = file_info.get('subfolder') or '-'
+            item_text = f"{folder}/{bucket}/{subfolder}/{file_info['filename']}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, file_info['path'])
             self.file_list.addItem(item)
