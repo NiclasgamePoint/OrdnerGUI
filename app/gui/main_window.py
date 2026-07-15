@@ -17,7 +17,7 @@ from PySide6.QtGui import QIcon, QPixmap
 import threading
 from datetime import datetime
 
-from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, MOCK_DATA_DIR, DB_FILE, get_default_index_source
+from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, DB_FILE, get_default_index_source
 from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
 
@@ -154,22 +154,21 @@ class MainWindow(QMainWindow):
         main_widget.setLayout(main_layout)
     
     def check_and_index(self):
-        if not self.index_source.exists() and self.index_source == MOCK_DATA_DIR:
-            from app.core.mock_data_generator import generate_mock_data
-            self.status_label.setText("Generiere Mock-Daten...")
-            generate_mock_data(MOCK_DATA_DIR, num_customers=5)
+        if not self.index_source.exists():
+            self.status_label.setText(f"Indexquelle nicht gefunden: {self.index_source}")
+            QMessageBox.warning(
+                self,
+                "Indexquelle fehlt",
+                f"Der Datenordner wurde nicht gefunden:\n{self.index_source}\n\n"
+                "Bitte den Ordner anlegen oder den Pfad in app/core/config.py anpassen."
+            )
+            return
 
         needs_index = (not DB_FILE.exists() or DB_FILE.stat().st_size == 0)
         if not needs_index:
             needs_index = not self.index_manager.has_index_for_root(self.index_source)
 
         if needs_index:
-            if not self.index_source.exists():
-                from app.core.mock_data_generator import generate_mock_data
-                self.status_label.setText("Generiere Mock-Daten...")
-                generate_mock_data(MOCK_DATA_DIR, num_customers=5)
-                self.index_source = MOCK_DATA_DIR
-            
             self.status_label.setText("Indexiere Dateien...")
             self.progress_bar.setVisible(True)
             

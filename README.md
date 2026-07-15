@@ -11,7 +11,6 @@
   - Textdateien (TXT, CSV, LOG, MD)
   - Word-Dokumente (DOCX)
 - **Volltextsuche**: ripgrep-Integration für Textdateien
-- **Mock-Daten**: 5 Kunden × 50 Dateien zum Testen
 - **GUI**: PySide6-basiert mit modernem Interface
 
 ### Zu Implementieren (später)
@@ -52,11 +51,6 @@ sudo apt install ripgrep
 pip install PyPDF2
 ```
 
-### Mock-Daten neu generieren
-```bash
-python -c "from app.core.mock_data_generator import generate_mock_data; from app.core.config import MOCK_DATA_DIR; generate_mock_data(MOCK_DATA_DIR, 5, 50)"
-```
-
 ### Index zurücksetzen
 ```bash
 rm data/index.db
@@ -75,13 +69,12 @@ PapaGUI/
 │   │   ├── __init__.py
 │   │   ├── config.py           # Konfiguration
 │   │   ├── index_manager.py    # SQLite-Index & Suche
-│   │   └── mock_data_generator.py  # Test-Datengenerator
 │   └── gui/
 │       ├── __init__.py
 │       ├── main_window.py      # Hauptfenster
 │       └── viewer.py           # Datei-Viewer
+├── Bauvorhaben/               # Reale Projektdaten (Indexquelle)
 └── data/
-    ├── mock/                   # Mock-Kundendaten
     └── index.db               # SQLite-Index (wird auto-erstellt)
 ```
 
