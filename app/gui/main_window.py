@@ -16,7 +16,14 @@ from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
 from PySide6.QtGui import QIcon
 from datetime import datetime
 
-from app.core.config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, DB_FILE, get_default_index_source
+from app.core.config import (
+    WINDOW_TITLE,
+    WINDOW_WIDTH,
+    WINDOW_HEIGHT,
+    DB_FILE,
+    get_configured_index_source,
+    save_index_source,
+)
 from app.core.index_manager import IndexManager
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
@@ -26,15 +33,23 @@ from app.gui.settings_popup import SettingsPopup
 class IndexingWorker(QThread):
     progress = Signal(int)
     
-    def __init__(self, db_path: Path, base_path: Path):
+    def __init__(self, db_path: Path, base_path: Path, replace_existing: bool = False):
         super().__init__()
         self.db_path = db_path
         self.base_path = base_path
+        self.replace_existing = replace_existing
+        self.error = ""
+        self.indexed_count = 0
     
     def run(self):
         manager = IndexManager(self.db_path)
         try:
-            manager.index_directory(self.base_path)
+            self.indexed_count = manager.index_directory(
+                self.base_path,
+                replace_existing=self.replace_existing,
+            )
+        except Exception as exc:
+            self.error = str(exc)
         finally:
             manager.close()
 
@@ -86,7 +101,8 @@ class MainWindow(QMainWindow):
         self.index_manager = IndexManager(DB_FILE)
         self.current_customer = None
         self.index_worker = None
-        self.index_source = get_default_index_source()
+        self.index_source = get_configured_index_source()
+        self.pending_index_source = None
         self.theme_manager = ThemeManager()
         self.settings_popup = None
         self.search_generation = 0
@@ -290,8 +306,14 @@ class MainWindow(QMainWindow):
             self.settings_popup.close()
             return
 
-        self.settings_popup = SettingsPopup(self.theme_manager.mode, self.theme_manager.accent, self)
+        self.settings_popup = SettingsPopup(
+            self.theme_manager.mode,
+            self.theme_manager.accent,
+            self,
+            data_path=self.index_source,
+        )
         self.settings_popup.appearanceChanged.connect(self.on_settings_appearance_changed)
+        self.settings_popup.dataPathChanged.connect(self.on_settings_data_path_changed)
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
 
@@ -327,6 +349,36 @@ class MainWindow(QMainWindow):
         self.theme_manager.set_accent(accent)
         self.theme_manager.save()
         self.apply_theme()
+
+    def on_settings_data_path_changed(self, path_value: str):
+        new_source = Path(path_value).expanduser().resolve()
+        if not new_source.exists() or not new_source.is_dir():
+            QMessageBox.warning(self, "Datenquelle", "Der ausgewählte Datenordner ist ungültig.")
+            return
+        if self.index_worker is not None and self.index_worker.isRunning():
+            QMessageBox.information(
+                self,
+                "Indexierung läuft",
+                "Bitte warten, bis die aktuelle Indexierung abgeschlossen ist.",
+            )
+            return
+        if new_source == self.index_source and self.index_manager.has_index_for_root(new_source):
+            save_index_source(new_source)
+            self.status_label.setText(f"Datenquelle aktiv ✓ ({new_source.name})")
+            return
+
+        self.search_generation += 1
+        self._cancel_outdated_searches()
+        self.search_debounce.stop()
+        self.search_input.setEnabled(False)
+        self.search_button.setEnabled(False)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText(f"Baue Index für {new_source} neu auf …")
+        self.pending_index_source = new_source
+        self.index_worker = IndexingWorker(DB_FILE, new_source, replace_existing=True)
+        self.index_worker.finished.connect(self.on_indexing_complete)
+        self.index_worker.start()
     
     def check_and_index(self):
         if not self.index_source.exists():
@@ -354,8 +406,25 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Index geladen ✓ ({self.index_source.name})")
     
     def on_indexing_complete(self):
+        worker = self.index_worker
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
-        self.status_label.setText("Index fertig geladen ✓")
+        self.search_input.setEnabled(True)
+        self.search_button.setEnabled(True)
+        if worker is not None and worker.error:
+            self.status_label.setText(f"Indexierung fehlgeschlagen: {worker.error}")
+            QMessageBox.warning(self, "Indexierung fehlgeschlagen", worker.error)
+            self.pending_index_source = None
+        else:
+            if self.pending_index_source is not None:
+                self.index_source = self.pending_index_source
+                save_index_source(self.index_source)
+                self.pending_index_source = None
+            count = worker.indexed_count if worker is not None else 0
+            self._reset_search_results()
+            self.current_customer = None
+            self.file_list.clear()
+            self.status_label.setText(f"Index fertig geladen ✓ ({count} Dateien)")
         self.index_worker = None
     
     def _create_result_groups(self, parent_layout: QVBoxLayout):

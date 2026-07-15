@@ -4,10 +4,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QColorDialog,
     QFrame,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QLineEdit,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -19,8 +21,9 @@ class SettingsPopup(QFrame):
     """Centered settings popup with navigation and content panels."""
 
     appearanceChanged = Signal(str, str)
+    dataPathChanged = Signal(str)
 
-    def __init__(self, mode: str, accent: str, parent=None):
+    def __init__(self, mode: str, accent: str, parent=None, data_path=None):
         super().__init__(
             parent,
             Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint,
@@ -32,6 +35,7 @@ class SettingsPopup(QFrame):
 
         self.selected_mode = mode if mode in {"light", "dark"} else "light"
         self.selected_accent = QColor(accent).name() if QColor(accent).isValid() else "#2db89d"
+        self.data_path = str(data_path or "")
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -95,15 +99,95 @@ class SettingsPopup(QFrame):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(10)
 
-        heading = QLabel("Einstellungen")
+        heading = QLabel("Allgemein")
         heading.setObjectName("PopupSectionTitle")
         layout.addWidget(heading)
 
-        status = QLabel("in arbeit")
-        status.setObjectName("PopupCaption")
-        layout.addWidget(status)
+        path_label = QLabel("Datenquelle")
+        path_label.setObjectName("PopupCaption")
+        layout.addWidget(path_label)
+
+        path_row = QHBoxLayout()
+        path_row.setSpacing(8)
+        self.data_path_input = QLineEdit(self.data_path)
+        self.data_path_input.setPlaceholderText("Ordner mit den zu durchsuchenden Daten")
+        self.data_path_input.setCursorPosition(0)
+        self.data_path_input.textChanged.connect(self._clear_path_error)
+        path_row.addWidget(self.data_path_input, 1)
+
+        browse_button = QPushButton("Durchsuchen")
+        browse_button.setObjectName("GhostButton")
+        browse_button.clicked.connect(self.choose_data_path)
+        path_row.addWidget(browse_button)
+        layout.addLayout(path_row)
+
+        hint = QLabel(
+            "Beim Übernehmen wird der lokale Index für diese Datenquelle neu aufgebaut."
+        )
+        hint.setObjectName("PopupCaption")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.path_error_label = QLabel("")
+        self.path_error_label.setObjectName("SettingsError")
+        self.path_error_label.setWordWrap(True)
+        layout.addWidget(self.path_error_label)
+
+        apply_row = QHBoxLayout()
+        apply_row.addStretch()
+        apply_button = QPushButton("Pfad übernehmen")
+        apply_button.clicked.connect(self.apply_data_path)
+        apply_row.addWidget(apply_button)
+        layout.addLayout(apply_row)
         layout.addStretch()
         return page
+
+    def choose_data_path(self):
+        start_path = self.data_path_input.text().strip() or self.data_path
+        popup_position = self.pos()
+
+        # A native file dialog takes focus away from a Qt.Popup. Temporarily
+        # keep this widget alive so it can be restored after the dialog closes.
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        try:
+            selected_path = QFileDialog.getExistingDirectory(
+                self.parentWidget(),
+                "Datenquelle auswählen",
+                start_path,
+                QFileDialog.ShowDirsOnly,
+            )
+        finally:
+            self.setAttribute(Qt.WA_DeleteOnClose, True)
+            self.move(popup_position)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+        if selected_path:
+            self.data_path_input.setText(selected_path)
+            self.data_path_input.setCursorPosition(0)
+
+    def apply_data_path(self):
+        from pathlib import Path
+
+        raw_path = self.data_path_input.text().strip()
+        if not raw_path:
+            self.path_error_label.setText("Bitte einen Datenordner auswählen.")
+            return
+
+        path = Path(raw_path).expanduser()
+        if not path.exists() or not path.is_dir():
+            self.path_error_label.setText("Der ausgewählte Datenordner existiert nicht.")
+            return
+
+        resolved_path = path.resolve()
+        self.data_path = str(resolved_path)
+        self.data_path_input.setText(self.data_path)
+        self.dataPathChanged.emit(self.data_path)
+        self.close()
+
+    def _clear_path_error(self):
+        self.path_error_label.setText("")
 
     def _build_appearance_page(self) -> QWidget:
         page = QWidget()

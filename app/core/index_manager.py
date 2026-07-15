@@ -115,7 +115,7 @@ class IndexManager:
         cursor.execute("SELECT 1 FROM indexed_roots WHERE root_path = ? LIMIT 1", (root,))
         return cursor.fetchone() is not None
     
-    def index_directory(self, base_path: Path):
+    def index_directory(self, base_path: Path, replace_existing: bool = False):
         if not base_path.exists():
             raise FileNotFoundError(f"Index-Pfad existiert nicht: {base_path}")
 
@@ -123,8 +123,12 @@ class IndexManager:
         indexed_count = 0
         root = str(base_path)
 
-        cursor.execute("DELETE FROM files WHERE index_root = ?", (root,))
-        cursor.execute("DELETE FROM files WHERE path LIKE ?", (f"{root}{os.sep}%",))
+        if replace_existing:
+            cursor.execute("DELETE FROM files")
+            cursor.execute("DELETE FROM indexed_roots")
+        else:
+            cursor.execute("DELETE FROM files WHERE index_root = ?", (root,))
+            cursor.execute("DELETE FROM files WHERE path LIKE ?", (f"{root}{os.sep}%",))
         
         for filepath in base_path.rglob('*'):
             if filepath.is_file():

@@ -446,6 +446,12 @@ def build_stylesheet(mode: str, accent: str) -> str:
         min-width: 46px;
     }}
 
+    QLabel#SettingsError {{
+        color: #d84a4a;
+        border: none;
+        background: transparent;
+    }}
+
     QLabel#PopupSectionTitle {{
         font-size: 14px;
         font-weight: 700;
