@@ -8,11 +8,11 @@ if __name__ == "__main__" and __package__ is None:
 
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
     QMessageBox, QProgressBar, QToolButton, QComboBox, QCompleter
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QStringListModel
+from PySide6.QtCore import Qt, QSize, QTimer, QStringListModel
 from PySide6.QtGui import QIcon
 from datetime import datetime
 
@@ -21,136 +21,29 @@ from app.core.config import (
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
     DB_FILE,
+    CUSTOMER_DB_FILE,
     get_configured_index_source,
     load_index_options,
     save_index_options,
     save_index_source,
 )
 from app.core.index_manager import IndexManager
+from app.core.customer_repository import CustomerRepository
 from app.core.index_diagnostics import IndexDiagnosticsService
 from app.core.search_models import SearchFilters, SearchHistory
 from app.core.index_store import (
     activate_index,
     available_backups,
-    create_build_path,
     create_restore_build,
-    seed_build_database,
     validate_index,
 )
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
+from app.gui.panels import CustomerDetailsPanel
 from app.gui.widgets import AppButton, HighlightDelegate, SearchResultSection
+from app.gui.workers import IndexingWorker, SearchWorker
 from app.services import FileSystemMonitor
-
-
-class IndexingWorker(QThread):
-    progress = Signal(int, str)
-    
-    def __init__(self, db_path: Path, base_path: Path, options, full_rebuild: bool = False):
-        super().__init__()
-        self.db_path = db_path
-        self.base_path = base_path
-        self.options = options
-        self.full_rebuild = full_rebuild
-        self.error = ""
-        self.indexed_count = 0
-        self.changed_count = 0
-        self.build_path = None
-        self.no_changes = False
-        self.cancelled = False
-    
-    def run(self):
-        build_path = create_build_path(self.db_path)
-        self.build_path = build_path
-        manager = None
-        try:
-            seed_build_database(
-                self.db_path,
-                build_path,
-                incremental=not self.full_rebuild,
-            )
-            manager = IndexManager(build_path, options=self.options)
-            self.indexed_count = manager.synchronize_directory(
-                self.base_path,
-                full_rebuild=self.full_rebuild,
-                should_cancel=self.isInterruptionRequested,
-                progress_callback=self.progress.emit,
-            )
-            self.changed_count = getattr(manager, "last_change_count", self.indexed_count)
-            manager.close()
-            manager = None
-            validate_index(build_path)
-            if self.changed_count == 0 and self.db_path.exists():
-                build_path.unlink(missing_ok=True)
-                self.build_path = None
-                self.no_changes = True
-        except Exception as exc:
-            self.error = str(exc)
-            self.cancelled = isinstance(exc, InterruptedError)
-        finally:
-            if manager is not None:
-                manager.close()
-            if self.error and build_path.exists():
-                build_path.unlink(missing_ok=True)
-                self.build_path = None
-
-
-class SearchWorker(QThread):
-    """Run one search type with its own thread-local database connection."""
-
-    completed = Signal(int, str, object, str)
-
-    def __init__(
-        self,
-        db_path: Path,
-        generation: int,
-        category: str,
-        query: str,
-        result_limit: int,
-        filters: SearchFilters,
-        page: int,
-        page_size: int,
-    ):
-        super().__init__()
-        self.db_path = db_path
-        self.generation = generation
-        self.category = category
-        self.query = query
-        self.result_limit = result_limit
-        self.filters = filters
-        self.page = page
-        self.page_size = page_size
-
-    def run(self):
-        manager = None
-        try:
-            manager = IndexManager(self.db_path, initialize=False)
-            if self.category == "folders":
-                results = manager.search_folders_page(
-                    self.query, self.filters, self.page, self.page_size
-                )
-            elif self.category == "files":
-                results = manager.search_files_page(
-                    self.query, self.filters, self.page, self.page_size
-                )
-            elif self.category == "text":
-                results = manager.search_text_page(
-                    self.query,
-                    self.filters,
-                    self.page,
-                    self.page_size,
-                    maximum=self.result_limit,
-                    should_cancel=self.isInterruptionRequested,
-                )
-            else:
-                raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
-            self.completed.emit(self.generation, self.category, results, "")
-        except Exception as exc:
-            self.completed.emit(self.generation, self.category, [], str(exc))
-        finally:
-            if manager is not None:
-                manager.close()
 
 
 class MainWindow(QMainWindow):
@@ -162,11 +55,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(WINDOW_TITLE)
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
         
-        self.index_manager = IndexManager(DB_FILE)
+        self.index_options = load_index_options()
+        self.index_manager = IndexManager(DB_FILE, options=self.index_options)
+        self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
         self.current_customer = None
         self.index_worker = None
         self.index_source = get_configured_index_source()
-        self.index_options = load_index_options()
         self.pending_index_source = None
         self.theme_manager = ThemeManager()
         self.diagnostics_service = IndexDiagnosticsService()
@@ -289,67 +183,14 @@ class MainWindow(QMainWindow):
         self.details_splitter.setObjectName("DetailsSplitter")
         self.details_splitter.setChildrenCollapsible(False)
 
-        details_widget = QWidget()
-        details_widget.setObjectName("CustomerDetailsSection")
-        details_widget.setMinimumWidth(280)
-        
-        details_layout = QVBoxLayout(details_widget)
-        details_layout.setContentsMargins(14, 12, 14, 14)
-        details_layout.setSpacing(10)
-
-        details_title = QLabel("Kundendetails")
-        details_title.setObjectName("SectionTitle")
-        details_layout.addWidget(details_title)
-        
-        info_layout = QGridLayout()
-        info_layout.setHorizontalSpacing(18)
-        info_layout.setVerticalSpacing(3)
-
-        name_caption = QLabel("Ordner")
-        name_caption.setObjectName("StatCaption")
-        info_layout.addWidget(name_caption, 0, 0, 1, 2)
-        self.customer_name_label = QLabel("-")
-        self.customer_name_label.setObjectName("StatValue")
-        self.customer_name_label.setWordWrap(True)
-        info_layout.addWidget(self.customer_name_label, 1, 0, 1, 2)
-        
-        files_caption = QLabel("Dateien")
-        files_caption.setObjectName("StatCaption")
-        info_layout.addWidget(files_caption, 2, 0)
-        self.file_count_label = QLabel("0")
-        self.file_count_label.setObjectName("StatValue")
-        info_layout.addWidget(self.file_count_label, 3, 0)
-        
-        size_caption = QLabel("Größe")
-        size_caption.setObjectName("StatCaption")
-        info_layout.addWidget(size_caption, 2, 1)
-        self.size_label = QLabel("0 B")
-        self.size_label.setObjectName("StatValue")
-        info_layout.addWidget(self.size_label, 3, 1)
-        
-        modified_caption = QLabel("Zuletzt geändert")
-        modified_caption.setObjectName("StatCaption")
-        info_layout.addWidget(modified_caption, 4, 0, 1, 2)
-        self.modified_label = QLabel("-")
-        self.modified_label.setObjectName("StatValue")
-        info_layout.addWidget(self.modified_label, 5, 0, 1, 2)
-        info_layout.setColumnStretch(0, 1)
-        info_layout.setColumnStretch(1, 1)
-        details_layout.addLayout(info_layout)
-        
-        folder_caption = QLabel("Fachordner")
-        folder_caption.setObjectName("StatCaption")
-        details_layout.addWidget(folder_caption)
-        self.service_types_label = QLabel("-")
-        self.service_types_label.setObjectName("StatValue")
-        details_layout.addWidget(self.service_types_label)
-        
-        file_caption = QLabel("Dateien")
-        file_caption.setObjectName("StatCaption")
-        details_layout.addWidget(file_caption)
-        self.file_list = QListWidget()
-        self.file_list.itemDoubleClicked.connect(self.on_file_selected)
-        details_layout.addWidget(self.file_list)
+        details_widget = CustomerDetailsPanel(self.customer_repository)
+        self.customer_details_panel = details_widget
+        self.customer_name_label = details_widget.customer_name_label
+        self.file_count_label = details_widget.file_count_label
+        self.size_label = details_widget.size_label
+        self.modified_label = details_widget.modified_label
+        self.service_types_label = details_widget.service_types_label
+        self.file_list = details_widget.file_list
 
         viewer_widget = QWidget()
         viewer_widget.setObjectName("FileViewerSection")
@@ -363,6 +204,9 @@ class MainWindow(QMainWindow):
         viewer_layout.addWidget(viewer_title)
 
         self.file_viewer = FileViewer()
+        self.customer_details_panel.fileActivated.connect(
+            lambda path: self.file_viewer.open_file(Path(path))
+        )
         viewer_layout.addWidget(self.file_viewer)
 
         self.details_splitter.addWidget(details_widget)
@@ -644,10 +488,12 @@ class MainWindow(QMainWindow):
         try:
             activate_index(DB_FILE, build_path)
         finally:
-            self.index_manager = IndexManager(DB_FILE)
+            self.index_manager = IndexManager(DB_FILE, options=self.index_options)
+        self._refresh_search_facets()
 
     def on_index_options_changed(self, options):
         self.index_options = options
+        self.index_manager.options = options
         save_index_options(options)
         self.status_label.setText("Indexeinstellungen gespeichert")
         self._start_filesystem_monitor()
@@ -744,7 +590,7 @@ class MainWindow(QMainWindow):
             return
         configurations = (
             (self.domain_filter, "Alle Themen", facets.get("domains", [])),
-            (self.year_filter, "Alle Jahre", facets.get("years", [])),
+            (self.year_filter, "Alle Jahre/Vorlagen", facets.get("years", [])),
             (self.file_type_filter, "Alle Dateitypen", facets.get("file_types", [])),
         )
         for combo, empty_label, values in configurations:
@@ -832,6 +678,7 @@ class MainWindow(QMainWindow):
             self._current_search_filters(),
             page,
             self.search_page_size,
+            CUSTOMER_DB_FILE,
         )
         worker.completed.connect(self._on_search_completed)
         worker.finished.connect(lambda worker=worker: self._release_search_worker(worker))
@@ -886,6 +733,8 @@ class MainWindow(QMainWindow):
             file_count = int(result.get("file_count") or 0)
             relative_path = result.get("relative_path") or ""
             suffix = f"  ·  {relative_path}" if relative_path and relative_path != name else ""
+            if result.get("customer_match"):
+                suffix = f"  ·  Kunde · {relative_path}"
             item = QListWidgetItem(f"{name}  ·  {file_count} Dateien{suffix}")
             item.setData(self.RESULT_KIND_ROLE, "folder")
             item.setData(self.RESULT_VALUE_ROLE, result["folder_path"])
@@ -986,21 +835,7 @@ class MainWindow(QMainWindow):
     def show_folder_details(self, folder_path: str):
         self.current_customer = None
         details = self.index_manager.get_folder_details(folder_path)
-        self.customer_name_label.setText(details["folder_name"])
-        self.file_count_label.setText(str(details["file_count"]))
-        self.size_label.setText(f"{details['total_size'] / 1024 / 1024:.2f} MB")
-        if details["last_modified"]:
-            modified = datetime.fromisoformat(details["last_modified"])
-            self.modified_label.setText(modified.strftime("%d.%m.%Y %H:%M"))
-        else:
-            self.modified_label.setText("-")
-        self.service_types_label.setText(", ".join(details["service_types"]) or "-")
-        self.file_list.clear()
-        for file_info in details["files"]:
-            item = QListWidgetItem(file_info["filename"])
-            item.setData(Qt.UserRole, file_info["path"])
-            item.setToolTip(file_info["path"])
-            self.file_list.addItem(item)
+        self.customer_details_panel.set_folder(details)
         self.status_label.setText(
             f"✓ Ordner: {details['folder_name']} mit {details['file_count']} Dateien"
         )
@@ -1023,6 +858,7 @@ class MainWindow(QMainWindow):
             self.filesystem_monitor.requestInterruption()
             self.filesystem_monitor.wait()
         self.index_manager.close()
+        self.customer_repository.close()
         event.accept()
 
 

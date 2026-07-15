@@ -151,6 +151,14 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background: transparent;
     }}
 
+    QLabel#CustomerSummary {{
+        color: {text};
+        background-color: {chip};
+        border: 1px solid {border};
+        border-radius: 8px;
+        padding: 8px;
+    }}
+
     QToolButton#SettingsButton {{
         background-color: {surface};
         border: 1px solid {border};
@@ -164,7 +172,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
         background-color: {item_hover};
     }}
 
-    QLineEdit, QComboBox, QSpinBox, QTextEdit, QListWidget, QTreeWidget, QTableWidget, QTabWidget::pane {{
+    QLineEdit, QComboBox, QSpinBox, QTextEdit, QPlainTextEdit, QListWidget, QTreeWidget, QTableWidget, QTabWidget::pane {{
         background-color: {surface};
         color: {text};
         border: 1px solid {border};

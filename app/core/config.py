@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 BAUVORHABEN_DIR = BASE_DIR / "Bauvorhaben"
 DB_FILE = DATA_DIR / "index.db"
+CUSTOMER_DB_FILE = DATA_DIR / "customers.db"
 
 INDEX_BATCH_SIZE = 100
 
@@ -28,7 +29,8 @@ class IndexOptions:
     max_extracted_characters: int = 2_000_000
     result_limit: int = 200
     ocr_enabled: bool = True
-    ocr_max_pages: int = 25
+    ocr_max_pages: int = 5
+    ocr_timeout_seconds: int = 10
     content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
     excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
 
@@ -86,6 +88,9 @@ def load_index_options() -> IndexOptions:
         ocr_enabled=str(settings.value("index/ocr_enabled", defaults.ocr_enabled)).lower()
         in {"1", "true", "yes"},
         ocr_max_pages=int(settings.value("index/ocr_max_pages", defaults.ocr_max_pages)),
+        ocr_timeout_seconds=int(
+            settings.value("index/ocr_timeout_seconds", defaults.ocr_timeout_seconds)
+        ),
         content_extensions=str(
             settings.value("index/content_extensions", defaults.content_extensions)
         ),
@@ -105,6 +110,7 @@ def save_index_options(options: IndexOptions):
     settings.setValue("search/result_limit", values["result_limit"])
     settings.setValue("index/ocr_enabled", values["ocr_enabled"])
     settings.setValue("index/ocr_max_pages", values["ocr_max_pages"])
+    settings.setValue("index/ocr_timeout_seconds", values["ocr_timeout_seconds"])
     settings.setValue("index/content_extensions", values["content_extensions"])
     settings.setValue("index/excluded_folders", values["excluded_folders"])
     settings.sync()

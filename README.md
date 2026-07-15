@@ -1,80 +1,89 @@
+## Datenstruktur
+
+Die Indexierung behandelt alle Fachthemen gleich. Es gibt keine Sonderlogik für „Blower Door“.
+
+```text
+Bauvorhaben/
+├── Baubegleitung/
+├── Blower Door/
+├── DEKRA/
+└── Elektroplanung/
+    └── Jahr oder Vorlagen/
+        └── Projekt- bzw. Kundenordner/
+            └── weitere Unterordner und Dateien
+```
+
+Weitere Fachthemen können als neue Ordner der ersten Ebene ergänzt werden und werden automatisch erkannt.
+
 ## Funktionen
 
-### Implementiert (v0.1)
-- **Kundensuche**: Suche nach Kundennamen mit lokaler Indexierung
-- **Dateiindex**: SQLite-basierter Index für schnelle Metadaten-Abfragen
-- **Dateisystem-Browser**: Ordnerstruktur: `[Dienstleistungstyp]/[Jahr]/[Kundenname & Ort]/[Subfolder]`
-- **Multi-Format Viewer**:
-  - PDFs (Basis + Text-Extract)
-  - Bilder (JPG, PNG, GIF, BMP)
-  - Excel-Dateien (XLSX/XLS) - Tabellenvorschau
-  - Textdateien (TXT, CSV, LOG, MD)
-  - Word-Dokumente (DOCX)
-- **Volltextsuche**: ripgrep-Integration für Textdateien
-- **Lokaler Inhaltsindex**: SQLite FTS5 für PDF-, Word-, Excel- und Textdateien
-- **Inkrementelle Indexierung**: Verarbeitet nur neue, geänderte oder gelöschte Dateien
-- **Sichere Indexgenerationen**: Aufbau in einer separaten Datei mit drei Backups
-- **OCR-Fallback**: Optional für gescannte PDFs (Tesseract + Poppler)
-- **GUI**: PySide6-basiert mit modernem Interface
-
-### Zu Implementieren (später)
-- Reiter für verschiedene Kundenviews
-- PDF-Vorschau (vollständig, nicht nur Text)
-- Thumbnails für Bilder
-- Favoriten/Lesezeichen
-- NAS-Anbindung und Authentifizierung
-- Erweiterte Filter (Datum, Dateityp, Größe)
-- Export-Funktionen
-- Backup-Management
-- Logging & Debugging-Tools
-
-## Projektstruktur
-
-```
-PapaGUI/
-├── main.py                      # Entry Point
-├── requirements.txt             # Python-Abhängigkeiten
-├── app/
-│   ├── __init__.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py           # Konfiguration
-│   │   ├── index_manager.py    # SQLite-Index & Suche
-│   └── gui/
-│       ├── __init__.py
-│       ├── main_window.py      # Hauptfenster
-│       └── viewer.py           # Datei-Viewer
-├── Bauvorhaben/               # Reale Projektdaten (Indexquelle)
-└── data/
-    └── index.db               # SQLite-Index (wird auto-erstellt)
-```
+- Gemeinsame Suche nach Ordnern/Kunden, Dateinamen und Dokumentinhalten
+- Live-Ordnersuche beim Tippen; parallele vollständige Suche mit Enter oder „Suchen“
+- Filter nach Fachthema, Jahr/Vorlagen und Dateityp
+- Relevanzranking, hervorgehobene Treffer, getrennte Pagination und Suchverlauf
+- SQLite-Metadatenindex und FTS5-Volltextindex
+- Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
+- Optionaler OCR-Fallback für gescannte PDFs
+- Inkrementelle Indexierung im Hintergrund
+- Sicherer Indexaufbau in einer temporären Datenbank, atomarer Wechsel und drei Sicherungen
+- Automatische, plattformübergreifende Überwachung der Datenquelle
+- Indexdiagnose mit Integrität, Laufzeit, Datei-/Ordnerzahlen und Extraktionsfehlern
+- PDF-Viewer mit Seitensteuerung, Zoom und Suche
+- Excel-Viewer mit Tabellenblättern und Zellensuche
+- Text-/Word-Viewer mit Suche sowie externes Öffnen von Datei oder Ordner
+- Separate Kundenverwaltung mit Entität, Stammdaten, Kontakten, Notizen und Tags
+- Light-/Dark-Theme und frei wählbare Akzentfarbe
 
 ## Architektur
 
-### 1. **Dateiindexierung**
-- SQLite-Datenbank speichert Metadaten (Pfad, Dateiname, Größe, Datum, Kunde, etc.)
-- Automatischer inkrementeller Abgleich beim Start
-- Dokumentextrakte und normale Textdateien werden lokal mit FTS5 indexiert
-- Ein neuer Index wird separat aufgebaut und erst nach erfolgreicher Prüfung aktiviert
-- Bis zu drei ältere Indexstände können über die Einstellungen geladen werden
-- Ordnersystem bleibt als "Source of Truth"
+```text
+app/
+├── core/
+│   ├── config.py                 Konfiguration und persistente Optionen
+│   ├── index_manager.py          Indexierung, Extraktion und Suche
+│   ├── index_store.py            Staging, Validierung und Indexgenerationen
+│   ├── index_diagnostics.py      Lesbare Index-Zustandsberichte
+│   ├── search_models.py          Filter, Seitenmodell und Suchverlauf
+│   ├── customer_models.py        Kunden- und Kontaktmodelle
+│   └── customer_repository.py    Separate Kunden-Datenbank
+├── services/
+│   ├── filesystem_monitor.py     Hintergrundüberwachung der Datenquelle
+│   └── document_converter.py     Optionale Legacy-Konvertierung
+└── gui/
+    ├── dialogs/                  Kundendaten-Editor
+    ├── panels/                   Ordner- und Kundendetails
+    ├── viewers/                  PDF-, Tabellen- und Textviewer
+    ├── widgets/                  Wiederverwendbare Buttons und Suchwidgets
+    ├── workers/                  Such- und Index-Threads
+    ├── main_window.py
+    ├── settings_popup.py
+    └── theme.py
+```
 
-### 2. **Suchstrategie**
-- **Datei-/Pfadsuche**: SQL-Queries gegen lokalen Index
-- **Volltextsuche**: ripgrep CLI für Text-Dateien (schnell & robust)
+`data/index.db` ist austauschbar und kann jederzeit neu erzeugt werden. `data/customers.db` enthält die manuell gepflegten Kundendaten und wird bei einer Neuindexierung nicht verändert.
 
-### 3. **GUI (PySide6)**
-- Linke Seite: Kundensuche & -liste
-- Rechte Seite: Kundendetails + Datei-Viewer (Tabs)
-- Status-Bar für Rückmeldungen
+## Start
 
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py
+```
 
+Unter Windows werden entsprechend `.venv\Scripts\pip.exe` und `.venv\Scripts\python.exe` verwendet. Die Anwendung nicht mit `sudo` starten.
 
-## Vorschläge
+Optionale Systemprogramme:
 
-### Papa
-- Dateipfad im Finder öffnen für Papa
-    - damit man es in den Mails finden kann
-- Imap server mit einbinden
-- Automatische indizierung
+- `ripgrep` als Textsuch-Fallback
+- Tesseract und Poppler für OCR
+- LibreOffice sowie `catdoc` oder `antiword` für alte Office-Dateien
 
+Fehlende optionale Programme verhindern den normalen Start nicht.
+
+## Tests
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
+```
+
+Die Tests prüfen unter anderem generische Fachthemen, inkrementelle Indexierung, Diagnosewerte, Filter/Pagination, Dateisystemänderungen, Viewer und Kunden-CRUD.

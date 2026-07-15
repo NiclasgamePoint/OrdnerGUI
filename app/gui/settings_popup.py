@@ -297,6 +297,12 @@ class SettingsPopup(QFrame):
         self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
         form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
 
+        self.ocr_timeout_spin = QSpinBox()
+        self.ocr_timeout_spin.setRange(5, 600)
+        self.ocr_timeout_spin.setSuffix(" s")
+        self.ocr_timeout_spin.setValue(self.index_options.ocr_timeout_seconds)
+        form.addRow(self._form_label("OCR-Zeitlimit pro PDF"), self.ocr_timeout_spin)
+
         self.content_extensions_input = QLineEdit(self.index_options.content_extensions)
         self.content_extensions_input.setPlaceholderText("pdf, docx, xlsx, txt, …")
         form.addRow(self._form_label("Durchsuchbare Formate"), self.content_extensions_input)
@@ -351,6 +357,8 @@ class SettingsPopup(QFrame):
             "success": "Erfolgreich",
             "empty": "Ohne extrahierbaren Text",
             "error": "Fehler",
+            "timeout": "OCR-Zeitlimit erreicht",
+            "encrypted": "Verschlüsselt/kennwortgeschützt",
             "skipped_large": "Wegen Größe übersprungen",
             "not_applicable": "Nur Metadaten",
         }
@@ -371,7 +379,7 @@ class SettingsPopup(QFrame):
         for status, count in sorted(diagnostics.status_counts.items()):
             lines.append(f"  {status_labels.get(status, status)}: {count}")
         if diagnostics.errors:
-            lines.extend(["", "Letzte Extraktionsfehler:"])
+            lines.extend(["", "Extraktionshinweise:"])
             for entry in diagnostics.errors:
                 lines.append(f"  {entry['path']}: {entry['error']}")
         self.diagnostics_text.setPlainText("\n".join(lines))
@@ -388,6 +396,7 @@ class SettingsPopup(QFrame):
             result_limit=self.result_limit_spin.value(),
             ocr_enabled=self.ocr_checkbox.isChecked(),
             ocr_max_pages=self.ocr_pages_spin.value(),
+            ocr_timeout_seconds=self.ocr_timeout_spin.value(),
             content_extensions=self.content_extensions_input.text().strip(),
             excluded_folders=self.excluded_folders_input.text().strip(),
         )

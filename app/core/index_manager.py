@@ -10,7 +10,9 @@ import re
 import sys
 import json
 import hashlib
+import importlib.util
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tempfile import TemporaryDirectory
 
 import openpyxl
@@ -305,7 +307,7 @@ class IndexManager:
                 cursor.execute("INSERT OR IGNORE INTO seen_files(path) VALUES (?)", (path_text,))
                 existing = cursor.execute(
                     """
-                    SELECT file_size, modified_ns, extractor_version
+                    SELECT file_size, modified_ns, extractor_version, content_error
                     FROM files WHERE path = ?
                     """,
                     (path_text,),
@@ -319,6 +321,10 @@ class IndexManager:
                         filepath.suffix.lower().lstrip(".")
                         not in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types)
                         or existing["extractor_version"] == self.EXTRACTOR_VERSION
+                    )
+                    and not (
+                        "PyCryptodome is required" in (existing["content_error"] or "")
+                        and importlib.util.find_spec("Crypto") is not None
                     )
                 )
                 if not unchanged:
@@ -339,6 +345,7 @@ class IndexManager:
         changed_count += max(cursor.rowcount, 0)
         cursor.execute("DELETE FROM folders WHERE path NOT IN (SELECT path FROM seen_folders)")
         changed_count += max(cursor.rowcount, 0)
+        changed_count += self._normalize_content_statuses()
         cursor.execute("DELETE FROM indexed_roots")
         cursor.execute(
             "INSERT INTO indexed_roots(root_path, last_indexed) VALUES (?, ?)",
@@ -409,8 +416,8 @@ class IndexManager:
                 filepath.name,
                 stat.st_size,
                 file_type,
-                datetime.fromtimestamp(stat.st_ctime),
-                datetime.fromtimestamp(stat.st_mtime),
+                datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 year,
                 service_type,
                 customer_name,
@@ -482,8 +489,38 @@ class IndexManager:
         try:
             content = self._extract_document_text(filepath, file_type)
             return content, ("success" if content.strip() else "empty"), ""
+        except TimeoutError as exc:
+            return "", "timeout", str(exc)
         except Exception as exc:
-            return "", "error", str(exc)
+            message = str(exc)
+            if "encrypted" in message.casefold() or "password" in message.casefold():
+                return "", "encrypted", message
+            return "", "error", message
+
+    def _normalize_content_statuses(self) -> int:
+        """Migrate older generic errors into actionable diagnostic categories."""
+        changed = 0
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE files SET content_status = 'encrypted'
+            WHERE content_status = 'error'
+              AND (LOWER(content_error) LIKE '%encrypted%'
+                   OR LOWER(content_error) LIKE '%password%')
+            """
+        )
+        changed += max(cursor.rowcount, 0)
+        cursor.execute(
+            """
+            UPDATE files SET content_status = 'timeout'
+            WHERE content_status = 'error'
+              AND (LOWER(content_error) LIKE '%timed out%'
+                   OR LOWER(content_error) LIKE '%futures unfinished%'
+                   OR LOWER(content_error) LIKE '%ocr-zeitlimit%')
+            """
+        )
+        changed += max(cursor.rowcount, 0)
+        return changed
 
     def _extract_document_text(self, filepath: Path, file_type: str) -> str:
         if file_type in self.TEXT_CONTENT_TYPES:
@@ -593,10 +630,26 @@ class IndexManager:
 
         with TemporaryDirectory(prefix="papagui-doc-index-") as temp_dir:
             output_dir = Path(temp_dir)
+            profile_dir = output_dir / "profile"
+            runtime_dir = output_dir / "runtime"
+            config_dir = output_dir / "config"
+            cache_dir = output_dir / "cache"
+            profile_dir.mkdir()
+            runtime_dir.mkdir(mode=0o700)
+            config_dir.mkdir()
+            cache_dir.mkdir()
+            environment = os.environ.copy()
+            environment.update({
+                "XDG_RUNTIME_DIR": str(runtime_dir),
+                "XDG_CONFIG_HOME": str(config_dir),
+                "XDG_CACHE_HOME": str(cache_dir),
+                "SAL_USE_VCLPLUGIN": "svp",
+            })
             result = subprocess.run(
                 [
                     str(libreoffice),
                     "--headless",
+                    f"-env:UserInstallation={profile_dir.as_uri()}",
                     "--convert-to",
                     "txt:Text",
                     "--outdir",
@@ -605,7 +658,8 @@ class IndexManager:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=45,
+                env=environment,
             )
             converted = next(output_dir.glob("*.txt"), None)
             if result.returncode == 0 and converted is not None:
@@ -618,14 +672,17 @@ class IndexManager:
         if pdftoppm is None or tesseract is None:
             return ""
 
+        deadline = time.monotonic() + self.options.ocr_timeout_seconds
         with TemporaryDirectory(prefix="papagui-ocr-") as temp_dir:
             output_prefix = Path(temp_dir) / "page"
             render = subprocess.run(
                 [
                     pdftoppm,
-                    "-png",
+                    "-jpeg",
+                    "-jpegopt",
+                    "quality=85",
                     "-r",
-                    "150",
+                    "120",
                     "-f",
                     "1",
                     "-l",
@@ -635,33 +692,51 @@ class IndexManager:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=180,
+                timeout=max(5, min(15, self.options.ocr_timeout_seconds)),
             )
             if render.returncode != 0:
                 return ""
 
-            parts = []
-            length = 0
-            for image_path in sorted(Path(temp_dir).glob("page-*.png")):
-                ocr = subprocess.run(
+            image_paths = sorted(Path(temp_dir).glob("page-*.jpg"))
+            language = self._get_ocr_language(tesseract)
+
+            def recognize(image_path: Path) -> tuple[Path, str]:
+                remaining = max(1, deadline - time.monotonic())
+                result = subprocess.run(
                     [
                         str(tesseract),
                         str(image_path),
                         "stdout",
                         "-l",
-                        self._get_ocr_language(tesseract),
+                        language,
                     ],
                     capture_output=True,
                     text=True,
                     errors="replace",
-                    timeout=120,
+                    timeout=max(1, min(15, remaining)),
                 )
-                if ocr.returncode == 0 and ocr.stdout.strip():
-                    parts.append(ocr.stdout)
-                    length += len(ocr.stdout)
-                if length >= self.options.max_extracted_characters:
-                    break
-            return self._limit_text("\n".join(parts))
+                return image_path, result.stdout if result.returncode == 0 else ""
+
+            recognized = {}
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(image_paths)))) as executor:
+                futures = [executor.submit(recognize, image_path) for image_path in image_paths]
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"OCR-Zeitlimit von {self.options.ocr_timeout_seconds} Sekunden erreicht"
+                    )
+                try:
+                    for future in as_completed(futures, timeout=remaining):
+                        image_path, text = future.result()
+                        if text.strip():
+                            recognized[image_path] = text
+                except TimeoutError as exc:
+                    raise TimeoutError(
+                        f"OCR-Zeitlimit von {self.options.ocr_timeout_seconds} Sekunden erreicht"
+                    ) from exc
+            return self._limit_text(
+                "\n".join(recognized[path] for path in image_paths if path in recognized)
+            )
 
     def _get_ocr_language(self, tesseract: Path) -> str:
         if self._ocr_language is not None:
@@ -847,6 +922,35 @@ class IndexManager:
             for row in cursor.fetchall()
         ]
         return SearchPage(items, total, page, page_size)
+
+    def get_folder_search_entry(
+        self, folder_path: str, filters: SearchFilters
+    ) -> Optional[Dict]:
+        filter_sql, filter_params = self._metadata_filter_clause(filters, "f")
+        row = self.conn.execute(
+            f"""
+            SELECT folders.path, folders.name, folders.relative_path,
+                (SELECT COUNT(*) FROM files
+                 WHERE files.folder_path = folders.path
+                    OR files.path LIKE folders.path || ? || '%') AS file_count
+            FROM folders
+            WHERE folders.path = ?
+              AND EXISTS (
+                SELECT 1 FROM files f
+                WHERE (f.folder_path = folders.path OR f.path LIKE folders.path || ? || '%')
+                {filter_sql}
+              )
+            """,
+            (os.sep, str(Path(folder_path)), os.sep, *filter_params),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "folder_path": row["path"],
+            "folder_name": row["name"],
+            "relative_path": row["relative_path"],
+            "file_count": row["file_count"],
+        }
 
     def get_folder_details(self, folder_path: str) -> Dict:
         cursor = self.conn.cursor()
@@ -1191,6 +1295,6 @@ if __name__ == "__main__":
     manager.index_directory(index_root)
     
     results = manager.search_customers("Müller")
-    print(f"Gefundene Kunden: {results}")
+    logger.info("Gefundene Kunden: %s", results)
     
     manager.close()
