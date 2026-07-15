@@ -8,8 +8,8 @@ if __name__ == "__main__" and __package__ is None:
 
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QListWidget, QListWidgetItem, QTabWidget, QLabel, QSplitter,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QPushButton,
+    QListWidget, QListWidgetItem, QLabel, QSplitter,
     QMessageBox, QProgressBar, QToolButton
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
@@ -109,36 +109,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(16, 14, 16, 14)
         main_layout.setSpacing(12)
 
-        top_bar = QWidget()
-        top_bar.setObjectName("TopBar")
-        top_bar.setFixedHeight(48)
-        top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(14, 4, 10, 4)
-        top_layout.setSpacing(8)
-
-        title_layout = QVBoxLayout()
-        title_layout.setSpacing(0)
-        page_title = QLabel("PapaGUI")
-        page_title.setObjectName("PageTitle")
-        title_layout.addWidget(page_title)
-        top_layout.addLayout(title_layout)
-        top_layout.addStretch()
-
-        self.settings_button = QToolButton()
-        self.settings_button.setObjectName("SettingsButton")
-        self.settings_button.setFixedSize(32, 32)
-        self.settings_button.setIconSize(QSize(16, 16))
-        icon = QIcon.fromTheme("preferences-system")
-        if icon.isNull():
-            self.settings_button.setText("⚙")
-        else:
-            self.settings_button.setIcon(icon)
-        self.settings_button.setToolTip("Einstellungen öffnen")
-        self.settings_button.clicked.connect(self.open_settings_popup)
-        top_layout.addWidget(self.settings_button)
-
-        main_layout.addWidget(top_bar)
-
         search_card = QWidget()
         search_card.setObjectName("SearchCard")
         search_card.setFixedHeight(50)
@@ -158,11 +128,26 @@ class MainWindow(QMainWindow):
 
         self.search_button = QPushButton("Suchen")
         self.search_button.setObjectName("SearchButton")
+        self.search_button.setMinimumWidth(120)
         self.search_button.clicked.connect(self.start_full_search)
+
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("SettingsButton")
+        self.settings_button.setFixedSize(32, 32)
+        self.settings_button.setIconSize(QSize(16, 16))
+        icon = QIcon.fromTheme("preferences-system")
+        if icon.isNull():
+            self.settings_button.setText("⚙")
+        else:
+            self.settings_button.setIcon(icon)
+        self.settings_button.setToolTip("Einstellungen öffnen")
+        self.settings_button.clicked.connect(self.open_settings_popup)
         
         search_layout.addWidget(search_label)
-        search_layout.addWidget(self.search_input, 1)
+        search_layout.addWidget(self.search_input, 2)
         search_layout.addWidget(self.search_button)
+        search_layout.addStretch(1)
+        search_layout.addWidget(self.settings_button)
         
         main_layout.addWidget(search_card)
         
@@ -183,47 +168,58 @@ class MainWindow(QMainWindow):
         details_card = QWidget()
         details_card.setObjectName("DetailsCard")
         details_outer_layout = QVBoxLayout(details_card)
-        details_outer_layout.setContentsMargins(12, 12, 12, 12)
-        details_outer_layout.setSpacing(10)
+        details_outer_layout.setContentsMargins(10, 10, 10, 10)
 
-        right_widget = QTabWidget()
+        self.details_splitter = QSplitter(Qt.Horizontal)
+        self.details_splitter.setObjectName("DetailsSplitter")
+        self.details_splitter.setChildrenCollapsible(False)
+
+        details_widget = QWidget()
+        details_widget.setObjectName("CustomerDetailsSection")
+        details_widget.setMinimumWidth(280)
         
-        details_layout = QVBoxLayout()
-        details_layout.setContentsMargins(8, 8, 8, 8)
+        details_layout = QVBoxLayout(details_widget)
+        details_layout.setContentsMargins(14, 12, 14, 14)
         details_layout.setSpacing(10)
-        
-        info_layout = QHBoxLayout()
-        info_layout.setSpacing(14)
 
-        name_caption = QLabel("Vorgang/Kunde")
+        details_title = QLabel("Kundendetails")
+        details_title.setObjectName("SectionTitle")
+        details_layout.addWidget(details_title)
+        
+        info_layout = QGridLayout()
+        info_layout.setHorizontalSpacing(18)
+        info_layout.setVerticalSpacing(3)
+
+        name_caption = QLabel("Ordner")
         name_caption.setObjectName("StatCaption")
-        info_layout.addWidget(name_caption)
+        info_layout.addWidget(name_caption, 0, 0, 1, 2)
         self.customer_name_label = QLabel("-")
         self.customer_name_label.setObjectName("StatValue")
-        info_layout.addWidget(self.customer_name_label)
+        self.customer_name_label.setWordWrap(True)
+        info_layout.addWidget(self.customer_name_label, 1, 0, 1, 2)
         
         files_caption = QLabel("Dateien")
         files_caption.setObjectName("StatCaption")
-        info_layout.addWidget(files_caption)
+        info_layout.addWidget(files_caption, 2, 0)
         self.file_count_label = QLabel("0")
         self.file_count_label.setObjectName("StatValue")
-        info_layout.addWidget(self.file_count_label)
+        info_layout.addWidget(self.file_count_label, 3, 0)
         
         size_caption = QLabel("Größe")
         size_caption.setObjectName("StatCaption")
-        info_layout.addWidget(size_caption)
+        info_layout.addWidget(size_caption, 2, 1)
         self.size_label = QLabel("0 B")
         self.size_label.setObjectName("StatValue")
-        info_layout.addWidget(self.size_label)
+        info_layout.addWidget(self.size_label, 3, 1)
         
         modified_caption = QLabel("Zuletzt geändert")
         modified_caption.setObjectName("StatCaption")
-        info_layout.addWidget(modified_caption)
+        info_layout.addWidget(modified_caption, 4, 0, 1, 2)
         self.modified_label = QLabel("-")
         self.modified_label.setObjectName("StatValue")
-        info_layout.addWidget(self.modified_label)
-        
-        info_layout.addStretch()
+        info_layout.addWidget(self.modified_label, 5, 0, 1, 2)
+        info_layout.setColumnStretch(0, 1)
+        info_layout.setColumnStretch(1, 1)
         details_layout.addLayout(info_layout)
         
         folder_caption = QLabel("Fachordner")
@@ -239,16 +235,27 @@ class MainWindow(QMainWindow):
         self.file_list = QListWidget()
         self.file_list.itemDoubleClicked.connect(self.on_file_selected)
         details_layout.addWidget(self.file_list)
-        
-        details_widget = QWidget()
-        details_widget.setLayout(details_layout)
-        
-        self.file_viewer = FileViewer()
-        
-        right_widget.addTab(details_widget, "Kundendetails")
-        right_widget.addTab(self.file_viewer, "Datei-Viewer")
 
-        details_outer_layout.addWidget(right_widget)
+        viewer_widget = QWidget()
+        viewer_widget.setObjectName("FileViewerSection")
+        viewer_widget.setMinimumWidth(360)
+        viewer_layout = QVBoxLayout(viewer_widget)
+        viewer_layout.setContentsMargins(14, 12, 14, 14)
+        viewer_layout.setSpacing(8)
+
+        viewer_title = QLabel("Datei-Viewer")
+        viewer_title.setObjectName("SectionTitle")
+        viewer_layout.addWidget(viewer_title)
+
+        self.file_viewer = FileViewer()
+        viewer_layout.addWidget(self.file_viewer)
+
+        self.details_splitter.addWidget(details_widget)
+        self.details_splitter.addWidget(viewer_widget)
+        self.details_splitter.setStretchFactor(0, 2)
+        self.details_splitter.setStretchFactor(1, 3)
+        self.details_splitter.setSizes([400, 600])
+        details_outer_layout.addWidget(self.details_splitter)
         
         content_splitter.addWidget(left_card)
         content_splitter.addWidget(details_card)
@@ -359,7 +366,7 @@ class MainWindow(QMainWindow):
         results_splitter.setChildrenCollapsible(False)
 
         for category, title in (
-            ("folders", "Ordner & Kunden"),
+            ("folders", "Ordner"),
             ("files", "Dateinamen"),
             ("text", "Dokumentinhalte"),
         ):
@@ -536,7 +543,7 @@ class MainWindow(QMainWindow):
         self.search_counts["text"] = len(results)
 
     def _update_search_status(self):
-        labels = {"folders": "Ordner/Kunden", "files": "Dateien", "text": "Text"}
+        labels = {"folders": "Ordner", "files": "Dateien", "text": "Text"}
         parts = []
         for category in ("folders", "files", "text"):
             count = self.search_counts[category]

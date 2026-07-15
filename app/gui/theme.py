@@ -106,6 +106,21 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border-radius: 14px;
     }}
 
+    QWidget#CustomerDetailsSection,
+    QWidget#FileViewerSection {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 12px;
+    }}
+
+    QLabel#SectionTitle {{
+        color: {text};
+        font-size: 14px;
+        font-weight: 700;
+        border: none;
+        background: transparent;
+    }}
+
     QLabel#PageTitle {{
         font-size: 15px;
         font-weight: 700;
@@ -298,9 +313,92 @@ def build_stylesheet(mode: str, accent: str) -> str:
         width: 2px;
     }}
 
+    QSplitter#DetailsSplitter::handle {{
+        background-color: transparent;
+        width: 10px;
+    }}
+
     QScrollArea {{
         border: none;
         background: transparent;
+    }}
+
+    QWidget#FileViewer,
+    QWidget#ViewerContent,
+    QScrollArea#ViewerScrollArea,
+    QScrollArea#ViewerScrollArea QWidget#qt_scrollarea_viewport {{
+        background-color: {surface};
+        color: {text};
+        border: none;
+    }}
+
+    QWidget#FileViewer QLabel,
+    QWidget#ViewerContent QLabel {{
+        background: transparent;
+        color: {text};
+        border: none;
+    }}
+
+    QLabel#ViewerFileInfo {{
+        color: {text};
+        font-size: 16px;
+        font-weight: 700;
+        background: transparent;
+        border: none;
+    }}
+
+    QScrollBar:vertical {{
+        background-color: {surface};
+        width: 12px;
+        margin: 2px;
+        border: none;
+        border-radius: 6px;
+    }}
+
+    QScrollBar::handle:vertical {{
+        background-color: {border};
+        min-height: 28px;
+        border-radius: 4px;
+    }}
+
+    QScrollBar::handle:vertical:hover {{
+        background-color: {accent};
+    }}
+
+    QScrollBar:horizontal {{
+        background-color: {surface};
+        height: 12px;
+        margin: 2px;
+        border: none;
+        border-radius: 6px;
+    }}
+
+    QScrollBar::handle:horizontal {{
+        background-color: {border};
+        min-width: 28px;
+        border-radius: 4px;
+    }}
+
+    QScrollBar::handle:horizontal:hover {{
+        background-color: {accent};
+    }}
+
+    QScrollBar::add-line,
+    QScrollBar::sub-line {{
+        width: 0;
+        height: 0;
+        border: none;
+        background: none;
+    }}
+
+    QScrollBar::add-page,
+    QScrollBar::sub-page {{
+        background: none;
+    }}
+
+    QAbstractScrollArea::corner {{
+        background-color: {surface};
+        border: none;
     }}
 
     QDialog {{

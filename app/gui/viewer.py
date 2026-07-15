@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 class FileViewer(QWidget):
     def __init__(self):
         super().__init__()
+        self.setObjectName("FileViewer")
         self.current_file = None
         self.init_ui()
     
@@ -20,17 +21,19 @@ class FileViewer(QWidget):
         
         header_layout = QHBoxLayout()
         self.file_info_label = QLabel("Keine Datei geladen")
-        self.file_info_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        self.file_info_label.setObjectName("ViewerFileInfo")
         header_layout.addWidget(self.file_info_label)
         header_layout.addStretch()
         
         layout.addLayout(header_layout)
         
         self.content_widget = QWidget()
+        self.content_widget.setObjectName("ViewerContent")
         self.content_layout = QVBoxLayout()
         self.content_widget.setLayout(self.content_layout)
         
         scroll = QScrollArea()
+        scroll.setObjectName("ViewerScrollArea")
         scroll.setWidget(self.content_widget)
         scroll.setWidgetResizable(True)
         
