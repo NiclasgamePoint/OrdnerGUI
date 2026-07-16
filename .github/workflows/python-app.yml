@@ -1,39 +1,83 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python application
+name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  build:
-
+  lint-test-build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.10"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-        pytest
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8
+
+      - name: Lint
+        run: |
+          flake8 app tests main.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 app tests main.py --count --max-complexity=12 --max-line-length=127 --statistics
+
+      - name: Run tests (headless Qt)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Build check (bytecode compile)
+        run: |
+          python -m compileall app main.py
+
+      - name: Count Python code lines
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          roots = [Path("app"), Path("tests"), Path("main.py")]
+          total = 0
+          rows = []
+
+          def count_lines(path: Path) -> int:
+            with path.open("r", encoding="utf-8", errors="ignore") as handle:
+              return sum(1 for _ in handle)
+
+          for root in roots:
+            if not root.exists():
+              continue
+            if root.is_file() and root.suffix == ".py":
+              line_count = count_lines(root)
+              rows.append((str(root), line_count))
+              total += line_count
+              continue
+            for file_path in sorted(root.rglob("*.py")):
+              line_count = count_lines(file_path)
+              rows.append((str(file_path), line_count))
+              total += line_count
+
+          print(f"TOTAL_PYTHON_LINES={total}")
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as summary:
+            summary.write("## Python code lines\n\n")
+            summary.write(f"**Total:** {total}\n\n")
+            summary.write("| File | Lines |\n")
+            summary.write("| --- | ---: |\n")
+            for file_path, line_count in rows:
+              summary.write(f"| `{file_path}` | {line_count} |\n")
+          PY

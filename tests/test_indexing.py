@@ -96,6 +96,24 @@ class IndexingTests(unittest.TestCase):
         self.assertIn("Elektroplanung", text_page.items[0]["path"])
         manager.close()
 
+    def test_empty_source_directory_indexes_without_errors(self):
+        empty_root = Path(self.temp_dir.name) / "Leer"
+        empty_root.mkdir(parents=True, exist_ok=True)
+
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        processed = manager.synchronize_directory(empty_root, full_rebuild=True)
+
+        self.assertEqual(processed, 0)
+        self.assertEqual(
+            manager.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            manager.conn.execute("SELECT COUNT(*) FROM folders").fetchone()[0],
+            1,
+        )
+        manager.close()
+
 
 if __name__ == "__main__":
     unittest.main()
