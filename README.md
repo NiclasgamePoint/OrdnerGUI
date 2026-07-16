@@ -4,8 +4,8 @@
 
 ## Funktionen
 
-- Gemeinsame Suche nach Ordnern/Kunden, Dateinamen und Dokumentinhalten
-- Live-Ordnersuche beim Tippen; parallele vollständige Suche mit Enter oder „Suchen“
+- Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
+- Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
 - Filter nach Fachthema, Jahr/Vorlagen und Dateityp
 - Relevanzranking, hervorgehobene Treffer, getrennte Pagination und Suchverlauf
 - SQLite-Metadatenindex und FTS5-Volltextindex
@@ -39,10 +39,11 @@ app/
 │   └── document_converter.py     Optionale Legacy-Konvertierung
 └── gui/
     ├── dialogs/                  Kundendaten-Editor
-    ├── panels/                   Ordner- und Kundendetails
+    ├── pages/                    Suche, Kundendetails und Ordner-/Viewer-Seite
     ├── viewers/                  PDF-, Tabellen- und Textviewer
-    ├── widgets/                  Wiederverwendbare Buttons und Suchwidgets
-    ├── workers/                  Such- und Index-Threads
+    ├── widgets/                  App-Rahmen, Ergebniszeilen und Suchwidgets
+    ├── workers/                  Suche und Steuerung des Indexprozesses
+    ├── navigation.py             Seitenverlauf und Zurück-Navigation
     ├── main_window.py
     ├── settings_popup.py
     └── theme.py

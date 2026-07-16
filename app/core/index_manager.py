@@ -933,6 +933,37 @@ class IndexManager:
             row["domain_folder"] for row in info["files"] if row["domain_folder"]
         })
         return info
+
+    def get_folder_summary(self, folder_path: str) -> Dict:
+        """Return lightweight folder metadata without loading every file row."""
+        path = str(Path(folder_path))
+        pattern = f"{path}{os.sep}%"
+        row = self.conn.execute(
+            """
+            SELECT
+                COUNT(*) AS file_count,
+                MAX(modified_date) AS last_modified,
+                COALESCE(SUM(file_size), 0) AS total_size,
+                GROUP_CONCAT(DISTINCT domain_folder) AS service_types,
+                GROUP_CONCAT(DISTINCT time_bucket) AS time_buckets
+            FROM files
+            WHERE folder_path = ? OR path LIKE ?
+            """,
+            (path, pattern),
+        ).fetchone()
+        return {
+            "folder_path": path,
+            "folder_name": Path(path).name,
+            "file_count": int(row["file_count"] or 0),
+            "last_modified": row["last_modified"],
+            "total_size": int(row["total_size"] or 0),
+            "service_types": sorted(
+                value for value in (row["service_types"] or "").split(",") if value
+            ),
+            "time_buckets": sorted(
+                value for value in (row["time_buckets"] or "").split(",") if value
+            ),
+        }
     
     def get_customer_details(self, customer_name: str) -> Dict:
         cursor = self.conn.cursor()

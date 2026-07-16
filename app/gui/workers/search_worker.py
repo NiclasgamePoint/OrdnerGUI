@@ -38,12 +38,14 @@ class SearchWorker(QThread):
     def run(self):
         manager = None
         try:
-            manager = IndexManager(self.db_path, initialize=False)
+            if self.category == "customers":
+                results = self._search_customers()
+            else:
+                manager = IndexManager(self.db_path, initialize=False)
             if self.category == "folders":
                 results = manager.search_folders_page(
                     self.query, self.filters, self.page, self.page_size
                 )
-                results = self._merge_customer_results(manager, results)
             elif self.category == "files":
                 results = manager.search_files_page(
                     self.query, self.filters, self.page, self.page_size
@@ -57,7 +59,7 @@ class SearchWorker(QThread):
                     maximum=self.result_limit,
                     should_cancel=self.isInterruptionRequested,
                 )
-            else:
+            elif self.category != "customers":
                 raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
             self.completed.emit(self.generation, self.category, results, "")
         except Exception as exc:
@@ -66,27 +68,17 @@ class SearchWorker(QThread):
             if manager is not None:
                 manager.close()
 
-    def _merge_customer_results(self, manager: IndexManager, page: SearchPage) -> SearchPage:
-        if self.page != 1 or not self.customer_db_path.exists():
-            return page
+    def _search_customers(self) -> SearchPage:
+        if not self.customer_db_path.exists():
+            return SearchPage([], 0, 1, self.page_size)
         repository = CustomerRepository(self.customer_db_path, readonly=True)
         try:
-            known_paths = {item["folder_path"] for item in page.items}
-            customer_items = []
-            for customer in repository.search(self.query, self.page_size):
-                if customer.folder_path in known_paths:
-                    continue
-                entry = manager.get_folder_search_entry(customer.folder_path, self.filters)
-                if entry is not None:
-                    entry["folder_name"] = customer.display_name
-                    entry["customer_match"] = True
-                    customer_items.append(entry)
-                    known_paths.add(customer.folder_path)
+            customers = repository.search(self.query, self.result_limit)
         finally:
             repository.close()
         return SearchPage(
-            (customer_items + page.items)[: self.page_size],
-            page.total + len(customer_items),
-            page.page,
-            page.page_size,
+            customers[: self.page_size],
+            len(customers),
+            1,
+            self.page_size,
         )

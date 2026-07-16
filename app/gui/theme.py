@@ -1,5 +1,5 @@
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 
 
 def _safe_color(value: str, fallback: str) -> str:
@@ -45,6 +45,7 @@ class ThemeManager:
     def save(self):
         self.settings.setValue("theme_mode", self.mode)
         self.settings.setValue("accent_color", self.accent)
+        self.settings.sync()
 
     def set_mode(self, mode: str):
         normalized = mode.strip().lower()
@@ -55,7 +56,49 @@ class ThemeManager:
         self.accent = _safe_color(color_hex, self.DEFAULT_ACCENT)
 
     def apply(self, app):
+        app.setStyleSheet("")
+        app.setPalette(build_palette(self.mode, self.accent))
         app.setStyleSheet(build_stylesheet(self.mode, self.accent))
+
+
+def build_palette(mode: str, accent: str) -> QPalette:
+    """Keep native and otherwise unstyled Qt controls aligned with the theme."""
+    dark = mode.lower() == "dark"
+    accent = _safe_color(accent, ThemeManager.DEFAULT_ACCENT)
+    colors = {
+        "window": "#11161b" if dark else "#eaf0ef",
+        "base": "#1a222a" if dark else "#f5f8f7",
+        "alternate": "#22303b" if dark else "#f0f6f5",
+        "button": "#202b35" if dark else "#ffffff",
+        "text": "#e9f1f8" if dark else "#1d2a34",
+        "muted": "#9fb3c5" if dark else "#667b88",
+    }
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(colors["window"]))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(colors["text"]))
+    palette.setColor(QPalette.ColorRole.Base, QColor(colors["base"]))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(colors["alternate"]))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(colors["button"]))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(colors["text"]))
+    palette.setColor(QPalette.ColorRole.Text, QColor(colors["text"]))
+    palette.setColor(QPalette.ColorRole.Button, QColor(colors["button"]))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(colors["text"]))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(accent))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(colors["muted"]))
+    palette.setColor(QPalette.ColorRole.Link, QColor(accent))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Text,
+        QColor(colors["muted"]),
+    )
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.ButtonText,
+        QColor(colors["muted"]),
+    )
+    return palette
 
 
 def build_stylesheet(mode: str, accent: str) -> str:
@@ -100,10 +143,105 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QWidget#SearchCard,
     QWidget#SideCard,
     QWidget#DetailsCard,
-    QWidget#StatusCard {{
+    QWidget#StatusCard,
+    QWidget#AppHeader,
+    QWidget#PageCard,
+    QWidget#IndexStatusBar {{
         background-color: {card};
         border: 1px solid {border};
         border-radius: 14px;
+    }}
+
+    QStackedWidget#PageStack,
+    QStackedWidget#ViewerStack,
+    QWidget#SearchPage,
+    QWidget#CustomerPage,
+    QWidget#FolderPage,
+    QWidget#SettingsPage,
+    QWidget#DialogPage {{
+        background-color: transparent;
+        color: {text};
+        border: none;
+    }}
+
+    QWidget#AppHeader {{
+        border-radius: 13px;
+    }}
+
+    QWidget#IndexStatusBar {{
+        border-radius: 10px;
+    }}
+
+    QLineEdit#GlobalSearchInput {{
+        border-radius: 17px;
+        padding-left: 13px;
+        font-size: 14px;
+    }}
+
+    QFrame#ResultRow {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 11px;
+    }}
+
+    QFrame#ResultRow:hover {{
+        background-color: {item_hover};
+        border-color: {accent};
+    }}
+
+    QLabel#ResultTitle {{
+        color: {text};
+        font-size: 13px;
+        font-weight: 700;
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#ResultSubtitle,
+    QLabel#SearchSectionMessage {{
+        color: {muted};
+        font-size: 12px;
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#SearchSectionTitle {{
+        color: {text};
+        font-size: 13px;
+        font-weight: 700;
+        padding: 2px 3px;
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#CustomerValue {{
+        color: {text};
+        font-weight: 600;
+        border: none;
+        background: transparent;
+    }}
+
+    QLabel#IndexStatusText {{
+        color: {muted};
+        font-size: 12px;
+        border: none;
+        background: transparent;
+    }}
+
+    QScrollArea#SearchResultsScroll,
+    QScrollArea#SearchResultsScroll QWidget#qt_scrollarea_viewport,
+    QScrollArea#PageScrollArea,
+    QScrollArea#PageScrollArea QWidget#qt_scrollarea_viewport,
+    QWidget#SearchResultsContent,
+    QWidget#ThemedScrollContent {{
+        background-color: {card};
+        color: {text};
+        border: none;
+    }}
+
+    QListWidget#FolderFileList::item {{
+        min-height: 42px;
+        padding: 8px 10px;
     }}
 
     QWidget#CustomerDetailsSection,
@@ -178,6 +316,17 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border: 1px solid {border};
         border-radius: 10px;
         padding: 7px;
+        selection-background-color: {accent};
+        selection-color: #ffffff;
+    }}
+
+    QLineEdit {{
+        placeholder-text-color: {muted};
+    }}
+
+    QPlainTextEdit:read-only, QTextEdit:read-only {{
+        background-color: {surface};
+        color: {text};
     }}
 
     QComboBox::drop-down {{
@@ -218,6 +367,41 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QAbstractItemView {{
         background-color: {surface};
         color: {text};
+        alternate-background-color: {chip};
+        selection-background-color: {item_selected};
+        selection-color: #ffffff;
+        outline: 0;
+    }}
+
+    QTableWidget {{
+        gridline-color: {border};
+    }}
+
+    QTableWidget::item {{
+        padding: 5px;
+    }}
+
+    QHeaderView {{
+        background-color: {chip};
+        color: {text};
+        border: none;
+    }}
+
+    QHeaderView::section {{
+        background-color: {chip};
+        color: {text};
+        border: none;
+        border-right: 1px solid {border};
+        border-bottom: 1px solid {border};
+        padding: 6px 8px;
+        font-weight: 600;
+    }}
+
+    QTableCornerButton::section {{
+        background-color: {chip};
+        border: none;
+        border-right: 1px solid {border};
+        border-bottom: 1px solid {border};
     }}
 
     QMenu {{
@@ -394,10 +578,19 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QScrollArea {{
         border: none;
         background: transparent;
+        color: {text};
+    }}
+
+    QScrollArea QWidget#qt_scrollarea_viewport {{
+        background-color: transparent;
+        color: {text};
     }}
 
     QWidget#FileViewer,
     QWidget#ViewerContent,
+    QStackedWidget#ViewerStack,
+    QScrollArea#ImageViewerScroll,
+    QScrollArea#ImageViewerScroll QWidget#qt_scrollarea_viewport,
     QScrollArea#ViewerScrollArea,
     QScrollArea#ViewerScrollArea QWidget#qt_scrollarea_viewport {{
         background-color: {surface};
@@ -489,9 +682,28 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border: none;
     }}
 
+    QToolTip {{
+        background-color: {card};
+        color: {text};
+        border: 1px solid {border};
+        padding: 5px;
+    }}
+
     QDialog {{
         background-color: {card};
         color: {text};
+    }}
+
+    QDialog#CenteredPopupDialog {{
+        background-color: transparent;
+        color: {text};
+    }}
+
+    QFrame#CustomerEditorBody {{
+        background-color: {card};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 14px;
     }}
 
     QFrame#SettingsPopup {{

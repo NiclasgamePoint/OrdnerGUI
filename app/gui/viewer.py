@@ -25,6 +25,7 @@ class ImageViewerWidget(QScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ImageViewerScroll")
         self.setWidgetResizable(False)
         self.setAlignment(Qt.AlignCenter)
         self._image_label = QLabel()
@@ -107,6 +108,7 @@ class FileViewer(QWidget):
         layout.addLayout(header)
 
         self.stack = QStackedWidget()
+        self.stack.setObjectName("ViewerStack")
         self.empty_label = QLabel("Keine Datei geladen")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.pdf_viewer = PdfViewerWidget()
