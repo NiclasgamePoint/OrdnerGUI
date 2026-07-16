@@ -235,13 +235,15 @@ class DocumentConverter:
         powershell = shutil.which("powershell") or shutil.which("pwsh")
         if powershell is None:
             return None
+        source_path = str(source).replace("'", "''")
+        target_path = str(target).replace("'", "''")
         script = (
             "$ErrorActionPreference='Stop';"
             "$excel=New-Object -ComObject Excel.Application;"
             "$excel.Visible=$false;"
             "$excel.DisplayAlerts=$false;"
-            f"$wb=$excel.Workbooks.Open('{str(source).replace("'", "''")}');"
-            f"$wb.SaveAs('{str(target).replace("'", "''")}', 51);"
+            f"$wb=$excel.Workbooks.Open('{source_path}');"
+            f"$wb.SaveAs('{target_path}', 51);"
             "$wb.Close($false);"
             "$excel.Quit();"
         )
@@ -264,14 +266,16 @@ class DocumentConverter:
         powershell = shutil.which("powershell") or shutil.which("pwsh")
         if powershell is None:
             return None
+        source_path = str(source).replace("'", "''")
+        target_path = str(target).replace("'", "''")
         file_format = "17" if target_extension == "pdf" else "2"
         script = (
             "$ErrorActionPreference='Stop';"
             "$word=New-Object -ComObject Word.Application;"
             "$word.Visible=$false;"
             "$word.DisplayAlerts=0;"
-            f"$doc=$word.Documents.Open('{str(source).replace("'", "''")}', $false, $true);"
-            f"$doc.SaveAs([ref]'{str(target).replace("'", "''")}', [ref]{file_format});"
+            f"$doc=$word.Documents.Open('{source_path}', $false, $true);"
+            f"$doc.SaveAs([ref]'{target_path}', [ref]{file_format});"
             "$doc.Close($false);"
             "$word.Quit();"
         )
