@@ -26,7 +26,9 @@ from app.core.config import (
     WINDOW_TITLE,
     WINDOW_WIDTH,
     get_configured_index_source,
+    load_customer_recognition_options,
     load_index_options,
+    save_customer_recognition_options,
     save_index_options,
     save_index_source,
 )
@@ -40,7 +42,7 @@ from app.core.index_store import (
     validate_index,
 )
 from app.core.search_models import SearchFilters, SearchHistory
-from app.gui.dialogs import CustomerEditorDialog
+from app.gui.dialogs import CustomerEditorDialog, CustomerRecognitionReviewDialog
 from app.gui.navigation import NavigationController, NavigationEntry
 from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
@@ -60,6 +62,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(920, 640)
 
         self.index_options = load_index_options()
+        self.recognition_options = load_customer_recognition_options()
         self.index_controller = IndexJobController(DB_FILE, parent=self)
         self.index_controller.adopt_running_job()
         self.index_manager = IndexManager(DB_FILE, options=self.index_options)
@@ -439,6 +442,11 @@ class MainWindow(QMainWindow):
             backups=available_backups(DB_FILE),
             index_options=self.index_options,
             diagnostics=self.diagnostics_service.inspect(DB_FILE),
+            recognition_options=self.recognition_options,
+            recognition_summary=self.customer_repository.last_recognition_run(),
+            pending_recognition_cases=(
+                self.customer_repository.pending_recognition_count()
+            ),
         )
         self.settings_popup.appearanceChanged.connect(
             self.on_settings_appearance_changed
@@ -458,6 +466,12 @@ class MainWindow(QMainWindow):
         self.settings_popup.indexOptionsChanged.connect(
             self.on_index_options_changed
         )
+        self.settings_popup.customerRecognitionOptionsChanged.connect(
+            self.on_customer_recognition_options_changed
+        )
+        self.settings_popup.reviewRecognitionRequested.connect(
+            self.open_customer_recognition_review
+        )
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
         self._center_settings_popup()
@@ -468,7 +482,33 @@ class MainWindow(QMainWindow):
         if self.settings_popup is None or not self.settings_popup.isVisible():
             self.open_settings_popup()
         if self.settings_popup is not None:
-            self.settings_popup.nav_list.setCurrentRow(2)
+            self.settings_popup.nav_list.setCurrentRow(3)
+
+    def on_customer_recognition_options_changed(self, options):
+        self.recognition_options = options
+        save_customer_recognition_options(options)
+        self.status_bar.set_text(
+            "Kundenerkennung gespeichert · wird beim nächsten Indexlauf angewendet"
+        )
+
+    def open_customer_recognition_review(self):
+        if self.settings_popup is not None:
+            self.settings_popup.close()
+        dialog = CustomerRecognitionReviewDialog(
+            DB_FILE,
+            CUSTOMER_DB_FILE,
+            self.recognition_options,
+            parent=self,
+        )
+        dialog.customersChanged.connect(self._refresh_customer_results_only)
+        dialog.casesChanged.connect(
+            lambda count: self.status_bar.set_text(
+                f"Kundenerkennung · {count} offene Prüffälle"
+                if count else "Kundenerkennung vollständig geprüft ✓"
+            )
+        )
+        dialog.exec()
+        self._refresh_customer_results_only()
 
     def _center_settings_popup(self):
         if self.settings_popup is None:
@@ -664,7 +704,17 @@ class MainWindow(QMainWindow):
             count = int(
                 state.get("indexed_count") or state.get("processed_count") or 0
             )
-            self.status_bar.set_text(f"Index aktuell ✓ · {count} Dateien geprüft")
+            self._show_customer_recognition_result(state)
+            if not state.get("customer_sync_error") and not int(
+                state.get("customer_cases_pending") or 0
+            ) and not int(state.get("customers_created") or 0) and not int(
+                state.get("customers_assigned") or 0
+            ):
+                self.status_bar.set_text(f"Index aktuell ✓ · {count} Dateien geprüft")
+            if int(state.get("customers_created") or 0) or int(
+                state.get("customers_assigned") or 0
+            ):
+                self._refresh_customer_results_only()
         elif status == "completed":
             if state.get("activated_by") == "worker":
                 self._reload_active_index()
@@ -680,14 +730,44 @@ class MainWindow(QMainWindow):
             self.navigator.reset("search")
             self._show_initial_customers()
             self.status_bar.set_text(f"Index fertig geladen ✓ · {count} Dateien")
+            self._show_customer_recognition_result(state)
             if self.settings_popup is not None:
                 self.settings_popup.set_backups(available_backups(DB_FILE))
                 self.settings_popup.set_diagnostics(
                     self.diagnostics_service.inspect(DB_FILE)
                 )
+                self.settings_popup.set_recognition_state(
+                    self.customer_repository.last_recognition_run(),
+                    self.customer_repository.pending_recognition_count(),
+                )
+        if status in {"completed", "no_changes"} and self.settings_popup is not None:
+            self.settings_popup.set_recognition_state(
+                self.customer_repository.last_recognition_run(),
+                self.customer_repository.pending_recognition_count(),
+            )
         if self.pending_filesystem_sync:
             self.pending_filesystem_sync = False
             QTimer.singleShot(0, self._start_incremental_filesystem_sync)
+
+    def _show_customer_recognition_result(self, state: dict):
+        error = str(state.get("customer_sync_error") or "")
+        pending = int(state.get("customer_cases_pending") or 0)
+        created = int(state.get("customers_created") or 0)
+        assigned = int(state.get("customers_assigned") or 0)
+        if error:
+            self.status_bar.set_text(
+                f"Index aktiv ✓ · Kundenerkennung fehlgeschlagen: {error}"
+            )
+            return
+        if pending:
+            self.status_bar.set_text(
+                f"Index aktiv ✓ · {created} Kunden angelegt · {assigned} zugeordnet · "
+                f"{pending} Prüffälle offen"
+            )
+        elif created or assigned:
+            self.status_bar.set_text(
+                f"Index aktiv ✓ · {created} Kunden angelegt · {assigned} zugeordnet"
+            )
 
     def _activate_built_index(self, build_path: Path):
         self.search_generation += 1

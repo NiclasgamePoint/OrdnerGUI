@@ -719,6 +719,13 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border-radius: 14px;
     }}
 
+    QFrame#RecognitionReviewBody {{
+        background-color: {card};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+
     QFrame#ExistingCustomerAssignment {{
         background-color: {chip};
         color: {text};
