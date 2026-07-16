@@ -1,6 +1,6 @@
 ## Vorschläge
 
-link -->
+[Vorschläge und Dinge die ich noch tun wollen würde](Vorschlaege.md)
 
 ## Funktionen
 
