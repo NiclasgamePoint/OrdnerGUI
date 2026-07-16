@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+import re
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QCompleter, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QHeaderView,
     QMessageBox, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget,
@@ -18,6 +21,22 @@ from app.core.search_models import SearchFilters
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.widgets.buttons import AppButton
 from app.services.customer_suggestion import CustomerSuggestionService
+
+
+@dataclass(frozen=True)
+class FolderDisplayInfo:
+    path: str
+    name: str
+    service: str = ""
+    year: str = ""
+
+    @property
+    def context(self) -> str:
+        return " · ".join(value for value in (self.service, self.year) if value)
+
+    @property
+    def summary(self) -> str:
+        return f"{self.name} ({self.context})" if self.context else self.name
 
 
 class CustomerEditorDialog(CenteredPopupDialog):
@@ -37,6 +56,8 @@ class CustomerEditorDialog(CenteredPopupDialog):
         self.context_folder_path = folder_path
         self._suggestion_service = CustomerSuggestionService()
         self._suggested_folder_paths: set[str] = set()
+        self._folder_display_cache: dict[str, FolderDisplayInfo] = {}
+        self.existing_customer_combo: QComboBox | None = None
         self.customer = (
             repository.get(customer_id)
             if customer_id is not None
@@ -67,10 +88,17 @@ class CustomerEditorDialog(CenteredPopupDialog):
         layout.addWidget(popup_title)
 
         linked_folder = folder_path or (self.customer.folder_paths[0] if self.customer.folder_paths else "-")
-        title = QLabel(f"Verknüpfter Ordner: {linked_folder}")
+        linked_info = self._folder_display_info(linked_folder)
+        title = QLabel(f"Verknüpfter Ordner: {linked_info.summary}")
         title.setObjectName("PopupCaption")
         title.setWordWrap(True)
+        title.setToolTip(linked_folder)
         layout.addWidget(title)
+
+        assignment_panel = self._build_existing_customer_assignment()
+        if assignment_panel is not None:
+            layout.addWidget(assignment_panel)
+
         tabs = QTabWidget()
         tabs.addTab(self._build_master_page(), "Stammdaten")
         tabs.addTab(self._build_contacts_page(), "Kontakte")
@@ -96,6 +124,98 @@ class CustomerEditorDialog(CenteredPopupDialog):
         if self.customer.id is None and self.context_folder_path:
             self._offer_auto_suggestions(suggested_name)
 
+    def _build_existing_customer_assignment(self) -> QWidget | None:
+        if self.customer.id is not None or not self.context_folder_path:
+            return None
+
+        customers = [
+            customer
+            for customer in self.repository.list_customers()
+            if customer.id is not None
+        ]
+        if not customers:
+            return None
+
+        panel = QFrame()
+        panel.setObjectName("ExistingCustomerAssignment")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 10, 12, 10)
+        panel_layout.setSpacing(7)
+
+        heading = QLabel("Ordner einem vorhandenen Kunden zuordnen")
+        heading.setObjectName("PopupTitle")
+        panel_layout.addWidget(heading)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.setPlaceholderText("Kunden suchen und auswählen …")
+        for customer in customers:
+            context = " · ".join(
+                value for value in (customer.city, customer.entity_type) if value
+            )
+            label = (
+                f"{customer.display_name} · {context}"
+                if context
+                else customer.display_name
+            )
+            combo.addItem(label, customer.id)
+        combo.setCurrentIndex(-1)
+        completer = combo.completer()
+        if completer is not None:
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+
+        assign_button = AppButton("Ordner zuordnen")
+        assign_button.clicked.connect(self._assign_to_existing_customer)
+        row.addWidget(combo, 1)
+        row.addWidget(assign_button)
+        panel_layout.addLayout(row)
+
+        hint = QLabel(
+            "Alternativ können darunter neue Kundendaten für diesen Ordner angelegt werden."
+        )
+        hint.setObjectName("StatCaption")
+        hint.setWordWrap(True)
+        panel_layout.addWidget(hint)
+        self.existing_customer_combo = combo
+        return panel
+
+    def _assign_to_existing_customer(self):
+        combo = self.existing_customer_combo
+        if combo is None:
+            return
+
+        current_index = combo.currentIndex()
+        selected_id = (
+            combo.itemData(current_index)
+            if current_index >= 0
+            and combo.currentText().strip() == combo.itemText(current_index)
+            else None
+        )
+        if selected_id is None:
+            QMessageBox.warning(
+                self,
+                "Ordner zuordnen",
+                "Bitte einen vorhandenen Kunden aus der Liste auswählen.",
+            )
+            return
+
+        folder_info = self._folder_display_info(self.context_folder_path)
+        try:
+            self.customer = self.repository.add_folder_to_customer(
+                int(selected_id),
+                self.context_folder_path,
+                folder_info.service,
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Ordner zuordnen", str(error))
+            return
+        self.accept()
+
     def _build_master_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("DialogPage")
@@ -114,9 +234,12 @@ class CustomerEditorDialog(CenteredPopupDialog):
         self.city = QLineEdit(self.customer.city)
         self.service_types = QLineEdit(", ".join(self.customer.service_types))
         folder_values = self.customer.folder_paths or ([self.customer.folder_path] if self.customer.folder_path else [])
-        self.folder_paths = QLineEdit(" | ".join(folder_values))
+        self.folder_paths = QLineEdit(
+            " | ".join(self._folder_display_info(path).summary for path in folder_values)
+        )
         self.folder_paths.setReadOnly(True)
         self.folder_paths.setPlaceholderText("Im Dateien-Tab auswählbar")
+        self.folder_paths.setToolTip("\n".join(folder_values))
         form.addRow("Art", self.entity_type)
         form.addRow("Unternehmensname *", self.company)
         form.addRow("Firmenadresse", self.street)
@@ -191,25 +314,13 @@ class CustomerEditorDialog(CenteredPopupDialog):
 
         found_panel = QVBoxLayout()
         found_panel.addWidget(QLabel("Gefundene mögliche Ordner"))
-        self.found_folders_table = QTableWidget(0, 1)
-        self.found_folders_table.setHorizontalHeaderLabels(["Ordnerpfad"])
-        self.found_folders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.found_folders_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.found_folders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.found_folders_table.verticalHeader().setVisible(False)
-        self.found_folders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.found_folders_table = self._create_folder_table()
         self.found_folders_table.itemClicked.connect(lambda item: self._move_folder_item(item, self.found_folders_table, self.selected_folders_table, suggested=False))
         found_panel.addWidget(self.found_folders_table, 1)
 
         selected_panel = QVBoxLayout()
         selected_panel.addWidget(QLabel("Ausgewählte Ordner"))
-        self.selected_folders_table = QTableWidget(0, 1)
-        self.selected_folders_table.setHorizontalHeaderLabels(["Ordnerpfad"])
-        self.selected_folders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.selected_folders_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.selected_folders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.selected_folders_table.verticalHeader().setVisible(False)
-        self.selected_folders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.selected_folders_table = self._create_folder_table()
         self.selected_folders_table.itemClicked.connect(lambda item: self._move_folder_item(item, self.selected_folders_table, self.found_folders_table, suggested=True))
         selected_panel.addWidget(self.selected_folders_table, 1)
 
@@ -219,6 +330,19 @@ class CustomerEditorDialog(CenteredPopupDialog):
 
         self._populate_folder_selection_tables()
         return page
+
+    def _create_folder_table(self) -> QTableWidget:
+        table = QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels(["Ordner", "Dienstleistung", "Jahr"])
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        return table
 
     def _mark_auto_filled_widget(self, widget: QWidget):
         widget.setStyleSheet(self.AUTO_FILL_STYLE)
@@ -249,14 +373,28 @@ class CustomerEditorDialog(CenteredPopupDialog):
         table.blockSignals(True)
         table.setRowCount(0)
         for path in rows:
-            row = table.rowCount()
-            table.insertRow(row)
-            item = QTableWidgetItem(path)
+            self._append_folder_row(table, path, suggested)
+        table.blockSignals(False)
+
+    def _append_folder_row(
+        self,
+        table: QTableWidget,
+        path: str,
+        suggested: bool,
+    ):
+        info = self._folder_display_info(path)
+        row = table.rowCount()
+        table.insertRow(row)
+        tooltip = path
+        if suggested:
+            tooltip = f"{self.SUGGESTED_ITEM_TOOLTIP}\n{path}"
+        for column, value in enumerate((info.name, info.service or "-", info.year or "-")):
+            item = QTableWidgetItem(value)
+            item.setData(Qt.UserRole, path)
+            item.setToolTip(tooltip)
             if suggested:
                 item.setBackground(self.palette().alternateBase())
-                item.setToolTip(self.SUGGESTED_ITEM_TOOLTIP)
-            table.setItem(row, 0, item)
-        table.blockSignals(False)
+            table.setItem(row, column, item)
 
     def _move_folder_item(
         self,
@@ -267,8 +405,8 @@ class CustomerEditorDialog(CenteredPopupDialog):
     ):
         if item is None:
             return
-        value = item.text().strip()
-        if not value:
+        path = str(item.data(Qt.UserRole) or "").strip()
+        if not path:
             return
 
         source_row = item.row()
@@ -276,25 +414,19 @@ class CustomerEditorDialog(CenteredPopupDialog):
         source.removeRow(source_row)
         source.blockSignals(False)
 
-        if self._table_contains_path(target, value):
+        if self._table_contains_path(target, path):
             self._sync_folder_line_edit_from_selection()
             return
 
         target.blockSignals(True)
-        row = target.rowCount()
-        target.insertRow(row)
-        target_item = QTableWidgetItem(value)
-        if suggested:
-            target_item.setBackground(self.palette().alternateBase())
-            target_item.setToolTip(self.SUGGESTED_ITEM_TOOLTIP)
-        target.setItem(row, 0, target_item)
+        self._append_folder_row(target, path, suggested)
         target.blockSignals(False)
         self._sync_folder_line_edit_from_selection()
 
     def _table_contains_path(self, table: QTableWidget, path_value: str) -> bool:
         for row in range(table.rowCount()):
             item = table.item(row, 0)
-            if item and item.text().strip() == path_value:
+            if item and str(item.data(Qt.UserRole) or "") == path_value:
                 return True
         return False
 
@@ -302,12 +434,17 @@ class CustomerEditorDialog(CenteredPopupDialog):
         values: list[str] = []
         for row in range(self.selected_folders_table.rowCount()):
             item = self.selected_folders_table.item(row, 0)
-            if item and item.text().strip():
-                values.append(item.text().strip())
+            path = str(item.data(Qt.UserRole) or "").strip() if item else ""
+            if path:
+                values.append(path)
         return self._normalize_folder_values(values)
 
     def _sync_folder_line_edit_from_selection(self):
-        self.folder_paths.setText(" | ".join(self._selected_folder_values()))
+        paths = self._selected_folder_values()
+        self.folder_paths.setText(
+            " | ".join(self._folder_display_info(path).summary for path in paths)
+        )
+        self.folder_paths.setToolTip("\n".join(paths))
 
     def _discover_related_folders(self, suggested_name: str) -> list[str]:
         queries: list[str] = []
@@ -351,6 +488,10 @@ class CustomerEditorDialog(CenteredPopupDialog):
                 for item in page.items:
                     path = item.get("folder_path", "")
                     if path:
+                        self._folder_display_cache[path] = self._folder_display_info(
+                            path,
+                            str(item.get("relative_path") or ""),
+                        )
                         results.append(path)
         except Exception:
             # If index search is unavailable, keep the dialog usable.
@@ -360,6 +501,41 @@ class CustomerEditorDialog(CenteredPopupDialog):
                 manager.close()
 
         return self._normalize_folder_values(results)
+
+    def _folder_display_info(
+        self,
+        path_value: str,
+        relative_path: str = "",
+    ) -> FolderDisplayInfo:
+        if not relative_path and path_value in self._folder_display_cache:
+            return self._folder_display_cache[path_value]
+
+        name = Path(path_value).name or path_value
+        service = ""
+        year = ""
+        relative_parts = Path(relative_path).parts if relative_path else ()
+        if relative_parts:
+            service = relative_parts[0] if len(relative_parts) >= 1 else ""
+            year = relative_parts[1] if len(relative_parts) >= 2 else ""
+        else:
+            path_parts = Path(path_value).parts
+            bucket_index = next(
+                (
+                    index
+                    for index, part in enumerate(path_parts)
+                    if re.fullmatch(r"(?:19|20)\d{2}", part)
+                    or part.casefold() == "vorlagen"
+                ),
+                None,
+            )
+            if bucket_index is not None:
+                year = path_parts[bucket_index]
+                if bucket_index > 0:
+                    service = path_parts[bucket_index - 1]
+
+        info = FolderDisplayInfo(path_value, name, service, year)
+        self._folder_display_cache[path_value] = info
+        return info
 
     def _normalize_lookup_token(self, text: str) -> str:
         token = (text or "").casefold().strip()

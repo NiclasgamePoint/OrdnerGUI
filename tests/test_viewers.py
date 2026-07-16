@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
 import unittest
 
 import openpyxl
@@ -44,6 +45,35 @@ class ViewerTests(unittest.TestCase):
             viewer.text_viewer.search_input.setText("zwei")
             viewer.text_viewer.find_next()
             self.assertTrue(viewer.text_viewer.editor.textCursor().hasSelection())
+            viewer.close()
+
+    def test_legacy_doc_processing_runs_asynchronously_with_loading_view(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.doc"
+            path.write_bytes(
+                b"Legacy customer document with enough readable text "
+                b"for the Python fallback extraction."
+            )
+
+            viewer = FileViewer()
+            viewer.open_file(path)
+
+            self.assertTrue(viewer.is_converting)
+            self.assertIs(viewer.stack.currentWidget(), viewer.loading_widget)
+            self.assertTrue(viewer.loading_indicator.is_running())
+
+            deadline = time.monotonic() + 5
+            while viewer.is_converting and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.app.processEvents()
+
+            self.assertFalse(viewer.is_converting)
+            self.assertIs(viewer.stack.currentWidget(), viewer.text_viewer)
+            self.assertIn(
+                "Legacy customer document",
+                viewer.text_viewer.editor.toPlainText(),
+            )
             viewer.close()
 
 

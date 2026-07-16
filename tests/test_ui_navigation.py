@@ -6,7 +6,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from app.core.customer_models import Customer
+from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
+from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
 from app.gui.pages import FolderPage, SearchPage
 
@@ -72,6 +74,79 @@ class UiNavigationTests(unittest.TestCase):
 
         self.assertEqual(page.customer_section.row_count, 1)
         self.assertEqual(page.folder_section.row_count, 1)
+
+    def test_customer_editor_shows_compact_folder_context_but_keeps_full_path(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "Blower Door" / "2026" / "Musterkunde"
+            project.mkdir(parents=True)
+            repository = CustomerRepository(root / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Musterkunde",
+                company="Musterkunde",
+                folder_path=str(project),
+                folder_paths=[str(project)],
+            ))
+
+            dialog = CustomerEditorDialog(
+                repository,
+                customer_id=customer.id,
+            )
+            name_item = dialog.selected_folders_table.item(0, 0)
+            service_item = dialog.selected_folders_table.item(0, 1)
+            year_item = dialog.selected_folders_table.item(0, 2)
+
+            self.assertEqual(name_item.text(), "Musterkunde")
+            self.assertEqual(service_item.text(), "Blower Door")
+            self.assertEqual(year_item.text(), "2026")
+            self.assertEqual(name_item.data(Qt.UserRole), str(project.resolve()))
+            self.assertIn(str(project.resolve()), name_item.toolTip())
+            self.assertNotIn(str(root), dialog.folder_paths.text())
+
+            dialog.selected_folders_table.itemClicked.emit(service_item)
+            self.assertEqual(dialog.selected_folders_table.rowCount(), 0)
+            self.assertEqual(dialog.found_folders_table.rowCount(), 1)
+            self.assertEqual(
+                dialog.found_folders_table.item(0, 0).data(Qt.UserRole),
+                str(project.resolve()),
+            )
+
+            dialog.found_folders_table.itemClicked.emit(
+                dialog.found_folders_table.item(0, 2)
+            )
+            self.assertEqual(dialog.selected_folders_table.rowCount(), 1)
+            self.assertEqual(dialog.found_folders_table.rowCount(), 0)
+
+            dialog.close()
+            repository.close()
+
+    def test_customer_editor_assigns_current_folder_to_existing_customer(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "Energieberatung" / "2026" / "Projekt B"
+            folder.mkdir(parents=True)
+            repository = CustomerRepository(root / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Bestandskunde",
+                company="Bestandskunde",
+            ))
+
+            dialog = CustomerEditorDialog(
+                repository,
+                folder_path=str(folder),
+                suggested_name="Projekt B",
+            )
+            self.assertIsNotNone(dialog.existing_customer_combo)
+            dialog.existing_customer_combo.setCurrentIndex(0)
+            dialog._assign_to_existing_customer()
+
+            assigned = repository.get_by_folder(str(folder))
+            self.assertIsNotNone(assigned)
+            self.assertEqual(assigned.id, customer.id)
+            self.assertIn("Energieberatung", assigned.service_types)
+
+            dialog.close()
+            repository.close()
 
     def test_folder_page_populates_only_matching_files(self):
         with TemporaryDirectory() as directory:

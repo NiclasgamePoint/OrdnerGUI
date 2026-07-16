@@ -217,5 +217,4 @@ class FolderPage(QWidget):
             self.splitter.setOrientation(orientation)
 
     def cleanup(self):
-        self.file_viewer.pdf_viewer.close_document()
-        self.file_viewer.converter.cleanup()
+        self.file_viewer.shutdown()
