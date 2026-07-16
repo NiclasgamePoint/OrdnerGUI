@@ -620,6 +620,19 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border: none;
     }}
 
+    QWidget#ViewerLoading {{
+        background-color: {surface};
+        color: {text};
+        border: none;
+    }}
+
+    QLabel#ViewerLoadingText {{
+        color: {muted};
+        font-size: 13px;
+        background: transparent;
+        border: none;
+    }}
+
     QPdfView#PdfView,
     QPdfView#PdfView QWidget#qt_scrollarea_viewport {{
         background-color: {surface};
@@ -704,6 +717,18 @@ def build_stylesheet(mode: str, accent: str) -> str:
         color: {text};
         border: 1px solid {border};
         border-radius: 14px;
+    }}
+
+    QFrame#ExistingCustomerAssignment {{
+        background-color: {chip};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 10px;
+    }}
+
+    QFrame#ExistingCustomerAssignment QLabel {{
+        border: none;
+        background-color: transparent;
     }}
 
     QFrame#SettingsPopup {{

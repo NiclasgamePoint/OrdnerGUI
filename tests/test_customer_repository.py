@@ -11,6 +11,36 @@ from app.gui.workers.search_worker import SearchWorker
 
 
 class CustomerRepositoryTests(unittest.TestCase):
+    def test_add_folder_to_existing_customer_and_reject_duplicate_assignment(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "customers.db"
+            repository = CustomerRepository(database)
+            first = repository.save(Customer(
+                display_name="Muster GmbH",
+                company="Muster GmbH",
+            ))
+            second = repository.save(Customer(
+                display_name="Andere GmbH",
+                company="Andere GmbH",
+            ))
+            folder = Path(directory) / "Blower Door" / "2026" / "Projekt A"
+
+            updated = repository.add_folder_to_customer(
+                first.id,
+                str(folder),
+                "Blower Door",
+            )
+
+            self.assertEqual(repository.get_by_folder(str(folder)).id, first.id)
+            self.assertIn(str(folder.resolve()), updated.folder_paths)
+            self.assertIn("Blower Door", updated.service_types)
+            self.assertFalse(any(
+                path.startswith("customer://") for path in updated.folder_paths
+            ))
+            with self.assertRaises(ValueError):
+                repository.add_folder_to_customer(second.id, str(folder))
+            repository.close()
+
     def test_customer_contacts_notes_and_tags_crud(self):
         with TemporaryDirectory() as directory:
             database = Path(directory) / "customers.db"

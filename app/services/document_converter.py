@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+import time
+from typing import Callable
 
 try:
     import olefile
@@ -42,7 +44,11 @@ class DocumentConverter:
             "action": action,
         }
 
-    def extract_legacy_doc(self, path: Path) -> str:
+    def extract_legacy_doc(
+        self,
+        path: Path,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> str:
         executable = shutil.which("catdoc") or shutil.which("antiword")
         if executable is None:
             text, tool = self._extract_legacy_doc_python(path)
@@ -52,12 +58,10 @@ class DocumentConverter:
             self._set_last_operation(converted=False, tool="Nicht verfügbar", action="extract_doc")
             raise RuntimeError("Für .doc wurde kein externer Konverter gefunden")
 
-        result = subprocess.run(
+        result = self._run_command(
             [executable, str(path)],
-            capture_output=True,
-            text=True,
-            errors="replace",
             timeout=30,
+            should_cancel=should_cancel,
         )
         if result.returncode == 0 and result.stdout.strip():
             self._set_last_operation(
@@ -136,19 +140,39 @@ class DocumentConverter:
                     return "\n".join(lines)
         return "\n".join(lines)
 
-    def convert(self, path: Path, target_extension: str) -> Path:
+    def convert(
+        self,
+        path: Path,
+        target_extension: str,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> Path:
         path = path.resolve()
         target_extension = target_extension.lower().lstrip(".")
-        if converted := self._convert_with_libreoffice(path, target_extension):
+        if converted := self._convert_with_libreoffice(
+            path,
+            target_extension,
+            should_cancel,
+        ):
             self._set_last_operation(converted=True, tool="LibreOffice", action="convert")
             return converted
-        if converted := self._convert_with_ms_office(path, target_extension):
+        if should_cancel is not None and should_cancel():
+            raise InterruptedError("Konvertierung wurde abgebrochen")
+        if converted := self._convert_with_ms_office(
+            path,
+            target_extension,
+            should_cancel,
+        ):
             self._set_last_operation(converted=True, tool="MS Office", action="convert")
             return converted
         self._set_last_operation(converted=False, tool="Nicht verfügbar", action="convert")
         raise RuntimeError("Kein geeigneter Konverter gefunden (weder LibreOffice noch MS Office)")
 
-    def _convert_with_libreoffice(self, path: Path, target_extension: str) -> Path | None:
+    def _convert_with_libreoffice(
+        self,
+        path: Path,
+        target_extension: str,
+        should_cancel: Callable[[], bool] | None,
+    ) -> Path | None:
         executable = shutil.which("libreoffice") or shutil.which("soffice")
         if executable is None:
             return None
@@ -170,7 +194,7 @@ class DocumentConverter:
             "XDG_CACHE_HOME": str(cache),
             "SAL_USE_VCLPLUGIN": "svp",
         })
-        result = subprocess.run(
+        result = self._run_command(
             [
                 executable,
                 "--headless",
@@ -181,10 +205,9 @@ class DocumentConverter:
                 str(output),
                 str(path),
             ],
-            capture_output=True,
-            text=True,
             timeout=60,
             env=environment,
+            should_cancel=should_cancel,
         )
         candidates = list(output.glob(f"*.{target_extension}"))
         if result.returncode != 0 or not candidates:
@@ -192,8 +215,13 @@ class DocumentConverter:
             return None
         return candidates[0]
 
-    def _convert_with_ms_office(self, path: Path, target_extension: str) -> Path | None:
-        if not self._can_use_ms_office():
+    def _convert_with_ms_office(
+        self,
+        path: Path,
+        target_extension: str,
+        should_cancel: Callable[[], bool] | None,
+    ) -> Path | None:
+        if not self._can_use_ms_office(should_cancel):
             return None
 
         source_extension = path.suffix.lower().lstrip(".")
@@ -203,14 +231,22 @@ class DocumentConverter:
         output_path = output_dir / f"{path.stem}.{target_extension}"
 
         if source_extension in {"xls", "xlsx"} and target_extension == "xlsx":
-            return self._ms_excel_convert(path, output_path)
+            return self._ms_excel_convert(path, output_path, should_cancel)
         if source_extension in {"doc", "docx"} and target_extension in {"pdf", "txt"}:
-            return self._ms_word_convert(path, output_path, target_extension)
+            return self._ms_word_convert(
+                path,
+                output_path,
+                target_extension,
+                should_cancel,
+            )
 
         self.cleanup()
         return None
 
-    def _can_use_ms_office(self) -> bool:
+    def _can_use_ms_office(
+        self,
+        should_cancel: Callable[[], bool] | None,
+    ) -> bool:
         if sys.platform != "win32":
             return False
         powershell = shutil.which("powershell") or shutil.which("pwsh")
@@ -221,17 +257,23 @@ class DocumentConverter:
             "try {$x=New-Object -ComObject Excel.Application; $x.Quit(); 'ok'} catch {'no'}"
         )
         try:
-            result = subprocess.run(
+            result = self._run_command(
                 [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True,
-                text=True,
                 timeout=10,
+                should_cancel=should_cancel,
             )
+        except InterruptedError:
+            raise
         except Exception:
             return False
         return result.returncode == 0 and "ok" in result.stdout.lower()
 
-    def _ms_excel_convert(self, source: Path, target: Path) -> Path | None:
+    def _ms_excel_convert(
+        self,
+        source: Path,
+        target: Path,
+        should_cancel: Callable[[], bool] | None,
+    ) -> Path | None:
         powershell = shutil.which("powershell") or shutil.which("pwsh")
         if powershell is None:
             return None
@@ -248,12 +290,14 @@ class DocumentConverter:
             "$excel.Quit();"
         )
         try:
-            result = subprocess.run(
+            result = self._run_command(
                 [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True,
-                text=True,
                 timeout=60,
+                should_cancel=should_cancel,
             )
+        except InterruptedError:
+            self.cleanup()
+            raise
         except Exception:
             self.cleanup()
             return None
@@ -262,7 +306,13 @@ class DocumentConverter:
             return None
         return target
 
-    def _ms_word_convert(self, source: Path, target: Path, target_extension: str) -> Path | None:
+    def _ms_word_convert(
+        self,
+        source: Path,
+        target: Path,
+        target_extension: str,
+        should_cancel: Callable[[], bool] | None,
+    ) -> Path | None:
         powershell = shutil.which("powershell") or shutil.which("pwsh")
         if powershell is None:
             return None
@@ -280,12 +330,14 @@ class DocumentConverter:
             "$word.Quit();"
         )
         try:
-            result = subprocess.run(
+            result = self._run_command(
                 [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True,
-                text=True,
                 timeout=60,
+                should_cancel=should_cancel,
             )
+        except InterruptedError:
+            self.cleanup()
+            raise
         except Exception:
             self.cleanup()
             return None
@@ -293,6 +345,48 @@ class DocumentConverter:
             self.cleanup()
             return None
         return target
+
+    def _run_command(
+        self,
+        command: list[str],
+        timeout: float,
+        env: dict[str, str] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            env=env,
+        )
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=0.1)
+                return subprocess.CompletedProcess(
+                    command,
+                    process.returncode,
+                    stdout,
+                    stderr,
+                )
+            except subprocess.TimeoutExpired:
+                if should_cancel is not None and should_cancel():
+                    self._terminate_process(process)
+                    raise InterruptedError("Konvertierung wurde abgebrochen")
+                if time.monotonic() >= deadline:
+                    self._terminate_process(process)
+                    raise subprocess.TimeoutExpired(command, timeout)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen):
+        process.terminate()
+        try:
+            process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
 
     def cleanup(self):
         if self._temporary_directory is not None:

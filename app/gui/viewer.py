@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.viewers import PdfViewerWidget, SpreadsheetViewerWidget, TextViewerWidget
-from app.gui.widgets.buttons import AppButton
+from app.gui.widgets.buttons import AppButton, BusyIndicator
+from app.gui.workers.file_conversion_worker import FileConversionWorker
 from app.services.document_converter import DocumentConverter
 
 
@@ -89,7 +90,9 @@ class FileViewer(QWidget):
         super().__init__(parent)
         self.setObjectName("FileViewer")
         self.current_file: Path | None = None
-        self.converter = DocumentConverter()
+        self._load_generation = 0
+        self._conversion_workers: set[FileConversionWorker] = set()
+        self._active_converter: DocumentConverter | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -111,12 +114,27 @@ class FileViewer(QWidget):
         self.stack.setObjectName("ViewerStack")
         self.empty_label = QLabel("Keine Datei geladen")
         self.empty_label.setAlignment(Qt.AlignCenter)
+        self.loading_widget = QWidget()
+        self.loading_widget.setObjectName("ViewerLoading")
+        loading_layout = QVBoxLayout(self.loading_widget)
+        loading_layout.setContentsMargins(24, 24, 24, 24)
+        loading_layout.addStretch(1)
+        self.loading_indicator = BusyIndicator()
+        self.loading_indicator.setAlignment(Qt.AlignCenter)
+        self.loading_label = QLabel("Datei wird vorbereitet …")
+        self.loading_label.setObjectName("ViewerLoadingText")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setWordWrap(True)
+        loading_layout.addWidget(self.loading_indicator, 0, Qt.AlignCenter)
+        loading_layout.addWidget(self.loading_label)
+        loading_layout.addStretch(1)
         self.pdf_viewer = PdfViewerWidget()
         self.spreadsheet_viewer = SpreadsheetViewerWidget()
         self.text_viewer = TextViewerWidget()
         self.image_viewer = ImageViewerWidget()
         for widget in (
             self.empty_label,
+            self.loading_widget,
             self.pdf_viewer,
             self.spreadsheet_viewer,
             self.text_viewer,
@@ -135,9 +153,11 @@ class FileViewer(QWidget):
         if not filepath.exists() or not filepath.is_file():
             QMessageBox.warning(self, "Fehler", f"Datei nicht gefunden: {filepath}")
             return
+        self._load_generation += 1
+        self._cancel_conversions()
+        self._cleanup_active_converter()
+        self._stop_loading()
         self.pdf_viewer.close_document()
-        self.converter.cleanup()
-        self.converter.reset_last_operation()
         self.current_file = filepath
         self.file_info_label.setText(
             f"{filepath.name} · {filepath.stat().st_size / 1024:.1f} KB"
@@ -174,20 +194,19 @@ class FileViewer(QWidget):
         self._set_conversion_meta(converted=False, tool="Direkt")
 
     def _show_spreadsheet(self, path: Path):
-        converted = False
-        tool = "Direkt"
         try:
             self.spreadsheet_viewer.load(path)
         except Exception:
             if path.suffix.lower() != ".xls":
                 raise
-            converted_path = self.converter.convert(path, "xlsx")
-            self.spreadsheet_viewer.load(converted_path)
-            op = self.converter.get_last_operation()
-            converted = bool(op.get("converted", False))
-            tool = str(op.get("tool", "Unbekannt"))
+            self._start_conversion(
+                FileConversionWorker.XLS_TO_XLSX,
+                path,
+                "Excel-Datei wird konvertiert …",
+            )
+            return
         self.stack.setCurrentWidget(self.spreadsheet_viewer)
-        self._set_conversion_meta(converted=converted, tool=tool)
+        self._set_conversion_meta(converted=False, tool="Direkt")
 
     def _show_docx(self, path: Path):
         document = Document(str(path))
@@ -198,15 +217,107 @@ class FileViewer(QWidget):
         self._set_conversion_meta(converted=False, tool="Direkt")
 
     def _show_legacy_doc(self, path: Path):
-        text = self.converter.extract_legacy_doc(path)
-        if not text.strip():
-            raise ValueError("Inhalt der .doc-Datei konnte nicht extrahiert werden")
-        self._show_text(text)
-        op = self.converter.get_last_operation()
-        self._set_conversion_meta(
-            converted=bool(op.get("converted", False)),
-            tool=str(op.get("tool", "Unbekannt")),
+        self._start_conversion(
+            FileConversionWorker.EXTRACT_DOC,
+            path,
+            "Word-Datei wird im Hintergrund verarbeitet …",
         )
+
+    def _start_conversion(self, operation: str, path: Path, message: str):
+        self._start_loading(message)
+        worker = FileConversionWorker(
+            self._load_generation,
+            operation,
+            path,
+            parent=self,
+        )
+        worker.completed.connect(self._on_conversion_completed)
+        worker.finished.connect(
+            lambda worker=worker: self._release_conversion_worker(worker)
+        )
+        self._conversion_workers.add(worker)
+        worker.start()
+
+    def _on_conversion_completed(
+        self,
+        generation: int,
+        operation: str,
+        result,
+        metadata,
+        error: str,
+    ):
+        worker = self.sender()
+        try:
+            if generation != self._load_generation:
+                return
+            self._stop_loading()
+            if error:
+                if error != "abgebrochen":
+                    self._set_conversion_meta(converted=False, tool="")
+                    self._show_text(
+                        "Datei konnte nicht konvertiert werden:\n\n"
+                        f"{error}"
+                    )
+                return
+
+            if operation == FileConversionWorker.XLS_TO_XLSX:
+                self.spreadsheet_viewer.load(Path(result))
+                if isinstance(worker, FileConversionWorker):
+                    self._active_converter = worker.take_converter()
+                self.stack.setCurrentWidget(self.spreadsheet_viewer)
+            elif operation == FileConversionWorker.EXTRACT_DOC:
+                text = str(result or "")
+                if not text.strip():
+                    raise ValueError(
+                        "Inhalt der .doc-Datei konnte nicht extrahiert werden"
+                    )
+                self._show_text(text)
+            self._set_conversion_meta(
+                converted=bool(metadata.get("converted", False)),
+                tool=str(metadata.get("tool", "Unbekannt")),
+            )
+        except Exception as exc:
+            if generation == self._load_generation:
+                self._stop_loading()
+                self._set_conversion_meta(converted=False, tool="")
+                self._show_text(
+                    "Datei konnte nicht angezeigt werden:\n\n"
+                    f"{exc}"
+                )
+        finally:
+            if isinstance(worker, FileConversionWorker):
+                worker.cleanup()
+
+    def _release_conversion_worker(self, worker: FileConversionWorker):
+        worker.cleanup()
+        self._conversion_workers.discard(worker)
+        worker.deleteLater()
+
+    def _start_loading(self, message: str):
+        self.loading_label.setText(message)
+        self.loading_indicator.start()
+        self.stack.setCurrentWidget(self.loading_widget)
+        self.conversion_meta_label.setText(
+            "Die Konvertierung läuft unabhängig von der Oberfläche."
+        )
+        self.conversion_meta_label.setVisible(True)
+
+    def _stop_loading(self):
+        self.loading_indicator.stop()
+
+    def _cancel_conversions(self):
+        for worker in tuple(self._conversion_workers):
+            if worker.isRunning():
+                worker.requestInterruption()
+
+    def _cleanup_active_converter(self):
+        if self._active_converter is not None:
+            self._active_converter.cleanup()
+            self._active_converter = None
+
+    @property
+    def is_converting(self) -> bool:
+        return any(worker.isRunning() for worker in self._conversion_workers)
 
     def _show_text(self, text: str):
         self.text_viewer.set_text(text[:2_000_000])
@@ -237,6 +348,16 @@ class FileViewer(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current_file.parent)))
 
     def closeEvent(self, event):
-        self.pdf_viewer.close_document()
-        self.converter.cleanup()
+        self.shutdown()
         super().closeEvent(event)
+
+    def shutdown(self):
+        self._load_generation += 1
+        self._stop_loading()
+        self._cancel_conversions()
+        for worker in tuple(self._conversion_workers):
+            worker.wait()
+            worker.cleanup()
+        self._conversion_workers.clear()
+        self._cleanup_active_converter()
+        self.pdf_viewer.close_document()

@@ -152,6 +152,93 @@ class CustomerRepository:
         ).fetchall()
         return [self._hydrate(row) for row in rows]
 
+    def add_folder_to_customer(
+        self,
+        customer_id: int,
+        folder_path: str,
+        service_type: str = "",
+    ) -> Customer:
+        """Assign one physical folder to an existing customer."""
+        if not folder_path.strip():
+            raise ValueError("Bitte einen gültigen Ordner auswählen.")
+        normalized_folder = self._folder_key(folder_path)
+        target = self.get(customer_id)
+        if target is None:
+            raise ValueError("Der ausgewählte Kunde wurde nicht gefunden.")
+
+        assigned_customer = self.get_by_folder(normalized_folder)
+        if assigned_customer is not None and assigned_customer.id != customer_id:
+            raise ValueError(
+                f"Der Ordner ist bereits dem Kunden "
+                f"„{assigned_customer.display_name}“ zugeordnet."
+            )
+
+        cleaned_service = service_type.strip()
+        try:
+            with self.connection:
+                primary_folder = target.folder_path
+                if primary_folder.startswith("customer://"):
+                    self.connection.execute(
+                        """
+                        DELETE FROM customer_folders
+                        WHERE customer_id = ? AND folder_path = ?
+                        """,
+                        (customer_id, primary_folder),
+                    )
+                    self.connection.execute(
+                        """
+                        UPDATE customers
+                        SET folder_path = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (normalized_folder, customer_id),
+                    )
+                else:
+                    self.connection.execute(
+                        """
+                        UPDATE customers
+                        SET updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (customer_id,),
+                    )
+
+                self.connection.execute(
+                    """
+                    INSERT OR IGNORE INTO customer_folders (customer_id, folder_path)
+                    VALUES (?, ?)
+                    """,
+                    (customer_id, normalized_folder),
+                )
+                service_exists = (
+                    self.connection.execute(
+                        """
+                        SELECT 1 FROM customer_services
+                        WHERE customer_id = ? AND name = ? COLLATE NOCASE
+                        """,
+                        (customer_id, cleaned_service),
+                    ).fetchone()
+                    if cleaned_service
+                    else None
+                )
+                if cleaned_service and service_exists is None:
+                    self.connection.execute(
+                        """
+                        INSERT INTO customer_services (customer_id, name)
+                        VALUES (?, ?)
+                        """,
+                        (customer_id, cleaned_service),
+                    )
+        except sqlite3.IntegrityError as error:
+            raise ValueError(
+                "Der Ordner konnte nicht eindeutig zugeordnet werden."
+            ) from error
+
+        updated = self.get(customer_id)
+        if updated is None:
+            raise RuntimeError("Der aktualisierte Kunde konnte nicht geladen werden.")
+        return updated
+
     def save(self, customer: Customer) -> Customer:
         folder_paths = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
         normalized_paths = []
