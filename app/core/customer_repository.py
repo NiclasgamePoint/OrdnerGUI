@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import sqlite3
+import uuid
 
 from app.core.customer_models import Contact, Customer
 
@@ -43,6 +44,10 @@ class CustomerRepository:
                 city TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS customer_types (
+                id INTEGER PRIMARY KEY,
+                name TEXT UNIQUE COLLATE NOCASE NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS contacts (
                 id INTEGER PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -50,6 +55,16 @@ class CustomerRepository:
                 role TEXT NOT NULL DEFAULT '',
                 email TEXT NOT NULL DEFAULT '',
                 phone TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS customer_services (
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                PRIMARY KEY (customer_id, name)
+            );
+            CREATE TABLE IF NOT EXISTS customer_folders (
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                folder_path TEXT UNIQUE NOT NULL,
+                PRIMARY KEY (customer_id, folder_path)
             );
             CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY,
@@ -68,11 +83,34 @@ class CustomerRepository:
             );
             """
         )
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO customer_types (name) VALUES (?)",
+            [("Unternehmen",), ("Privatperson",), ("Organisation",)],
+        )
+        self.connection.execute(
+            """
+            INSERT OR IGNORE INTO customer_folders (customer_id, folder_path)
+            SELECT id, folder_path FROM customers WHERE TRIM(folder_path) != ''
+            """
+        )
         self.connection.commit()
 
     def get_by_folder(self, folder_path: str) -> Customer | None:
+        normalized = self._folder_key(folder_path)
         row = self.connection.execute(
-            "SELECT * FROM customers WHERE folder_path = ?", (self._folder_key(folder_path),)
+            """
+            SELECT customers.* FROM customers
+            JOIN customer_folders ON customer_folders.customer_id = customers.id
+            WHERE customer_folders.folder_path = ?
+            LIMIT 1
+            """,
+            (normalized,),
+        ).fetchone()
+        if row is not None:
+            return self._hydrate(row)
+        row = self.connection.execute(
+            "SELECT * FROM customers WHERE folder_path = ?",
+            (normalized,),
         ).fetchone()
         return self._hydrate(row) if row else None
 
@@ -87,6 +125,12 @@ class CustomerRepository:
             "SELECT * FROM customers ORDER BY display_name COLLATE NOCASE"
         ).fetchall()
         return [self._hydrate(row) for row in rows]
+
+    def list_customer_types(self) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT name FROM customer_types ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        return [str(row[0]) for row in rows]
 
     def search(self, query: str, limit: int = 25) -> list[Customer]:
         pattern = f"%{query}%"
@@ -109,8 +153,25 @@ class CustomerRepository:
         return [self._hydrate(row) for row in rows]
 
     def save(self, customer: Customer) -> Customer:
+        folder_paths = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
+        normalized_paths = []
+        seen_paths = set()
+        for folder in folder_paths:
+            normalized = self._folder_key(folder)
+            if normalized not in seen_paths:
+                normalized_paths.append(normalized)
+                seen_paths.add(normalized)
+
+        primary_folder = customer.folder_path.strip()
+        if primary_folder:
+            primary_folder = self._folder_key(primary_folder)
+        elif normalized_paths:
+            primary_folder = normalized_paths[0]
+        else:
+            primary_folder = f"customer://{uuid.uuid4().hex}"
+
         values = (
-            self._folder_key(customer.folder_path), customer.display_name.strip(),
+            primary_folder, customer.display_name.strip(),
             customer.entity_type, customer.company.strip(), customer.email.strip(),
             customer.phone.strip(), customer.street.strip(), customer.postal_code.strip(),
             customer.city.strip(),
@@ -137,7 +198,13 @@ class CustomerRepository:
                 """,
                 (*values, customer_id),
             )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO customer_types (name) VALUES (?)",
+            (customer.entity_type.strip() or "Unternehmen",),
+        )
         self._replace_contacts(customer_id, customer.contacts)
+        self._replace_services(customer_id, customer.service_types)
+        self._replace_folders(customer_id, normalized_paths or [primary_folder])
         self._replace_notes(customer_id, customer.notes)
         self._replace_tags(customer_id, customer.tags)
         self.connection.commit()
@@ -158,6 +225,25 @@ class CustomerRepository:
                 (customer_id, item.name.strip(), item.role.strip(), item.email.strip(), item.phone.strip())
                 for item in contacts if item.name.strip()
             ],
+        )
+
+    def _replace_services(self, customer_id: int, service_types: list[str]):
+        self.connection.execute("DELETE FROM customer_services WHERE customer_id = ?", (customer_id,))
+        unique = {}
+        for service in service_types:
+            cleaned = service.strip()
+            if cleaned:
+                unique.setdefault(cleaned.casefold(), cleaned)
+        self.connection.executemany(
+            "INSERT INTO customer_services (customer_id, name) VALUES (?, ?)",
+            [(customer_id, item) for item in sorted(unique.values(), key=str.casefold)],
+        )
+
+    def _replace_folders(self, customer_id: int, folder_paths: list[str]):
+        self.connection.execute("DELETE FROM customer_folders WHERE customer_id = ?", (customer_id,))
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO customer_folders (customer_id, folder_path) VALUES (?, ?)",
+            [(customer_id, folder) for folder in folder_paths if folder.strip()],
         )
 
     def _replace_notes(self, customer_id: int, notes: list[str]):
@@ -200,6 +286,20 @@ class CustomerRepository:
                 "SELECT body FROM notes WHERE customer_id=? ORDER BY id", (customer_id,)
             )
         ]
+        service_types = [
+            str(item[0])
+            for item in self.connection.execute(
+                "SELECT name FROM customer_services WHERE customer_id=? ORDER BY name COLLATE NOCASE",
+                (customer_id,),
+            )
+        ]
+        folder_paths = [
+            str(item[0])
+            for item in self.connection.execute(
+                "SELECT folder_path FROM customer_folders WHERE customer_id=? ORDER BY folder_path COLLATE NOCASE",
+                (customer_id,),
+            )
+        ]
         tags = [
             str(item[0])
             for item in self.connection.execute(
@@ -215,7 +315,8 @@ class CustomerRepository:
             folder_path=row["folder_path"], display_name=row["display_name"],
             entity_type=row["entity_type"], company=row["company"], email=row["email"],
             phone=row["phone"], street=row["street"], postal_code=row["postal_code"],
-            city=row["city"], contacts=contacts, notes=notes, tags=tags,
+            city=row["city"], contacts=contacts, service_types=service_types,
+            folder_paths=folder_paths, notes=notes, tags=tags,
         )
 
     def close(self):
