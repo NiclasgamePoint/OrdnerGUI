@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFormLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QSplitter,
-    QTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -21,6 +31,7 @@ from app.gui.widgets.buttons import AppButton
 
 class CustomerOverviewPanel(QWidget):
     customerChanged = Signal()
+    folderSearchRequested = Signal(str)
 
     def __init__(self, repository: CustomerRepository, parent=None):
         super().__init__(parent)
@@ -65,10 +76,12 @@ class CustomerOverviewPanel(QWidget):
         self.detail_title.setObjectName("StatValue")
         right_layout.addWidget(self.detail_title)
 
-        self.detail_summary = QTextEdit()
-        self.detail_summary.setReadOnly(True)
-        self.detail_summary.setPlaceholderText("Kundendetails werden hier angezeigt …")
-        right_layout.addWidget(self.detail_summary, 1)
+        self.detail_tabs = QTabWidget()
+        self.detail_tabs.addTab(self._build_master_page(), "Stammdaten")
+        self.detail_tabs.addTab(self._build_contacts_page(), "Kontakte")
+        self.detail_tabs.addTab(self._build_notes_page(), "Notiz")
+        self.detail_tabs.addTab(self._build_files_page(), "Dateien")
+        right_layout.addWidget(self.detail_tabs, 1)
 
         detail_actions = QHBoxLayout()
         self.edit_button = AppButton("Kunde bearbeiten", AppButton.SECONDARY)
@@ -86,6 +99,110 @@ class CustomerOverviewPanel(QWidget):
         layout.addWidget(splitter, 1)
 
         self._reload_customers()
+
+    def _readonly_line_edit(self) -> QLineEdit:
+        field = QLineEdit()
+        field.setReadOnly(True)
+        return field
+
+    def _build_master_page(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+
+        self.detail_entity_type = self._readonly_line_edit()
+        self.detail_company = self._readonly_line_edit()
+        self.detail_street = self._readonly_line_edit()
+        self.detail_postal_code = self._readonly_line_edit()
+        self.detail_city = self._readonly_line_edit()
+        self.detail_service_types = self._readonly_line_edit()
+        self.detail_folder_paths = self._readonly_line_edit()
+
+        form.addRow("Art", self.detail_entity_type)
+        form.addRow("Unternehmensname", self.detail_company)
+        form.addRow("Firmenadresse", self.detail_street)
+        form.addRow("PLZ", self.detail_postal_code)
+        form.addRow("Ort", self.detail_city)
+        form.addRow("Dienstleistungen", self.detail_service_types)
+        form.addRow("Verknüpfte Ordner", self.detail_folder_paths)
+        return page
+
+    def _build_contacts_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.detail_contacts_table = QTableWidget(0, 3)
+        self.detail_contacts_table.setHorizontalHeaderLabels(["Name", "E-Mail", "Telefon"])
+        self.detail_contacts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.detail_contacts_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.detail_contacts_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.detail_contacts_table)
+        return page
+
+    def _build_notes_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.detail_note_text = QPlainTextEdit()
+        self.detail_note_text.setReadOnly(True)
+        self.detail_note_text.setPlaceholderText("Keine Notiz hinterlegt")
+        layout.addWidget(self.detail_note_text, 1)
+        return page
+
+    def _build_files_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.detail_files_tree = QTreeWidget()
+        self.detail_files_tree.setHeaderLabels(["Ordner / Datei", "Typ", "Größe"])
+        self.detail_files_tree.itemDoubleClicked.connect(self._on_file_tree_item_double_clicked)
+        header = self.detail_files_tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.detail_files_tree, 1)
+        return page
+
+    def _on_file_tree_item_double_clicked(self, item: QTreeWidgetItem, _column: int):
+        if item is None:
+            return
+        if item.text(1) != "Ordner":
+            return
+        label = item.text(0).strip()
+        if not label or label == "-" or label.startswith("("):
+            return
+        query = Path(label).name or label
+        if query:
+            self.folderSearchRequested.emit(query)
+
+    def _set_readonly_text(self, field: QLineEdit, value: str):
+        field.setText(value or "-")
+
+    def _populate_files_tree(self, customer: Customer):
+        self.detail_files_tree.clear()
+        folders = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
+        if not folders:
+            self.detail_files_tree.addTopLevelItem(QTreeWidgetItem(["-", "Ordner", "-"]))
+            return
+
+        for folder in folders:
+            root_item = QTreeWidgetItem([folder, "Ordner", ""])
+            self.detail_files_tree.addTopLevelItem(root_item)
+            folder_path = Path(folder)
+            if not folder_path.exists() or not folder_path.is_dir():
+                root_item.addChild(QTreeWidgetItem(["(nicht gefunden)", "-", "-"]))
+                continue
+
+            file_count = 0
+            for file_path in sorted(folder_path.rglob("*")):
+                if not file_path.is_file():
+                    continue
+                relative_name = str(file_path.relative_to(folder_path))
+                extension = file_path.suffix.lower().lstrip(".") or "-"
+                size_kb = f"{file_path.stat().st_size / 1024:.1f} KB"
+                root_item.addChild(QTreeWidgetItem([relative_name, extension, size_kb]))
+                file_count += 1
+                if file_count >= 500:
+                    root_item.addChild(QTreeWidgetItem(["… weitere Dateien ausgelassen", "", ""]))
+                    break
+            root_item.setExpanded(False)
 
     def refresh(self):
         self._reload_customers()
@@ -136,36 +253,41 @@ class CustomerOverviewPanel(QWidget):
     def _set_detail(self, customer: Customer | None):
         if customer is None:
             self.detail_title.setText("Kein Kunde ausgewählt")
-            self.detail_summary.clear()
+            self._set_readonly_text(self.detail_entity_type, "")
+            self._set_readonly_text(self.detail_company, "")
+            self._set_readonly_text(self.detail_street, "")
+            self._set_readonly_text(self.detail_postal_code, "")
+            self._set_readonly_text(self.detail_city, "")
+            self._set_readonly_text(self.detail_service_types, "")
+            self._set_readonly_text(self.detail_folder_paths, "")
+            self.detail_contacts_table.setRowCount(0)
+            self.detail_note_text.clear()
+            self.detail_files_tree.clear()
             self.edit_button.setEnabled(False)
             return
 
-        lines = [
-            f"Typ: {customer.entity_type or '-'}",
-            f"Firma: {customer.company or '-'}",
-            f"E-Mail: {customer.email or '-'}",
-            f"Telefon: {customer.phone or '-'}",
-            f"Adresse: {', '.join(part for part in [customer.street, customer.postal_code, customer.city] if part) or '-'}",
-            f"Dienstleistungen: {', '.join(customer.service_types) or '-'}",
-            f"Verknüpfte Ordner: {', '.join(customer.folder_paths) or customer.folder_path or '-'}",
-            f"Tags: {', '.join(customer.tags) or '-'}",
-            f"Kontakte: {len(customer.contacts)}",
-            f"Notizen: {len(customer.notes)}",
-        ]
-        if customer.contacts:
-            lines.append("")
-            lines.append("Kontaktdetails:")
-            for contact in customer.contacts:
-                values = [contact.name, contact.role, contact.email, contact.phone]
-                lines.append("- " + " · ".join(value for value in values if value))
-        if customer.notes:
-            lines.append("")
-            lines.append("Notizen:")
-            for note in customer.notes:
-                lines.append(f"- {note}")
-
         self.detail_title.setText(customer.display_name)
-        self.detail_summary.setPlainText("\n".join(lines))
+        self._set_readonly_text(self.detail_entity_type, customer.entity_type)
+        self._set_readonly_text(self.detail_company, customer.company)
+        self._set_readonly_text(self.detail_street, customer.street)
+        self._set_readonly_text(self.detail_postal_code, customer.postal_code)
+        self._set_readonly_text(self.detail_city, customer.city)
+        self._set_readonly_text(self.detail_service_types, ", ".join(customer.service_types))
+        self._set_readonly_text(
+            self.detail_folder_paths,
+            " | ".join(customer.folder_paths) or customer.folder_path,
+        )
+
+        self.detail_contacts_table.setRowCount(0)
+        for contact in customer.contacts:
+            row = self.detail_contacts_table.rowCount()
+            self.detail_contacts_table.insertRow(row)
+            self.detail_contacts_table.setItem(row, 0, QTableWidgetItem(contact.name))
+            self.detail_contacts_table.setItem(row, 1, QTableWidgetItem(contact.email))
+            self.detail_contacts_table.setItem(row, 2, QTableWidgetItem(contact.phone))
+
+        self.detail_note_text.setPlainText("\n\n".join(customer.notes))
+        self._populate_files_tree(customer)
         self.edit_button.setEnabled(True)
 
     def _edit_selected(self):

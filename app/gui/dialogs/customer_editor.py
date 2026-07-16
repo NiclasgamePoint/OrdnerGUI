@@ -3,21 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QHeaderView,
     QMessageBox, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QTreeWidget, QTreeWidgetItem,
     QTabWidget, QVBoxLayout, QWidget,
 )
 
+from app.core.config import DB_FILE
 from app.core.customer_models import Contact, Customer
+from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
+from app.core.search_models import SearchFilters
 from app.gui.widgets.buttons import AppButton
 from app.services.customer_suggestion import CustomerSuggestionService
 
 
 class CustomerEditorDialog(QDialog):
     AUTO_FILL_STYLE = "border: 1px solid #d7a832; background-color: rgba(215, 168, 50, 0.12);"
+    SUGGESTED_ITEM_TOOLTIP = "Automatisch gefundener möglicher Kundenordner"
 
     def __init__(
         self,
@@ -31,6 +35,7 @@ class CustomerEditorDialog(QDialog):
         self.repository = repository
         self.context_folder_path = folder_path
         self._suggestion_service = CustomerSuggestionService()
+        self._suggested_folder_paths: set[str] = set()
         self.customer = (
             repository.get(customer_id)
             if customer_id is not None
@@ -43,6 +48,9 @@ class CustomerEditorDialog(QDialog):
         )
         self.setWindowTitle("Kundendaten bearbeiten")
         self.setMinimumSize(700, 560)
+
+        # Legacy saved data may have split folder names at commas.
+        self.customer.folder_paths = self._normalize_folder_values(self.customer.folder_paths)
 
         layout = QVBoxLayout(self)
         linked_folder = folder_path or (self.customer.folder_paths[0] if self.customer.folder_paths else "-")
@@ -91,7 +99,9 @@ class CustomerEditorDialog(QDialog):
         self.city = QLineEdit(self.customer.city)
         self.service_types = QLineEdit(", ".join(self.customer.service_types))
         folder_values = self.customer.folder_paths or ([self.customer.folder_path] if self.customer.folder_path else [])
-        self.folder_paths = QLineEdit(", ".join(folder_values))
+        self.folder_paths = QLineEdit(" | ".join(folder_values))
+        self.folder_paths.setReadOnly(True)
+        self.folder_paths.setPlaceholderText("Im Dateien-Tab auswählbar")
         form.addRow("Art", self.entity_type)
         form.addRow("Unternehmensname *", self.company)
         form.addRow("Firmenadresse", self.street)
@@ -149,50 +159,223 @@ class CustomerEditorDialog(QDialog):
     def _build_files_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        self.files_tree = QTreeWidget()
-        self.files_tree.setHeaderLabels(["Ordner / Datei", "Typ", "Größe"])
-        header = self.files_tree.header()
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self._populate_files_tree()
-        layout.addWidget(self.files_tree, 1)
+
+        hint = QLabel(
+            "Ein Klick verschiebt Ordner zwischen Vorschlägen und Auswahl. "
+            "Nur Einträge in 'Ausgewählte Ordner' werden gespeichert."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("StatCaption")
+        layout.addWidget(hint)
+
+        tables = QHBoxLayout()
+        tables.setSpacing(10)
+
+        found_panel = QVBoxLayout()
+        found_panel.addWidget(QLabel("Gefundene mögliche Ordner"))
+        self.found_folders_table = QTableWidget(0, 1)
+        self.found_folders_table.setHorizontalHeaderLabels(["Ordnerpfad"])
+        self.found_folders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.found_folders_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.found_folders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.found_folders_table.verticalHeader().setVisible(False)
+        self.found_folders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.found_folders_table.itemClicked.connect(lambda item: self._move_folder_item(item, self.found_folders_table, self.selected_folders_table, suggested=False))
+        found_panel.addWidget(self.found_folders_table, 1)
+
+        selected_panel = QVBoxLayout()
+        selected_panel.addWidget(QLabel("Ausgewählte Ordner"))
+        self.selected_folders_table = QTableWidget(0, 1)
+        self.selected_folders_table.setHorizontalHeaderLabels(["Ordnerpfad"])
+        self.selected_folders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.selected_folders_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.selected_folders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.selected_folders_table.verticalHeader().setVisible(False)
+        self.selected_folders_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.selected_folders_table.itemClicked.connect(lambda item: self._move_folder_item(item, self.selected_folders_table, self.found_folders_table, suggested=True))
+        selected_panel.addWidget(self.selected_folders_table, 1)
+
+        tables.addLayout(selected_panel, 1)
+        tables.addLayout(found_panel, 1)
+        layout.addLayout(tables, 1)
+
+        self._populate_folder_selection_tables()
         return page
 
     def _mark_auto_filled_widget(self, widget: QWidget):
         widget.setStyleSheet(self.AUTO_FILL_STYLE)
         widget.setToolTip("Automatisch aus Dokument-/Ordnerdaten vorausgefüllt")
 
-    def _populate_files_tree(self):
-        self.files_tree.clear()
-        folders = [
-            value.strip()
-            for value in self.folder_paths.text().split(",")
-            if value.strip()
-        ] or ([self.context_folder_path] if self.context_folder_path else [])
+    def _populate_folder_selection_tables(self):
+        if self.customer.id is None:
+            selected = []
+        else:
+            selected = self._normalize_folder_values(
+                self.customer.folder_paths or ([self.customer.folder_path] if self.customer.folder_path else [])
+            )
 
-        for folder in folders:
-            folder_path = Path(folder)
-            root_item = QTreeWidgetItem([str(folder_path), "Ordner", ""])
-            self.files_tree.addTopLevelItem(root_item)
-            if not folder_path.exists() or not folder_path.is_dir():
-                root_item.addChild(QTreeWidgetItem(["(nicht gefunden)", "-", "-"]))
+        discovered = self._discover_related_folders(self.customer.display_name)
+        discovered_set = set(discovered)
+        selected_set = set(selected)
+        self._suggested_folder_paths = {path for path in discovered_set if path not in selected_set}
+
+        self._fill_folder_table(self.selected_folders_table, selected, suggested=False)
+        self._fill_folder_table(
+            self.found_folders_table,
+            [path for path in discovered if path not in selected_set],
+            suggested=True,
+        )
+        self._sync_folder_line_edit_from_selection()
+
+    def _fill_folder_table(self, table: QTableWidget, rows: list[str], suggested: bool):
+        table.blockSignals(True)
+        table.setRowCount(0)
+        for path in rows:
+            row = table.rowCount()
+            table.insertRow(row)
+            item = QTableWidgetItem(path)
+            if suggested:
+                item.setBackground(self.palette().alternateBase())
+                item.setToolTip(self.SUGGESTED_ITEM_TOOLTIP)
+            table.setItem(row, 0, item)
+        table.blockSignals(False)
+
+    def _move_folder_item(
+        self,
+        item: QTableWidgetItem,
+        source: QTableWidget,
+        target: QTableWidget,
+        suggested: bool,
+    ):
+        if item is None:
+            return
+        value = item.text().strip()
+        if not value:
+            return
+
+        source_row = item.row()
+        source.blockSignals(True)
+        source.removeRow(source_row)
+        source.blockSignals(False)
+
+        if self._table_contains_path(target, value):
+            self._sync_folder_line_edit_from_selection()
+            return
+
+        target.blockSignals(True)
+        row = target.rowCount()
+        target.insertRow(row)
+        target_item = QTableWidgetItem(value)
+        if suggested:
+            target_item.setBackground(self.palette().alternateBase())
+            target_item.setToolTip(self.SUGGESTED_ITEM_TOOLTIP)
+        target.setItem(row, 0, target_item)
+        target.blockSignals(False)
+        self._sync_folder_line_edit_from_selection()
+
+    def _table_contains_path(self, table: QTableWidget, path_value: str) -> bool:
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            if item and item.text().strip() == path_value:
+                return True
+        return False
+
+    def _selected_folder_values(self) -> list[str]:
+        values: list[str] = []
+        for row in range(self.selected_folders_table.rowCount()):
+            item = self.selected_folders_table.item(row, 0)
+            if item and item.text().strip():
+                values.append(item.text().strip())
+        return self._normalize_folder_values(values)
+
+    def _sync_folder_line_edit_from_selection(self):
+        self.folder_paths.setText(" | ".join(self._selected_folder_values()))
+
+    def _discover_related_folders(self, suggested_name: str) -> list[str]:
+        queries: list[str] = []
+
+        if self.context_folder_path:
+            try:
+                context_path = Path(self.context_folder_path).resolve()
+            except OSError:
+                context_path = Path(self.context_folder_path)
+            if context_path.parent.name:
+                queries.append(context_path.parent.name)
+            if context_path.name:
+                queries.append(context_path.name)
+
+        if suggested_name.strip():
+            queries.append(suggested_name.strip())
+
+        company_name = self.customer.company.strip()
+        if company_name:
+            queries.append(company_name)
+
+        normalized_queries: list[str] = []
+        seen_queries: set[str] = set()
+        for query in queries:
+            cleaned = " ".join(query.split())
+            if len(cleaned) < 2:
+                continue
+            key = cleaned.casefold()
+            if key in seen_queries:
+                continue
+            seen_queries.add(key)
+            normalized_queries.append(cleaned)
+
+        results: list[str] = []
+        manager = None
+        try:
+            manager = IndexManager(DB_FILE, initialize=False)
+            filters = SearchFilters()
+            for query in normalized_queries:
+                page = manager.search_folders_page(query, filters, page=1, page_size=200)
+                for item in page.items:
+                    path = item.get("folder_path", "")
+                    if path:
+                        results.append(path)
+        except Exception:
+            # If index search is unavailable, keep the dialog usable.
+            results = []
+        finally:
+            if manager is not None:
+                manager.close()
+
+        return self._normalize_folder_values(results)
+
+    def _normalize_lookup_token(self, text: str) -> str:
+        token = (text or "").casefold().strip()
+        for marker in [",", ";", ".", "-", "_", "(", ")", "[", "]"]:
+            token = token.replace(marker, " ")
+        return " ".join(token.split())
+
+    def _parse_folder_values(self, raw_text: str) -> list[str]:
+        text = (raw_text or "").strip()
+        if not text:
+            return []
+
+        if "|" in text:
+            values = [value.strip() for value in text.split("|") if value.strip()]
+        else:
+            # If there is no explicit separator, keep the full input as one path.
+            values = [text]
+        return self._normalize_folder_values(values)
+
+    def _normalize_folder_values(self, values: list[str]) -> list[str]:
+        merged: list[str] = []
+        for value in values:
+            token = (value or "").strip()
+            if not token:
                 continue
 
-            file_count = 0
-            for file_path in sorted(folder_path.rglob("*")):
-                if not file_path.is_file():
-                    continue
-                relative_name = str(file_path.relative_to(folder_path))
-                extension = file_path.suffix.lower().lstrip(".") or "-"
-                size_kb = f"{file_path.stat().st_size / 1024:.1f} KB"
-                root_item.addChild(QTreeWidgetItem([relative_name, extension, size_kb]))
-                file_count += 1
-                if file_count >= 500:
-                    root_item.addChild(QTreeWidgetItem(["… weitere Dateien ausgelassen", "", ""]))
-                    break
-            root_item.setExpanded(True)
+            # Heuristic to heal old data that accidentally split paths at commas,
+            # e.g. ['/abs/path/abgeschlossene Messungen', 'Kaltenkirchen'].
+            if merged and Path(merged[-1]).is_absolute() and not Path(token).is_absolute():
+                merged[-1] = f"{merged[-1]}, {token}"
+                continue
+
+            merged.append(token)
+        return merged
 
     def _offer_auto_suggestions(self, suggested_name: str):
         suggestion = self._suggestion_service.suggest_for_folder(
@@ -257,9 +440,7 @@ class CustomerEditorDialog(QDialog):
         self.customer.service_types = [
             value.strip() for value in self.service_types.text().split(",") if value.strip()
         ]
-        folders = [value.strip() for value in self.folder_paths.text().split(",") if value.strip()]
-        if self.context_folder_path and self.context_folder_path not in folders:
-            folders.insert(0, self.context_folder_path)
+        folders = self._selected_folder_values()
         self.customer.folder_paths = folders
         if folders:
             self.customer.folder_path = folders[0]
