@@ -17,3 +17,9 @@
     - Maus Hoover konsequent machen 
 - Dienstlesiitungstypen als eigene Dtenbank
 - bessere zuordnung Kunde Ordnerstruktur
+- Installer für das Deplyment
+- Auto Updates wenn neue Versionen raus kommen? 
+
+
+## Patrick
+
