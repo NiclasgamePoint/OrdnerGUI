@@ -1,20 +1,3 @@
-## Datenstruktur
-
-Die Indexierung behandelt alle Fachthemen gleich. Es gibt keine Sonderlogik für „Blower Door“.
-
-```text
-Bauvorhaben/
-├── Baubegleitung/
-├── Blower Door/
-├── DEKRA/
-└── Elektroplanung/
-    └── Jahr oder Vorlagen/
-        └── Projekt- bzw. Kundenordner/
-            └── weitere Unterordner und Dateien
-```
-
-Weitere Fachthemen können als neue Ordner der ersten Ebene ergänzt werden und werden automatisch erkannt.
-
 ## Funktionen
 
 - Gemeinsame Suche nach Ordnern/Kunden, Dateinamen und Dokumentinhalten
