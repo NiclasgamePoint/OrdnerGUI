@@ -21,6 +21,7 @@ from docx import Document
 from PyPDF2 import PdfReader
 from app.core.config import IndexOptions
 from app.core.search_models import SearchFilters, SearchPage
+from app.services.document_converter import DocumentConverter
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class IndexManager:
         self.db_path = db_path
         self.conn = None
         self.options = options or IndexOptions()
+        self._document_converter = DocumentConverter()
         self._ocr_language = None
         if initialize:
             self.init_db()
@@ -611,60 +613,10 @@ class IndexManager:
             workbook.release_resources()
 
     def _extract_doc_text(self, filepath: Path) -> str:
-        for executable_name in ("catdoc", "antiword"):
-            executable = shutil.which(executable_name)
-            if executable:
-                result = subprocess.run(
-                    [executable, str(filepath)],
-                    capture_output=True,
-                    text=True,
-                    errors="replace",
-                    timeout=30,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return self._limit_text(result.stdout)
-
-        libreoffice = self._find_libreoffice()
-        if libreoffice is None:
+        try:
+            return self._limit_text(self._document_converter.extract_legacy_doc(filepath))
+        except Exception:
             return ""
-
-        with TemporaryDirectory(prefix="papagui-doc-index-") as temp_dir:
-            output_dir = Path(temp_dir)
-            profile_dir = output_dir / "profile"
-            runtime_dir = output_dir / "runtime"
-            config_dir = output_dir / "config"
-            cache_dir = output_dir / "cache"
-            profile_dir.mkdir()
-            runtime_dir.mkdir(mode=0o700)
-            config_dir.mkdir()
-            cache_dir.mkdir()
-            environment = os.environ.copy()
-            environment.update({
-                "XDG_RUNTIME_DIR": str(runtime_dir),
-                "XDG_CONFIG_HOME": str(config_dir),
-                "XDG_CACHE_HOME": str(cache_dir),
-                "SAL_USE_VCLPLUGIN": "svp",
-            })
-            result = subprocess.run(
-                [
-                    str(libreoffice),
-                    "--headless",
-                    f"-env:UserInstallation={profile_dir.as_uri()}",
-                    "--convert-to",
-                    "txt:Text",
-                    "--outdir",
-                    str(output_dir),
-                    str(filepath),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=45,
-                env=environment,
-            )
-            converted = next(output_dir.glob("*.txt"), None)
-            if result.returncode == 0 and converted is not None:
-                return self._limit_text(converted.read_text(encoding="utf-8", errors="replace"))
-        return ""
 
     def _ocr_pdf(self, filepath: Path) -> str:
         pdftoppm = shutil.which("pdftoppm")
