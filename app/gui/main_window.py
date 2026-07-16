@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
-    QMessageBox, QProgressBar, QToolButton, QCompleter
+    QMessageBox, QProgressBar, QToolButton, QCompleter, QScrollArea
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QStringListModel
 from PySide6.QtGui import QIcon
@@ -40,7 +40,7 @@ from app.core.index_store import (
 from app.gui.viewer import FileViewer
 from app.gui.theme import ThemeManager
 from app.gui.settings_popup import SettingsPopup
-from app.gui.panels import CustomerDetailsPanel
+from app.gui.panels import CustomerDetailsPanel, CustomerOverviewPanel
 from app.gui.widgets import (
     AppButton,
     HighlightDelegate,
@@ -106,6 +106,19 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         main_widget = QWidget()
         main_widget.setObjectName("RootWidget")
+        main_root_layout = QVBoxLayout(main_widget)
+        main_root_layout.setContentsMargins(0, 0, 0, 0)
+        main_root_layout.setSpacing(0)
+
+        self.page_scroll_area = QScrollArea()
+        self.page_scroll_area.setWidgetResizable(True)
+        self.page_scroll_area.setObjectName("MainScrollArea")
+        main_root_layout.addWidget(self.page_scroll_area)
+
+        page_widget = QWidget()
+        page_widget.setObjectName("RootWidget")
+        self.page_scroll_area.setWidget(page_widget)
+
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(16, 14, 16, 14)
@@ -170,6 +183,7 @@ class MainWindow(QMainWindow):
         
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setChildrenCollapsible(False)
+        content_splitter.setMinimumHeight(620)
         
         left_card = QWidget()
         left_card.setObjectName("SideCard")
@@ -244,8 +258,26 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.progress_bar)
         
         main_layout.addWidget(status_card)
-        
-        main_widget.setLayout(main_layout)
+
+        overview_card = QWidget()
+        overview_card.setObjectName("DetailsCard")
+        overview_card.setMinimumHeight(360)
+        overview_layout = QVBoxLayout(overview_card)
+        overview_layout.setContentsMargins(12, 12, 12, 12)
+        overview_layout.setSpacing(8)
+        overview_title = QLabel("Kundenübersicht")
+        overview_title.setObjectName("SectionTitle")
+        overview_layout.addWidget(overview_title)
+
+        self.customer_overview_panel = CustomerOverviewPanel(self.customer_repository)
+        self.customer_overview_panel.setMinimumHeight(320)
+        overview_layout.addWidget(self.customer_overview_panel, 1)
+        main_layout.addWidget(overview_card)
+
+        self.customer_details_panel.customerChanged.connect(self.customer_overview_panel.refresh)
+        self.customer_overview_panel.customerChanged.connect(self.customer_details_panel._refresh_customer_summary)
+
+        page_widget.setLayout(main_layout)
 
     def apply_theme(self):
         app = QApplication.instance()

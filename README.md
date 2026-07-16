@@ -71,3 +71,13 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
 ```
 
 Die Tests prüfen unter anderem generische Fachthemen, inkrementelle Indexierung, Diagnosewerte, Filter/Pagination, Dateisystemänderungen, Viewer und Kunden-CRUD.
+
+## Kundenvorschläge und Kundenübersicht
+
+Die Anwendung unterstützt eine Kundenverwaltung, die von einzelnen Dienstleistungen getrennt ist. Ein Kunde kann mehrere Dienstleistungen und mehrere verknüpfte Projektordner haben.
+
+- Kundentypen sind dynamisch und können beim Bearbeiten frei gepflegt werden (z. B. Privatkunde, Firma, Gemeinde).
+- Kundendaten können über Vorschläge aus Ordnerstruktur und Dokumentinhalten vorbereitet und anschließend im Dialog bestätigt werden.
+- Unterhalb des Hauptbereichs gibt es eine Kundenübersicht mit Kundenliste (links) und dynamischer Detailansicht (rechts).
+
+Die Übersicht ist Teil der normalen Seitenansicht und über vertikales Scrollen erreichbar.

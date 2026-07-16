@@ -12,6 +12,7 @@ from app.gui.widgets.buttons import AppButton
 
 class CustomerDetailsPanel(QWidget):
     fileActivated = Signal(str)
+    customerChanged = Signal()
 
     def __init__(self, repository: CustomerRepository, parent=None):
         super().__init__(parent)
@@ -107,6 +108,8 @@ class CustomerDetailsPanel(QWidget):
             lines.append(contact)
         if customer.tags:
             lines.append("Tags: " + ", ".join(customer.tags))
+        if customer.service_types:
+            lines.append("Dienstleistungen: " + ", ".join(customer.service_types))
         lines.append(f"{len(customer.contacts)} Kontakte · {len(customer.notes)} Notizen")
         self.customer_summary.setText("\n".join(lines))
         self.edit_button.setText("Kundendaten bearbeiten")
@@ -115,13 +118,14 @@ class CustomerDetailsPanel(QWidget):
         if self.current_details is None:
             return
         dialog = CustomerEditorDialog(
-            self.repository,
-            self.current_details["folder_path"],
-            self.current_details["folder_name"],
-            self,
+            repository=self.repository,
+            folder_path=self.current_details["folder_path"],
+            suggested_name=self.current_details["folder_name"],
+            parent=self,
         )
         if dialog.exec():
             self._refresh_customer_summary()
+            self.customerChanged.emit()
 
     def _activate_file(self, item: QListWidgetItem):
         path = item.data(Qt.UserRole)
