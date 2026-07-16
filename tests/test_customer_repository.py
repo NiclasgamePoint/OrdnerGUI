@@ -44,7 +44,7 @@ class CustomerRepositoryTests(unittest.TestCase):
             self.assertIsNone(repository.get(updated.id))
             repository.close()
 
-    def test_customer_tag_is_merged_into_folder_search(self):
+    def test_customer_tag_is_returned_as_separate_customer_search_result(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "source"
             project = root / "DEKRA" / "2026" / "Ordnername"
@@ -63,15 +63,14 @@ class CustomerRepositoryTests(unittest.TestCase):
 
             captured = []
             worker = SearchWorker(
-                index_path, 1, "folders", "VIP", 100, SearchFilters(), 1, 25,
+                index_path, 1, "customers", "VIP", 100, SearchFilters(), 1, 25,
                 customer_path,
             )
             worker.completed.connect(lambda *args: captured.append(args))
             worker.run()
             page = captured[0][2]
             self.assertEqual(page.total, 1)
-            self.assertTrue(page.items[0]["customer_match"])
-            self.assertEqual(page.items[0]["folder_name"], "Abweichender Name")
+            self.assertEqual(page.items[0].display_name, "Abweichender Name")
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from app.gui.widgets.buttons import AppButton
 class PdfViewerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ViewerContent")
         self.document = QPdfDocument(self)
         self.search_model = QPdfSearchModel(self)
         self.search_model.setDocument(self.document)

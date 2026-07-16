@@ -70,7 +70,7 @@ class SettingsPopup(QFrame):
         content_layout.setContentsMargins(18, 16, 18, 14)
         content_layout.setSpacing(14)
 
-        title = QLabel("Settings")
+        title = QLabel("Einstellungen")
         title.setObjectName("PopupTitle")
         content_layout.addWidget(title)
 
@@ -127,6 +127,7 @@ class SettingsPopup(QFrame):
 
     def _build_general_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("SettingsPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(10)
@@ -260,6 +261,7 @@ class SettingsPopup(QFrame):
 
     def _build_index_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("SettingsPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(12)
@@ -331,6 +333,7 @@ class SettingsPopup(QFrame):
 
     def _build_diagnostics_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("SettingsPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(10)
@@ -452,6 +455,7 @@ class SettingsPopup(QFrame):
 
     def _build_appearance_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("SettingsPage")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(10)

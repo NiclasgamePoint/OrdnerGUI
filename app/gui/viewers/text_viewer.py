@@ -9,6 +9,7 @@ from app.gui.widgets.buttons import AppButton
 class TextViewerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ViewerContent")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         toolbar = QHBoxLayout()

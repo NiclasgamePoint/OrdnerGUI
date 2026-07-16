@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QHeaderView,
     QMessageBox, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget,
@@ -15,11 +15,12 @@ from app.core.customer_models import Contact, Customer
 from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
 from app.core.search_models import SearchFilters
+from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.widgets.buttons import AppButton
 from app.services.customer_suggestion import CustomerSuggestionService
 
 
-class CustomerEditorDialog(QDialog):
+class CustomerEditorDialog(CenteredPopupDialog):
     AUTO_FILL_STYLE = "border: 1px solid #d7a832; background-color: rgba(215, 168, 50, 0.12);"
     SUGGESTED_ITEM_TOOLTIP = "Automatisch gefundener möglicher Kundenordner"
 
@@ -46,13 +47,25 @@ class CustomerEditorDialog(QDialog):
             display_name=suggested_name,
             company=suggested_name,
         )
-        self.setWindowTitle("Kundendaten bearbeiten")
         self.setMinimumSize(700, 560)
+        self.resize(820, 640)
 
         # Legacy saved data may have split folder names at commas.
         self.customer.folder_paths = self._normalize_folder_values(self.customer.folder_paths)
 
-        layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        body = QFrame()
+        body.setObjectName("CustomerEditorBody")
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        popup_title = QLabel("Kundendaten bearbeiten")
+        popup_title.setObjectName("PopupSectionTitle")
+        layout.addWidget(popup_title)
+
         linked_folder = folder_path or (self.customer.folder_paths[0] if self.customer.folder_paths else "-")
         title = QLabel(f"Verknüpfter Ordner: {linked_folder}")
         title.setObjectName("PopupCaption")
@@ -78,12 +91,14 @@ class CustomerEditorDialog(QDialog):
         actions.addWidget(cancel_button)
         actions.addWidget(save_button)
         layout.addLayout(actions)
+        root_layout.addWidget(body)
 
         if self.customer.id is None and self.context_folder_path:
             self._offer_auto_suggestions(suggested_name)
 
     def _build_master_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("DialogPage")
         form = QFormLayout(page)
         self.entity_type = QComboBox()
         self.entity_type.setEditable(True)
@@ -113,6 +128,7 @@ class CustomerEditorDialog(QDialog):
 
     def _build_contacts_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("DialogPage")
         layout = QVBoxLayout(page)
         self.contacts_table = QTableWidget(0, 3)
         self.contacts_table.setHorizontalHeaderLabels(["Name", "E-Mail", "Telefon"])
@@ -148,6 +164,7 @@ class CustomerEditorDialog(QDialog):
 
     def _build_notes_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("DialogPage")
         layout = QVBoxLayout(page)
         layout.addWidget(QLabel("Notiz"))
         self.note_text = QPlainTextEdit()
@@ -158,6 +175,7 @@ class CustomerEditorDialog(QDialog):
 
     def _build_files_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("DialogPage")
         layout = QVBoxLayout(page)
 
         hint = QLabel(
@@ -455,7 +473,6 @@ class CustomerEditorDialog(QDialog):
         self.customer.contacts = contacts
         note_text = self.note_text.toPlainText().strip()
         self.customer.notes = [note_text] if note_text else []
-        self.customer.tags = []
         self.repository.save(self.customer)
         self.accept()
 

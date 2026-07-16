@@ -17,6 +17,7 @@ class SpreadsheetViewerWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ViewerContent")
         self.path: Path | None = None
         self.sheet_names: list[str] = []
         layout = QVBoxLayout(self)

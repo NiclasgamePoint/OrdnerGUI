@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from PySide6.QtCore import QSettings
 
@@ -20,7 +21,7 @@ class SearchFilters:
 
 @dataclass(frozen=True)
 class SearchPage:
-    items: list[dict]
+    items: list[Any]
     total: int
     page: int
     page_size: int
