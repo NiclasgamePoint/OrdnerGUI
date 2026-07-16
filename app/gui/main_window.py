@@ -244,7 +244,7 @@ class MainWindow(QMainWindow):
         content_splitter.setStretchFactor(1, 3)
         content_splitter.setSizes([340, 1040])
         
-        main_layout.addWidget(content_splitter, 1)
+        main_layout.addWidget(content_splitter, 2)
         
         status_card = QWidget()
         status_card.setObjectName("StatusCard")
@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
 
         overview_card = QWidget()
         overview_card.setObjectName("DetailsCard")
-        overview_card.setMinimumHeight(360)
+        overview_card.setMinimumHeight(500)
         overview_layout = QVBoxLayout(overview_card)
         overview_layout.setContentsMargins(12, 12, 12, 12)
         overview_layout.setSpacing(8)
@@ -270,12 +270,13 @@ class MainWindow(QMainWindow):
         overview_layout.addWidget(overview_title)
 
         self.customer_overview_panel = CustomerOverviewPanel(self.customer_repository)
-        self.customer_overview_panel.setMinimumHeight(320)
+        self.customer_overview_panel.setMinimumHeight(460)
         overview_layout.addWidget(self.customer_overview_panel, 1)
-        main_layout.addWidget(overview_card)
+        main_layout.addWidget(overview_card, 3)
 
         self.customer_details_panel.customerChanged.connect(self.customer_overview_panel.refresh)
         self.customer_overview_panel.customerChanged.connect(self.customer_details_panel._refresh_customer_summary)
+        self.customer_overview_panel.folderSearchRequested.connect(self._search_for_folder_from_overview)
 
         page_widget.setLayout(main_layout)
 
@@ -299,6 +300,13 @@ class MainWindow(QMainWindow):
         self.filter_popup.move(max(available.left(), popup_x), max(available.top(), popup_y))
         self.filter_popup.show()
         self.filter_popup.raise_()
+
+    def _search_for_folder_from_overview(self, query: str):
+        text = (query or "").strip()
+        if not text:
+            return
+        self.search_input.setText(text)
+        self.start_full_search()
 
     def open_settings_popup(self):
         self.filter_popup.close()
