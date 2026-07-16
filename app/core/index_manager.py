@@ -20,6 +20,7 @@ import xlrd
 from docx import Document
 from PyPDF2 import PdfReader
 from app.core.config import IndexOptions
+from app.core.folder_structure import FolderStructureClassifier
 from app.core.search_models import SearchFilters, SearchPage
 from app.services.document_converter import DocumentConverter
 
@@ -34,7 +35,7 @@ class IndexManager:
         "txt", "csv", "md", "log", "json", "xml", "yaml", "yml", "ini"
     }
     CONTENT_INDEX_TYPES = BINARY_CONTENT_TYPES | TEXT_CONTENT_TYPES
-    SCHEMA_VERSION = "3"
+    SCHEMA_VERSION = "4"
     EXTRACTOR_VERSION = "3"
     APP_VERSION = "0.2"
 
@@ -47,6 +48,7 @@ class IndexManager:
         self.db_path = db_path
         self.conn = None
         self.options = options or IndexOptions()
+        self._folder_classifier = FolderStructureClassifier()
         self._document_converter = DocumentConverter()
         self._ocr_language = None
         if initialize:
@@ -102,6 +104,21 @@ class IndexManager:
                 name TEXT NOT NULL,
                 relative_path TEXT,
                 parent_path TEXT,
+                index_root TEXT NOT NULL,
+                project_root_path TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_roots (
+                path TEXT PRIMARY KEY,
+                relative_path TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                customer_label TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                city TEXT NOT NULL DEFAULT '',
+                recognition_key TEXT NOT NULL,
                 index_root TEXT NOT NULL
             )
         """)
@@ -125,6 +142,8 @@ class IndexManager:
         self._ensure_column(cursor, "files", "content_status", "TEXT")
         self._ensure_column(cursor, "files", "content_error", "TEXT")
         self._ensure_column(cursor, "files", "extractor_version", "TEXT")
+        self._ensure_column(cursor, "files", "project_root_path", "TEXT")
+        self._ensure_column(cursor, "folders", "project_root_path", "TEXT")
         
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_customer ON files(customer_name)
@@ -151,7 +170,10 @@ class IndexManager:
             CREATE INDEX IF NOT EXISTS idx_index_root ON files(index_root)
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_folder_path ON files(folder_path)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_project_root ON files(project_root_path)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_name ON folders(name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_folder_project_root ON folders(project_root_path)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_project_recognition_key ON project_roots(recognition_key)")
         
         self.conn.commit()
 
@@ -254,12 +276,15 @@ class IndexManager:
             cursor.execute("DELETE FROM file_content_fts")
             cursor.execute("DELETE FROM files")
             cursor.execute("DELETE FROM folders")
+            cursor.execute("DELETE FROM project_roots")
             cursor.execute("DELETE FROM indexed_roots")
 
         cursor.execute("CREATE TEMP TABLE IF NOT EXISTS seen_files (path TEXT PRIMARY KEY)")
         cursor.execute("DELETE FROM seen_files")
         cursor.execute("CREATE TEMP TABLE IF NOT EXISTS seen_folders (path TEXT PRIMARY KEY)")
         cursor.execute("DELETE FROM seen_folders")
+        cursor.execute("CREATE TEMP TABLE IF NOT EXISTS seen_project_roots (path TEXT PRIMARY KEY)")
+        cursor.execute("DELETE FROM seen_project_roots")
 
         processed_count = 0
         excluded = self.options.excluded_folder_names
@@ -274,14 +299,16 @@ class IndexManager:
             relative = current_path.relative_to(base_path)
             relative_text = "" if relative == Path(".") else str(relative)
             parent_path = str(current_path.parent) if current_path != base_path else ""
+            project_root = self._folder_classifier.classify(current_path, base_path)
+            project_root_path = project_root.path if project_root is not None else None
             folder_exists = cursor.execute(
                 "SELECT 1 FROM folders WHERE path = ?", (str(current_path),)
             ).fetchone()
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO folders
-                (path, name, relative_path, parent_path, index_root)
-                VALUES (?, ?, ?, ?, ?)
+                (path, name, relative_path, parent_path, index_root, project_root_path)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(current_path),
@@ -289,9 +316,34 @@ class IndexManager:
                     relative_text,
                     parent_path,
                     str(base_path),
+                    project_root_path,
                 ),
             )
             cursor.execute("INSERT OR IGNORE INTO seen_folders(path) VALUES (?)", (str(current_path),))
+            if project_root is not None and str(current_path) == project_root.path:
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO project_roots
+                    (path, relative_path, service_type, year, customer_label,
+                     customer_name, city, recognition_key, index_root)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_root.path,
+                        project_root.relative_path,
+                        project_root.service_type,
+                        project_root.year,
+                        project_root.customer_label,
+                        project_root.customer_name,
+                        project_root.city,
+                        project_root.recognition_key,
+                        str(base_path),
+                    ),
+                )
+                cursor.execute(
+                    "INSERT OR IGNORE INTO seen_project_roots(path) VALUES (?)",
+                    (project_root.path,),
+                )
             if folder_exists is None:
                 changed_count += 1
 
@@ -346,6 +398,10 @@ class IndexManager:
         cursor.execute("DELETE FROM files WHERE path NOT IN (SELECT path FROM seen_files)")
         changed_count += max(cursor.rowcount, 0)
         cursor.execute("DELETE FROM folders WHERE path NOT IN (SELECT path FROM seen_folders)")
+        changed_count += max(cursor.rowcount, 0)
+        cursor.execute(
+            "DELETE FROM project_roots WHERE path NOT IN (SELECT path FROM seen_project_roots)"
+        )
         changed_count += max(cursor.rowcount, 0)
         changed_count += self._normalize_content_statuses()
         cursor.execute("DELETE FROM indexed_roots")
@@ -404,6 +460,8 @@ class IndexManager:
             
             file_type = filepath.suffix.lower().lstrip('.')
             relative_dir = str(filepath.parent.relative_to(base_path))
+            project_root = self._folder_classifier.classify(filepath.parent, base_path)
+            project_root_path = project_root.path if project_root is not None else None
             
             cursor.execute("""
                 INSERT OR REPLACE INTO files 
@@ -411,8 +469,8 @@ class IndexManager:
                  year, service_type, customer_name, subfolder,
                  domain_folder, time_bucket, project_name, relative_dir, index_root,
                  full_text_indexed, folder_path, modified_ns, content_hash,
-                 content_status, content_error, extractor_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 content_status, content_error, extractor_version, project_root_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(filepath),
                 filepath.name,
@@ -436,6 +494,7 @@ class IndexManager:
                 "not_applicable",
                 "",
                 "",
+                project_root_path,
             ))
 
             if file_type in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types):
@@ -823,27 +882,52 @@ class IndexManager:
         page_size: int = 25,
     ) -> SearchPage:
         cursor = self.conn.cursor()
-        filter_sql, filter_params = self._metadata_filter_clause(filters, "f")
-        exists_sql = f"""
-            EXISTS (
-                SELECT 1 FROM files f
-                WHERE (f.folder_path = folders.path OR f.path LIKE folders.path || ? || '%')
-                {filter_sql}
+        filter_sql, filter_params = self._metadata_filter_clause(filters, "meta")
+        common_cte = f"""
+            WITH canonical_paths AS (
+                SELECT DISTINCT
+                    COALESCE(NULLIF(folder.project_root_path, ''), folder.path) AS path
+                FROM folders folder
+                WHERE (folder.name LIKE ? OR folder.relative_path LIKE ?)
+                  AND (
+                      COALESCE(folder.project_root_path, '') <> ''
+                      OR NOT EXISTS (
+                          SELECT 1 FROM project_roots project
+                          WHERE project.path = folder.path
+                             OR project.path LIKE folder.path || ? || '%'
+                      )
+                  )
+            ), eligible AS (
+                SELECT root.path, root.name, root.relative_path
+                FROM canonical_paths canonical
+                JOIN folders root ON root.path = canonical.path
+                WHERE EXISTS (
+                    SELECT 1 FROM files meta
+                    WHERE (
+                        meta.folder_path = root.path
+                        OR meta.path LIKE root.path || ? || '%'
+                    )
+                    {filter_sql}
+                )
             )
         """
-        where_sql = f"(folders.name LIKE ? OR folders.relative_path LIKE ?) AND {exists_sql}"
-        common_params = [f"%{query}%", f"%{query}%", os.sep, *filter_params]
+        common_params = [
+            f"%{query}%",
+            f"%{query}%",
+            os.sep,
+            os.sep,
+            *filter_params,
+        ]
         total = int(cursor.execute(
-            f"SELECT COUNT(*) FROM folders WHERE {where_sql}", common_params
+            f"{common_cte} SELECT COUNT(*) FROM eligible", common_params
         ).fetchone()[0])
         offset = max(0, page - 1) * page_size
-        sql = f"""
-            SELECT path, name, relative_path,
+        sql = f"""{common_cte}
+            SELECT eligible.path, eligible.name, eligible.relative_path,
                 (SELECT COUNT(*) FROM files
-                 WHERE files.folder_path = folders.path
-                    OR files.path LIKE folders.path || ? || '%') AS file_count
-            FROM folders
-            WHERE {where_sql}
+                 WHERE files.folder_path = eligible.path
+                    OR files.path LIKE eligible.path || ? || '%') AS file_count
+            FROM eligible
             ORDER BY
                 CASE
                     WHEN name = ? COLLATE NOCASE THEN 0
@@ -855,8 +939,8 @@ class IndexManager:
             LIMIT ? OFFSET ?
         """
         params = [
-            os.sep,
             *common_params,
+            os.sep,
             query,
             f"{query}%",
             f"%{query}%",
@@ -878,6 +962,7 @@ class IndexManager:
     def get_folder_search_entry(
         self, folder_path: str, filters: SearchFilters
     ) -> Optional[Dict]:
+        canonical_path = self._canonical_folder_path(folder_path)
         filter_sql, filter_params = self._metadata_filter_clause(filters, "f")
         row = self.conn.execute(
             f"""
@@ -893,7 +978,7 @@ class IndexManager:
                 {filter_sql}
               )
             """,
-            (os.sep, str(Path(folder_path)), os.sep, *filter_params),
+            (os.sep, canonical_path, os.sep, *filter_params),
         ).fetchone()
         if row is None:
             return None
@@ -904,9 +989,19 @@ class IndexManager:
             "file_count": row["file_count"],
         }
 
+    def _canonical_folder_path(self, folder_path: str) -> str:
+        path = str(Path(folder_path))
+        row = self.conn.execute(
+            "SELECT project_root_path FROM folders WHERE path = ?",
+            (path,),
+        ).fetchone()
+        if row is not None and row[0]:
+            return str(row[0])
+        return path
+
     def get_folder_details(self, folder_path: str) -> Dict:
         cursor = self.conn.cursor()
-        path = str(Path(folder_path))
+        path = self._canonical_folder_path(folder_path)
         pattern = f"{path}{os.sep}%"
         cursor.execute(
             """
@@ -932,11 +1027,38 @@ class IndexManager:
         info["service_types"] = sorted({
             row["domain_folder"] for row in info["files"] if row["domain_folder"]
         })
+        cursor.execute(
+            """
+            SELECT path, name, parent_path, relative_path
+            FROM folders
+            WHERE path LIKE ?
+            ORDER BY relative_path COLLATE NOCASE
+            """,
+            (pattern,),
+        )
+        nodes: dict[str, dict] = {}
+        roots: list[dict] = []
+        for row in cursor.fetchall():
+            node = {
+                "path": str(row["path"]),
+                "name": str(row["name"]),
+                "relative_path": str(row["relative_path"] or ""),
+                "children": [],
+            }
+            nodes[node["path"]] = node
+            parent_path = str(row["parent_path"] or "")
+            if parent_path == path:
+                roots.append(node)
+            elif parent_path in nodes:
+                nodes[parent_path]["children"].append(node)
+            else:
+                roots.append(node)
+        info["subfolders"] = roots
         return info
 
     def get_folder_summary(self, folder_path: str) -> Dict:
         """Return lightweight folder metadata without loading every file row."""
-        path = str(Path(folder_path))
+        path = self._canonical_folder_path(folder_path)
         pattern = f"{path}{os.sep}%"
         row = self.conn.execute(
             """
@@ -964,6 +1086,45 @@ class IndexManager:
                 value for value in (row["time_buckets"] or "").split(",") if value
             ),
         }
+
+    def list_project_roots(self) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT path, relative_path, service_type, year, customer_label,
+                   customer_name, city, recognition_key
+            FROM project_roots
+            ORDER BY recognition_key, path COLLATE NOCASE
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def indexed_text_for_folder(
+        self,
+        folder_path: str,
+        max_characters: int = 250_000,
+    ) -> str:
+        path = self._canonical_folder_path(folder_path)
+        rows = self.conn.execute(
+            """
+            SELECT file_content_fts.content
+            FROM file_content_fts
+            WHERE path LIKE ?
+            ORDER BY path COLLATE NOCASE
+            """,
+            (f"{path}{os.sep}%",),
+        )
+        chunks: list[str] = []
+        size = 0
+        for row in rows:
+            content = str(row[0] or "")
+            if not content:
+                continue
+            remaining = max_characters - size
+            if remaining <= 0:
+                break
+            chunks.append(content[:remaining])
+            size += min(len(content), remaining)
+        return "\n".join(chunks)
     
     def get_customer_details(self, customer_name: str) -> Dict:
         cursor = self.conn.cursor()

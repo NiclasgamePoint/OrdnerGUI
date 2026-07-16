@@ -29,10 +29,19 @@ class IndexJobController(QObject):
     ready = Signal(object)
     finished = Signal(object)
 
-    def __init__(self, active_path: Path, state_dir: Path = DATA_DIR, parent=None):
+    def __init__(
+        self,
+        active_path: Path,
+        state_dir: Path = DATA_DIR,
+        parent=None,
+        customer_database_path: Path | None = None,
+    ):
         super().__init__(parent)
         self.active_path = active_path.resolve()
         self.state_dir = state_dir.resolve()
+        self.customer_database_path = (
+            customer_database_path or self.active_path.with_name("customers.db")
+        ).resolve()
         self._job_id = ""
         self._ready_emitted = False
         self._terminal_emitted = False
@@ -79,6 +88,8 @@ class IndexJobController(QObject):
             str(source.resolve()),
             "--state-dir",
             str(self.state_dir),
+            "--customers",
+            str(self.customer_database_path),
         ]
         if full_rebuild:
             command.append("--full-rebuild")

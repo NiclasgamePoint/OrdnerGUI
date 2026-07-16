@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -20,6 +20,13 @@ from PySide6.QtWidgets import (
 from app.core.config import SETTINGS_APP, SETTINGS_ORG
 from app.gui.viewer import FileViewer
 from app.gui.widgets.buttons import AppButton
+
+
+class FolderTreeWidget(QTreeWidget):
+    """Tree widget with the legacy count helper used by UI tests."""
+
+    def count(self) -> int:
+        return self.topLevelItemCount()
 
 
 class FolderPage(QWidget):
@@ -34,6 +41,7 @@ class FolderPage(QWidget):
         self.setObjectName("FolderPage")
         self.folder_path = ""
         self._all_files: list[dict] = []
+        self._subfolders: list[dict] = []
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._icon_provider = QFileIconProvider()
 
@@ -99,8 +107,11 @@ class FolderPage(QWidget):
         filter_row.addWidget(self.file_type_filter)
         layout.addLayout(filter_row)
 
-        self.file_list = QListWidget()
+        self.file_list = FolderTreeWidget()
         self.file_list.setObjectName("FolderFileList")
+        self.file_list.setHeaderLabels(["Ordner und Dateien", "Details"])
+        self.file_list.setColumnWidth(0, 330)
+        self.file_list.setAlternatingRowColors(True)
         self.file_list.itemClicked.connect(self._open_selected_file)
         layout.addWidget(self.file_list, 1)
         return card
@@ -120,6 +131,7 @@ class FolderPage(QWidget):
     def set_folder(self, details: dict):
         self.folder_path = str(details.get("folder_path") or "")
         self._all_files = list(details.get("files") or [])
+        self._subfolders = list(details.get("subfolders") or [])
         self.folder_title.setText(str(details.get("folder_name") or "Ordner"))
         file_count = int(details.get("file_count") or 0)
         size_mb = float(details.get("total_size") or 0) / 1024 / 1024
@@ -150,6 +162,27 @@ class FolderPage(QWidget):
         normalized = self.file_filter.text().strip().casefold()
         selected_type = str(self.file_type_filter.currentData() or "")
         self.file_list.clear()
+        folder_items: dict[str, QTreeWidgetItem] = {}
+
+        def append_folder(node: dict, parent: QTreeWidgetItem | None = None):
+            item = QTreeWidgetItem([str(node.get("name") or "Ordner"), "Ordner"])
+            path = str(node.get("path") or "")
+            item.setData(0, Qt.UserRole, path)
+            item.setData(0, Qt.UserRole + 1, "folder")
+            item.setToolTip(0, path)
+            if path:
+                item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
+            if parent is None:
+                self.file_list.addTopLevelItem(item)
+            else:
+                parent.addChild(item)
+            folder_items[path] = item
+            for child in node.get("children") or []:
+                append_folder(child, item)
+
+        for node in self._subfolders:
+            append_folder(node)
+
         for file_info in self._all_files:
             filename = str(file_info.get("filename") or "")
             relative_dir = str(file_info.get("relative_dir") or "")
@@ -161,10 +194,7 @@ class FolderPage(QWidget):
                 continue
             if selected_type and file_type != selected_type:
                 continue
-            details = []
-            if relative_dir:
-                details.append(relative_dir)
-            details.append(self._format_size(int(file_info.get("file_size") or 0)))
+            details = [self._format_size(int(file_info.get("file_size") or 0))]
             modified = str(file_info.get("modified_date") or "")
             if modified:
                 try:
@@ -172,15 +202,41 @@ class FolderPage(QWidget):
                 except ValueError:
                     pass
                 details.append(modified)
-            label = f"{filename}\n{' · '.join(details)}"
-            item = QListWidgetItem(label)
+            item = QTreeWidgetItem([filename, " · ".join(details)])
             path = str(file_info.get("path") or "")
-            item.setData(Qt.UserRole, path)
-            item.setToolTip(path)
+            item.setData(0, Qt.UserRole, path)
+            item.setData(0, Qt.UserRole + 1, "file")
+            item.setToolTip(0, path)
             if path:
-                item.setIcon(self._icon_provider.icon(QFileInfo(path)))
-            item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
-            self.file_list.addItem(item)
+                item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
+            parent = folder_items.get(str(Path(path).parent))
+            if parent is None:
+                self.file_list.addTopLevelItem(item)
+            else:
+                parent.addChild(item)
+
+        filters_active = bool(normalized or selected_type)
+
+        def prune(item: QTreeWidgetItem) -> bool:
+            child_visible = False
+            for index in reversed(range(item.childCount())):
+                child = item.child(index)
+                if child.data(0, Qt.UserRole + 1) == "folder":
+                    visible = prune(child)
+                else:
+                    visible = True
+                child.setHidden(not visible)
+                child_visible = child_visible or visible
+            own_match = normalized in item.text(0).casefold() if normalized else False
+            visible = not filters_active or child_visible or own_match
+            item.setHidden(not visible)
+            return visible
+
+        for index in range(self.file_list.topLevelItemCount()):
+            root_item = self.file_list.topLevelItem(index)
+            if root_item.data(0, Qt.UserRole + 1) == "folder":
+                prune(root_item)
+        self.file_list.expandToDepth(0)
 
     @staticmethod
     def _format_size(size: int) -> str:
@@ -190,9 +246,9 @@ class FolderPage(QWidget):
             return f"{size / 1024:.1f} KB"
         return f"{size} B"
 
-    def _open_selected_file(self, item: QListWidgetItem):
-        path = str(item.data(Qt.UserRole) or "")
-        if path:
+    def _open_selected_file(self, item: QTreeWidgetItem):
+        path = str(item.data(0, Qt.UserRole) or "")
+        if path and item.data(0, Qt.UserRole + 1) == "file":
             self.file_viewer.open_file(Path(path))
 
     def _open_folder(self):

@@ -16,6 +16,10 @@
 - Sicherer Indexaufbau in einer temporären Datenbank, atomarer Wechsel und drei Sicherungen
 - Automatische, plattformübergreifende Überwachung der Datenquelle
 - Indexdiagnose mit Integrität, Laufzeit, Datei-/Ordnerzahlen und Extraktionsfehlern
+- Optionale automatische Kundenerkennung für `Dienstleistung/Jahr/Nachname, Ort` ab 2016
+- Persistente Blacklists und Prüfwarteschlange für mehrdeutige Kundenzuordnungen
+- Kanonische Projektordner ohne doppelte Unterordner-Treffer
+- Aufklappbare Ordner- und Dateistruktur mit rekursivem Kundenbezug
 - PDF-Viewer mit Seitensteuerung, Zoom und Suche
 - Excel-Viewer mit Tabellenblättern und Zellensuche
 - Text-/Word-Viewer mit Suche sowie externes Öffnen von Datei oder Ordner
@@ -33,9 +37,11 @@ app/
 │   ├── index_diagnostics.py      Lesbare Index-Zustandsberichte
 │   ├── search_models.py          Filter, Seitenmodell und Suchverlauf
 │   ├── customer_models.py        Kunden- und Kontaktmodelle
+│   ├── folder_structure.py       Erkennung kanonischer Projektwurzeln
 │   └── customer_repository.py    Separate Kunden-Datenbank
 ├── services/
 │   ├── filesystem_monitor.py     Hintergrundüberwachung der Datenquelle
+│   ├── customer_recognition.py   Sichere automatische Kundenzuordnung
 │   └── document_converter.py     Optionale Legacy-Konvertierung
 └── gui/
     ├── dialogs/                  Kundendaten-Editor
@@ -49,7 +55,7 @@ app/
     └── theme.py
 ```
 
-`data/index.db` ist austauschbar und kann jederzeit neu erzeugt werden. `data/customers.db` enthält die manuell gepflegten Kundendaten und wird bei einer Neuindexierung nicht verändert.
+`data/index.db` ist austauschbar und kann jederzeit neu erzeugt werden. `data/customers.db` enthält die dauerhaften Kundendaten. Bei deaktivierter Kundenerkennung bleibt sie durch Indexläufe unverändert; bei aktivierter Erkennung werden ausschließlich leere Felder, Dienstleistungen und Projektordner ergänzt. Manuell gepflegte Werte werden nicht überschrieben.
 
 ## Start
 
@@ -83,6 +89,8 @@ Die Anwendung unterstützt eine Kundenverwaltung, die von einzelnen Dienstleistu
 
 - Kundentypen sind dynamisch und können beim Bearbeiten frei gepflegt werden (z. B. Privatkunde, Firma, Gemeinde).
 - Kundendaten können über Vorschläge aus Ordnerstruktur und Dokumentinhalten vorbereitet und anschließend im Dialog bestätigt werden.
+- Die automatische Erkennung ist standardmäßig deaktiviert und muss unter „Kundenerkennung“ ausdrücklich eingeschaltet werden.
+- Mehrdeutige Treffer werden nicht automatisch zusammengeführt, sondern dauerhaft zur manuellen Prüfung vorgemerkt.
 - Unterhalb des Hauptbereichs gibt es eine Kundenübersicht mit Kundenliste (links) und dynamischer Detailansicht (rechts).
 
 Die Übersicht ist Teil der normalen Seitenansicht und über vertikales Scrollen erreichbar.

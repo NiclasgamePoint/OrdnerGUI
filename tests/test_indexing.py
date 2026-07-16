@@ -114,6 +114,43 @@ class IndexingTests(unittest.TestCase):
         )
         manager.close()
 
+    def test_structured_subfolders_collapse_to_project_root_but_legacy_stays_visible(self):
+        current_project = self.root / "DEKRA" / "2026" / "Müller, Berlin"
+        pictures = current_project / "Bilder"
+        empty = current_project / "Dokumente" / "Leer"
+        pictures.mkdir(parents=True)
+        empty.mkdir(parents=True)
+        (pictures / "foto.txt").write_text("Foto", encoding="utf-8")
+        legacy = self.root / "DEKRA" / "2015" / "Altprojekt" / "Scans"
+        legacy.mkdir(parents=True)
+        (legacy / "alt.txt").write_text("Alt", encoding="utf-8")
+
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        structured = manager.search_folders_page(
+            "Bilder", SearchFilters(), page=1, page_size=25
+        )
+        legacy_result = manager.search_folders_page(
+            "Scans", SearchFilters(), page=1, page_size=25
+        )
+        details = manager.get_folder_details(str(pictures))
+
+        self.assertEqual(structured.total, 1)
+        self.assertEqual(structured.items[0]["folder_path"], str(current_project))
+        self.assertEqual(legacy_result.total, 1)
+        self.assertEqual(legacy_result.items[0]["folder_path"], str(legacy))
+        self.assertEqual(details["folder_path"], str(current_project))
+        self.assertEqual(
+            {node["name"] for node in details["subfolders"]},
+            {"Bilder", "Dokumente"},
+        )
+        documents = next(
+            node for node in details["subfolders"] if node["name"] == "Dokumente"
+        )
+        self.assertEqual(documents["children"][0]["name"], "Leer")
+        manager.close()
+
 
 if __name__ == "__main__":
     unittest.main()

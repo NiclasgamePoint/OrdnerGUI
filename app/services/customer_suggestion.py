@@ -77,13 +77,22 @@ class CustomerSuggestionService:
 
     def suggest_for_folder(self, folder_path: Path, suggested_name: str = "") -> CustomerSuggestion:
         folder_path = folder_path.resolve()
+        combined_text = self._collect_text_from_documents(folder_path)
+        return self.suggest_from_text(folder_path, suggested_name, combined_text)
+
+    def suggest_from_text(
+        self,
+        folder_path: Path,
+        suggested_name: str = "",
+        indexed_text: str = "",
+    ) -> CustomerSuggestion:
+        """Build a suggestion from already extracted index text."""
         suggestion = CustomerSuggestion()
 
         self._extract_from_path(folder_path, suggested_name, suggestion)
-        combined_text = self._collect_text_from_documents(folder_path)
-        if combined_text:
-            self._extract_from_text(combined_text, suggestion)
-            self._extract_contacts_from_text(combined_text, suggestion)
+        if indexed_text:
+            self._extract_from_text(indexed_text, suggestion)
+            self._extract_contacts_from_text(indexed_text, suggestion)
 
         if suggestion.display_name and not suggestion.company:
             suggestion.company = suggestion.display_name

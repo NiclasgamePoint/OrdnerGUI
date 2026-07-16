@@ -6,11 +6,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from app.core.customer_models import Customer
+from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
 from app.gui.pages import FolderPage, SearchPage
+from app.gui.settings_popup import SettingsPopup
 
 
 class UiNavigationTests(unittest.TestCase):
@@ -180,6 +182,76 @@ class UiNavigationTests(unittest.TestCase):
             page.file_filter.setText("zwei")
             self.assertEqual(page.file_list.count(), 1)
             page.cleanup()
+
+    def test_folder_page_renders_nested_and_empty_subfolders_as_tree(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "Bilder" / "Innen"
+            empty = root / "Leerer Ordner"
+            nested.mkdir(parents=True)
+            empty.mkdir()
+            photo = nested / "foto.jpg"
+            photo.write_bytes(b"image")
+
+            page = FolderPage()
+            page.set_folder({
+                "folder_path": str(root),
+                "folder_name": "Projekt",
+                "file_count": 1,
+                "total_size": photo.stat().st_size,
+                "files": [{
+                    "filename": photo.name,
+                    "path": str(photo),
+                    "file_type": "jpg",
+                    "file_size": photo.stat().st_size,
+                    "relative_dir": "Bilder/Innen",
+                }],
+                "subfolders": [
+                    {
+                        "path": str(root / "Bilder"),
+                        "name": "Bilder",
+                        "children": [{
+                            "path": str(nested),
+                            "name": "Innen",
+                            "children": [],
+                        }],
+                    },
+                    {
+                        "path": str(empty),
+                        "name": "Leerer Ordner",
+                        "children": [],
+                    },
+                ],
+            })
+
+            self.assertEqual(page.file_list.topLevelItemCount(), 2)
+            pictures = page.file_list.topLevelItem(0)
+            self.assertEqual(pictures.text(0), "Bilder")
+            self.assertEqual(pictures.child(0).text(0), "Innen")
+            self.assertEqual(pictures.child(0).child(0).text(0), "foto.jpg")
+            self.assertEqual(page.file_list.topLevelItem(1).text(0), "Leerer Ordner")
+            page.cleanup()
+
+    def test_settings_exposes_explicit_customer_recognition_page(self):
+        popup = SettingsPopup(
+            "dark",
+            "#2db89d",
+            recognition_options=CustomerRecognitionOptions(
+                enabled=True,
+                email_blacklist="intern@example.de",
+            ),
+            pending_recognition_cases=2,
+        )
+
+        self.assertEqual(popup.nav_list.count(), 5)
+        self.assertTrue(popup.recognition_enabled.isChecked())
+        self.assertEqual(
+            popup.recognition_blacklist_fields["email_blacklist"].toPlainText(),
+            "intern@example.de",
+        )
+        self.assertTrue(popup.review_recognition_button.isEnabled())
+        self.assertIn("2", popup.review_recognition_button.text())
+        popup.close()
 
 
 if __name__ == "__main__":

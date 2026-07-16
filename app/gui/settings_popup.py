@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QPlainTextEdit,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 from app.gui.widgets import AppButton, BusyIndicator
-from app.core.config import IndexOptions
+from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.index_diagnostics import IndexDiagnostics
 
 
@@ -32,6 +33,8 @@ class SettingsPopup(QFrame):
     cancelIndexRequested = Signal()
     loadBackupRequested = Signal(str)
     indexOptionsChanged = Signal(object)
+    customerRecognitionOptionsChanged = Signal(object)
+    reviewRecognitionRequested = Signal()
 
     def __init__(
         self,
@@ -43,6 +46,9 @@ class SettingsPopup(QFrame):
         backups=None,
         index_options: IndexOptions | None = None,
         diagnostics: IndexDiagnostics | None = None,
+        recognition_options: CustomerRecognitionOptions | None = None,
+        recognition_summary: dict | None = None,
+        pending_recognition_cases: int = 0,
     ):
         super().__init__(
             parent,
@@ -60,6 +66,9 @@ class SettingsPopup(QFrame):
         self.backups = list(backups or [])
         self.index_options = index_options or IndexOptions()
         self.diagnostics = diagnostics
+        self.recognition_options = recognition_options or CustomerRecognitionOptions()
+        self.recognition_summary = dict(recognition_summary or {})
+        self.pending_recognition_cases = int(pending_recognition_cases)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -93,6 +102,10 @@ class SettingsPopup(QFrame):
         index_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(index_item)
 
+        recognition_item = QListWidgetItem("Kundenerkennung")
+        recognition_item.setSizeHint(QSize(164, 42))
+        self.nav_list.addItem(recognition_item)
+
         diagnostics_item = QListWidgetItem("Diagnose")
         diagnostics_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(diagnostics_item)
@@ -109,6 +122,7 @@ class SettingsPopup(QFrame):
 
         self.stack.addWidget(self._build_general_page())
         self.stack.addWidget(self._build_index_page())
+        self.stack.addWidget(self._build_recognition_page())
         self.stack.addWidget(self._build_diagnostics_page())
         self.stack.addWidget(self._build_appearance_page())
 
@@ -348,6 +362,114 @@ class SettingsPopup(QFrame):
         layout.addWidget(self.diagnostics_text, 1)
         self.set_diagnostics(self.diagnostics)
         return page
+
+    def _build_recognition_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("SettingsPage")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        heading = QLabel("Automatische Kundenerkennung")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+
+        self.recognition_enabled = QCheckBox(
+            "Kunden ab 2016 aus Dienstleistung/Jahr/Nachname, Ort erkennen"
+        )
+        self.recognition_enabled.setChecked(self.recognition_options.enabled)
+        layout.addWidget(self.recognition_enabled)
+
+        note = QLabel(
+            "Manuell gepflegte Daten werden nicht überschrieben. Die folgenden Werte "
+            "werden nur aus automatisch erkannten Kontaktdaten entfernt."
+        )
+        note.setObjectName("PopupCaption")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.recognition_blacklist_fields: dict[str, QPlainTextEdit] = {}
+        blacklist_specs = [
+            ("email_blacklist", "E-Mail-Adressen", "eine Adresse pro Zeile"),
+            ("phone_blacklist", "Telefonnummern", "eine Nummer pro Zeile"),
+            ("name_blacklist", "Namen", "ein Name pro Zeile"),
+            ("address_blacklist", "Adressen", "eine Adresse pro Zeile"),
+            ("text_blacklist", "Beliebige Textwerte", "ein Textfragment pro Zeile"),
+        ]
+        for attribute, label_text, placeholder in blacklist_specs:
+            label = QLabel(label_text)
+            label.setObjectName("PopupCaption")
+            layout.addWidget(label)
+            field = QPlainTextEdit()
+            field.setFixedHeight(58)
+            field.setPlaceholderText(placeholder)
+            field.setPlainText(str(getattr(self.recognition_options, attribute)))
+            self.recognition_blacklist_fields[attribute] = field
+            layout.addWidget(field)
+
+        save_row = QHBoxLayout()
+        save_row.addStretch()
+        save_button = AppButton("Kundenerkennung speichern")
+        save_button.clicked.connect(self.save_customer_recognition_options)
+        save_row.addWidget(save_button)
+        layout.addLayout(save_row)
+
+        status_title = QLabel("Letzter Erkennungslauf")
+        status_title.setObjectName("PopupCaption")
+        layout.addWidget(status_title)
+        self.recognition_status = QLabel("")
+        self.recognition_status.setWordWrap(True)
+        layout.addWidget(self.recognition_status)
+        self.review_recognition_button = AppButton(
+            "Prüffälle öffnen", AppButton.SECONDARY
+        )
+        self.review_recognition_button.clicked.connect(
+            self.reviewRecognitionRequested.emit
+        )
+        layout.addWidget(self.review_recognition_button)
+        layout.addStretch()
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
+        self.set_recognition_state(
+            self.recognition_summary, self.pending_recognition_cases
+        )
+        return page
+
+    def save_customer_recognition_options(self):
+        self.recognition_options = CustomerRecognitionOptions(
+            enabled=self.recognition_enabled.isChecked(),
+            minimum_year=2016,
+            **{
+                attribute: field.toPlainText().strip()
+                for attribute, field in self.recognition_blacklist_fields.items()
+            },
+        )
+        self.customerRecognitionOptionsChanged.emit(self.recognition_options)
+
+    def set_recognition_state(self, summary: dict | None, pending: int):
+        self.recognition_summary = dict(summary or {})
+        self.pending_recognition_cases = int(pending)
+        if not hasattr(self, "recognition_status"):
+            return
+        values = self.recognition_summary
+        self.recognition_status.setText(
+            f"{int(values.get('detected') or 0)} erkannt · "
+            f"{int(values.get('created') or 0)} angelegt · "
+            f"{int(values.get('assigned') or 0)} zugeordnet · "
+            f"{int(values.get('skipped') or 0)} übersprungen · "
+            f"{self.pending_recognition_cases} offen"
+        )
+        self.review_recognition_button.setText(
+            f"Prüffälle öffnen ({self.pending_recognition_cases})"
+        )
+        self.review_recognition_button.setEnabled(self.pending_recognition_cases > 0)
 
     def set_diagnostics(self, diagnostics: IndexDiagnostics | None):
         self.diagnostics = diagnostics

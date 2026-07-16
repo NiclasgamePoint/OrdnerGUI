@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 import sqlite3
 import uuid
 
 from app.core.customer_models import Contact, Customer
+from app.core.customer_recognition_models import RecognitionCandidate, RecognitionStats
+from app.core.folder_structure import normalize_identity
 
 
 class CustomerRepository:
@@ -81,6 +84,37 @@ class CustomerRepository:
                 tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 PRIMARY KEY (customer_id, tag_id)
             );
+            CREATE TABLE IF NOT EXISTS recognition_cases (
+                signature TEXT PRIMARY KEY,
+                recognition_key TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS recognition_decisions (
+                signature TEXT PRIMARY KEY,
+                action TEXT NOT NULL,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                decided_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS recognition_runs (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                detected INTEGER NOT NULL DEFAULT 0,
+                created INTEGER NOT NULL DEFAULT 0,
+                assigned INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0,
+                pending INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                finished_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS automatic_customer_sources (
+                folder_path TEXT PRIMARY KEY,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                recognition_key TEXT NOT NULL,
+                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         self.connection.executemany(
@@ -95,7 +129,11 @@ class CustomerRepository:
         )
         self.connection.commit()
 
-    def get_by_folder(self, folder_path: str) -> Customer | None:
+    def get_by_folder(
+        self,
+        folder_path: str,
+        include_ancestors: bool = True,
+    ) -> Customer | None:
         normalized = self._folder_key(folder_path)
         row = self.connection.execute(
             """
@@ -108,6 +146,20 @@ class CustomerRepository:
         ).fetchone()
         if row is not None:
             return self._hydrate(row)
+        if include_ancestors:
+            row = self.connection.execute(
+                """
+                SELECT customers.* FROM customers
+                JOIN customer_folders ON customer_folders.customer_id = customers.id
+                WHERE ? LIKE customer_folders.folder_path || ? || '%'
+                  AND customer_folders.folder_path NOT LIKE 'customer://%'
+                ORDER BY LENGTH(customer_folders.folder_path) DESC
+                LIMIT 1
+                """,
+                (normalized, os.sep),
+            ).fetchone()
+            if row is not None:
+                return self._hydrate(row)
         row = self.connection.execute(
             "SELECT * FROM customers WHERE folder_path = ?",
             (normalized,),
@@ -125,6 +177,27 @@ class CustomerRepository:
             "SELECT * FROM customers ORDER BY display_name COLLATE NOCASE"
         ).fetchall()
         return [self._hydrate(row) for row in rows]
+
+    def find_by_identity(self, display_name: str, city: str) -> list[Customer]:
+        name_key = normalize_identity(display_name)
+        city_key = normalize_identity(city)
+        return [
+            customer
+            for customer in self.list_customers()
+            if normalize_identity(customer.display_name) == name_key
+            and normalize_identity(customer.city) == city_key
+        ]
+
+    def customer_ids_within_folder(self, folder_path: str) -> list[int]:
+        normalized = self._folder_key(folder_path)
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT customer_id FROM customer_folders
+            WHERE folder_path = ? OR folder_path LIKE ?
+            """,
+            (normalized, f"{normalized}{os.sep}%"),
+        ).fetchall()
+        return [int(row[0]) for row in rows]
 
     def list_customer_types(self) -> list[str]:
         rows = self.connection.execute(
@@ -239,7 +312,300 @@ class CustomerRepository:
             raise RuntimeError("Der aktualisierte Kunde konnte nicht geladen werden.")
         return updated
 
-    def save(self, customer: Customer) -> Customer:
+    def apply_recognition_candidate(
+        self,
+        candidate: RecognitionCandidate,
+        customer_id: int | None = None,
+    ) -> Customer:
+        """Create or safely enrich one customer from an automatic candidate."""
+        target = self.get(customer_id) if customer_id is not None else None
+        if customer_id is not None and target is None:
+            raise ValueError("Der ausgewählte Bestandskunde existiert nicht mehr.")
+
+        existing_owner_ids: set[int] = set()
+        for folder_path in candidate.folder_paths:
+            existing_owner_ids.update(self.customer_ids_within_folder(folder_path))
+            inherited_owner = self.get_by_folder(folder_path)
+            if inherited_owner is not None and inherited_owner.id is not None:
+                existing_owner_ids.add(inherited_owner.id)
+        if target is None and existing_owner_ids:
+            raise ValueError(
+                "Mindestens ein Ordner ist bereits einem Bestandskunden zugeordnet."
+            )
+        if customer_id is not None and existing_owner_ids - {customer_id}:
+            raise ValueError(
+                "Mindestens ein Ordner ist bereits einem anderen Kunden zugeordnet."
+            )
+
+        if target is None:
+            try:
+                target = self.save(Customer(
+                    display_name=candidate.display_name,
+                    company=candidate.display_name,
+                    city=candidate.city,
+                    email=candidate.email,
+                    phone=candidate.phone,
+                    street=candidate.street,
+                    postal_code=candidate.postal_code,
+                    contacts=list(candidate.contacts),
+                    service_types=list(candidate.service_types),
+                    folder_path=candidate.folder_paths[0] if candidate.folder_paths else "",
+                    folder_paths=list(candidate.folder_paths),
+                ), commit=False)
+            except Exception:
+                self.connection.rollback()
+                raise
+            customer_id = target.id
+        if customer_id is None:
+            raise RuntimeError("Der automatisch erzeugte Kunde besitzt keine ID.")
+
+        normalized_folders = [self._folder_key(path) for path in candidate.folder_paths]
+        try:
+            with self.connection:
+                row = self.connection.execute(
+                    "SELECT * FROM customers WHERE id = ?", (customer_id,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Der ausgewählte Kunde existiert nicht mehr.")
+
+                updates = {
+                    "company": candidate.display_name,
+                    "city": candidate.city,
+                    "email": candidate.email,
+                    "phone": candidate.phone,
+                    "street": candidate.street,
+                    "postal_code": candidate.postal_code,
+                }
+                assignments = []
+                values = []
+                for column, value in updates.items():
+                    if value and not str(row[column] or "").strip():
+                        assignments.append(f"{column} = ?")
+                        values.append(value)
+                if assignments:
+                    self.connection.execute(
+                        f"UPDATE customers SET {', '.join(assignments)}, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (*values, customer_id),
+                    )
+
+                primary_folder = str(row["folder_path"] or "")
+                primary_is_descendant = bool(
+                    normalized_folders
+                    and any(
+                        primary_folder.startswith(f"{root}{os.sep}")
+                        for root in normalized_folders
+                    )
+                )
+                if (
+                    primary_folder.startswith("customer://") or primary_is_descendant
+                ) and normalized_folders:
+                    self.connection.execute(
+                        "DELETE FROM customer_folders WHERE customer_id=? AND folder_path=?",
+                        (customer_id, primary_folder),
+                    )
+                    self.connection.execute(
+                        "UPDATE customers SET folder_path=? WHERE id=?",
+                        (normalized_folders[0], customer_id),
+                    )
+
+                for folder, normalized in zip(candidate.folder_paths, normalized_folders):
+                    owner = self.get_by_folder(normalized, include_ancestors=False)
+                    if owner is not None and owner.id != customer_id:
+                        raise ValueError(
+                            f"Der Ordner ist bereits „{owner.display_name}“ zugeordnet."
+                        )
+                    descendant_pattern = f"{normalized}{os.sep}%"
+                    self.connection.execute(
+                        "DELETE FROM customer_folders "
+                        "WHERE customer_id=? AND folder_path LIKE ?",
+                        (customer_id, descendant_pattern),
+                    )
+                    self.connection.execute(
+                        "DELETE FROM automatic_customer_sources "
+                        "WHERE customer_id=? AND folder_path LIKE ?",
+                        (customer_id, descendant_pattern),
+                    )
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO customer_folders (customer_id, folder_path) "
+                        "VALUES (?, ?)",
+                        (customer_id, normalized),
+                    )
+                    self.connection.execute(
+                        """
+                        INSERT OR REPLACE INTO automatic_customer_sources
+                        (folder_path, customer_id, recognition_key, last_seen)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (normalized, customer_id, candidate.recognition_key),
+                    )
+
+                for service in candidate.service_types:
+                    exists = self.connection.execute(
+                        "SELECT 1 FROM customer_services "
+                        "WHERE customer_id=? AND name=? COLLATE NOCASE",
+                        (customer_id, service),
+                    ).fetchone()
+                    if exists is None and service.strip():
+                        self.connection.execute(
+                            "INSERT INTO customer_services (customer_id, name) VALUES (?, ?)",
+                            (customer_id, service.strip()),
+                        )
+
+                existing_contacts = self.connection.execute(
+                    "SELECT name, email, phone FROM contacts WHERE customer_id=?",
+                    (customer_id,),
+                ).fetchall()
+                contact_keys = {
+                    (
+                        normalize_identity(item["name"]),
+                        str(item["email"] or "").casefold(),
+                        self._normalize_phone(str(item["phone"] or "")),
+                    )
+                    for item in existing_contacts
+                }
+                for contact in candidate.contacts:
+                    key = (
+                        normalize_identity(contact.name),
+                        contact.email.casefold(),
+                        self._normalize_phone(contact.phone),
+                    )
+                    if contact.name.strip() and key not in contact_keys:
+                        self.connection.execute(
+                            """
+                            INSERT INTO contacts (customer_id, name, role, email, phone)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                customer_id,
+                                contact.name.strip(),
+                                contact.role.strip(),
+                                contact.email.strip(),
+                                contact.phone.strip(),
+                            ),
+                        )
+                        contact_keys.add(key)
+        except sqlite3.IntegrityError as error:
+            raise ValueError("Die automatische Zuordnung ist nicht eindeutig.") from error
+
+        updated = self.get(customer_id)
+        if updated is None:
+            raise RuntimeError("Der automatisch aktualisierte Kunde konnte nicht geladen werden.")
+        return updated
+
+    @staticmethod
+    def _normalize_phone(value: str) -> str:
+        prefix = "+" if value.strip().startswith("+") else ""
+        return prefix + "".join(character for character in value if character.isdigit())
+
+    def get_recognition_decision(self, signature: str) -> dict | None:
+        row = self.connection.execute(
+            "SELECT action, customer_id FROM recognition_decisions WHERE signature=?",
+            (signature,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def has_previous_recognition_decision(
+        self,
+        recognition_key: str,
+        current_signature: str,
+    ) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1 FROM recognition_cases cases
+            JOIN recognition_decisions decisions
+              ON decisions.signature = cases.signature
+            WHERE cases.recognition_key = ? AND cases.signature <> ?
+            LIMIT 1
+            """,
+            (recognition_key, current_signature),
+        ).fetchone()
+        return row is not None
+
+    def replace_pending_recognition_cases(
+        self,
+        candidates: list[RecognitionCandidate],
+    ):
+        with self.connection:
+            self.connection.execute(
+                "UPDATE recognition_cases SET status='stale', updated_at=CURRENT_TIMESTAMP "
+                "WHERE status='pending'"
+            )
+            for candidate in candidates:
+                self.connection.execute(
+                    """
+                    INSERT INTO recognition_cases
+                    (signature, recognition_key, payload_json, reason, status)
+                    VALUES (?, ?, ?, ?, 'pending')
+                    ON CONFLICT(signature) DO UPDATE SET
+                        payload_json=excluded.payload_json,
+                        reason=excluded.reason,
+                        status='pending',
+                        updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (
+                        candidate.signature,
+                        candidate.recognition_key,
+                        json.dumps(candidate.to_dict(), ensure_ascii=False),
+                        candidate.reason,
+                    ),
+                )
+
+    def list_pending_recognition_cases(self) -> list[RecognitionCandidate]:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM recognition_cases "
+            "WHERE status='pending' ORDER BY created_at, signature"
+        ).fetchall()
+        return [RecognitionCandidate.from_dict(json.loads(row[0])) for row in rows]
+
+    def pending_recognition_count(self) -> int:
+        return int(self.connection.execute(
+            "SELECT COUNT(*) FROM recognition_cases WHERE status='pending'"
+        ).fetchone()[0])
+
+    def save_recognition_decision(
+        self,
+        signature: str,
+        action: str,
+        customer_id: int | None = None,
+    ):
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT OR REPLACE INTO recognition_decisions
+                (signature, action, customer_id, decided_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (signature, action, customer_id),
+            )
+            self.connection.execute(
+                "UPDATE recognition_cases SET status=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE signature=?",
+                ("ignored" if action == "ignore" else "resolved", signature),
+            )
+
+    def record_recognition_run(self, stats: RecognitionStats):
+        values = stats.to_dict()
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT OR REPLACE INTO recognition_runs
+                (id, detected, created, assigned, skipped, pending, error, finished_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    values["detected"], values["created"], values["assigned"],
+                    values["skipped"], values["pending"], values["error"],
+                ),
+            )
+
+    def last_recognition_run(self) -> dict:
+        row = self.connection.execute(
+            "SELECT * FROM recognition_runs WHERE id=1"
+        ).fetchone()
+        return dict(row) if row is not None else {}
+
+    def save(self, customer: Customer, commit: bool = True) -> Customer:
         folder_paths = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
         normalized_paths = []
         seen_paths = set()
@@ -294,7 +660,8 @@ class CustomerRepository:
         self._replace_folders(customer_id, normalized_paths or [primary_folder])
         self._replace_notes(customer_id, customer.notes)
         self._replace_tags(customer_id, customer.tags)
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         return self.get(customer_id)
 
     def delete(self, customer_id: int):
