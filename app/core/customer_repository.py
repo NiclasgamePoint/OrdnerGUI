@@ -842,6 +842,7 @@ class CustomerRepository:
             try:
                 target = self.save(Customer(
                     display_name=candidate.display_name,
+                    entity_type=candidate.entity_type or "Unternehmen",
                     company=candidate.display_name,
                     city=candidate.city,
                     email=candidate.email,

@@ -14,13 +14,19 @@ from app.services.document_converter import DocumentConverter
 
 
 EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b")
-PHONE_RE = re.compile(r"(?:\+49|0)[0-9][0-9\s/().-]{6,}[0-9]")
+PHONE_RE = re.compile(r"(?<![A-Za-z0-9])(?:\+49|0049|0[1-9])(?:[\s/().-]*\d){5,14}(?![A-Za-z0-9])")
 POSTAL_CITY_RE = re.compile(r"\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß .-]{2,})")
 STREET_RE = re.compile(
     r"\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß .-]{2,}(?:straße|str\.|weg|allee|platz|ring|gasse|chaussee)\s+\d+[a-zA-Z]?)",
     re.IGNORECASE,
 )
 NAME_HINT_RE = re.compile(r"(?im)^(?:kunde|auftraggeber|angebot an|an:)\s*:?[ \t]*(.+)$")
+PHONE_CONTEXT_RE = re.compile(r"(?i)\b(?:tel\.?|telefon|mobil|handy|fon|phone|fax)\b")
+NOISE_LINE_RE = re.compile(
+    r"(?i)\b(?:iban|bic|bank|konto|ust|steuer|rechnung|angebot[- ]?nr|kundennr|"
+    r"datum|seite|brh|höhe|breite|gesamt|summe|betrag|zahlbar|messwert)\b"
+)
+DATE_RE = re.compile(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b")
 
 COMPANY_MARKERS = (
     "gmbh",
@@ -30,17 +36,38 @@ COMPANY_MARKERS = (
     "ohg",
     "e.k",
     "mbh",
+)
+ORGANIZATION_MARKERS = (
     "gemeinde",
     "stadt",
     "amt",
+    "kita",
+    "kindergarten",
+    "schule",
+    "kirche",
+    "verein",
+    "zweckverband",
+    "kreis",
+    "landkreis",
 )
+GENERIC_EMAIL_NAMES = {
+    "info",
+    "mail",
+    "kontakt",
+    "office",
+    "verwaltung",
+    "sekretariat",
+    "post",
+    "architekturbuero",
+    "architekturbüro",
+}
 
 
 @dataclass
 class CustomerSuggestion:
     display_name: str = ""
     company: str = ""
-    entity_type: str = "Unternehmen"
+    entity_type: str = ""
     city: str = ""
     postal_code: str = ""
     street: str = ""
@@ -117,7 +144,10 @@ class CustomerSuggestionService:
         else:
             suggestion.display_name = suggested_name.strip() or project_label
 
-        suggestion.entity_type = self._infer_entity_type(suggestion.display_name)
+        suggestion.entity_type = self._infer_entity_type(
+            suggestion.display_name,
+            project_label,
+        )
 
         parts = list(folder_path.parts)
         year_index = next(
@@ -155,7 +185,7 @@ class CustomerSuggestionService:
 
         # Heuristic: lines with person-like names from addressing context.
         for match in NAME_HINT_RE.finditer(text):
-            candidate_name = match.group(1).strip()
+            candidate_name = self._clean_name_candidate(match.group(1))
             if not candidate_name:
                 continue
             key = candidate_name.casefold()
@@ -166,41 +196,29 @@ class CustomerSuggestionService:
         for line_index, line in enumerate(text_lines):
             for email_match in EMAIL_RE.finditer(line):
                 email = email_match.group(0)
-                name = ""
-                for back in range(max(0, line_index - 2), line_index + 1):
-                    candidate = text_lines[back]
-                    if EMAIL_RE.search(candidate) or PHONE_RE.search(candidate):
-                        continue
-                    if len(candidate.split()) >= 2:
-                        name = candidate
+                name = self._nearest_name(text_lines, line_index)
                 if not name:
-                    local = email.split("@", 1)[0].replace(".", " ").replace("_", " ").strip()
-                    name = local.title() if local else suggestion.display_name or "Kontakt"
+                    name = self._name_from_email(email, suggestion.display_name)
                 key = name.casefold()
                 contact = contacts_by_name.setdefault(key, Contact(name=name))
                 if not contact.email:
                     contact.email = email
 
-        # Attach phones to nearest suitable contact or create a generic one.
-        phone_matches = [match.group(0) for match in PHONE_RE.finditer(text)]
-        for phone in phone_matches:
-            assigned = False
-            for contact in contacts_by_name.values():
+        for line_index, line in enumerate(text_lines):
+            for phone_match in PHONE_RE.finditer(line):
+                phone = self._clean_phone_candidate(phone_match.group(0), line)
+                if not phone:
+                    continue
+                name = self._nearest_name(text_lines, line_index) or suggestion.display_name or "Kontakt"
+                key = name.casefold()
+                contact = contacts_by_name.setdefault(key, Contact(name=name))
                 if not contact.phone:
-                    contact.phone = re.sub(r"\s+", " ", phone).strip()
-                    assigned = True
-                    break
-            if not assigned:
-                fallback_name = suggestion.display_name or "Kontakt"
-                key = fallback_name.casefold()
-                contact = contacts_by_name.setdefault(key, Contact(name=fallback_name))
-                if not contact.phone:
-                    contact.phone = re.sub(r"\s+", " ", phone).strip()
+                    contact.phone = phone
 
         suggestion.contacts = [
             contact
             for contact in contacts_by_name.values()
-            if contact.name.strip()
+            if contact.name.strip() and (contact.email.strip() or contact.phone.strip())
         ]
 
         # Keep top-level shortcuts aligned with first extracted contact.
@@ -273,9 +291,14 @@ class CustomerSuggestionService:
                 suggestion.email = email.group(0)
 
         if not suggestion.phone:
-            phone = PHONE_RE.search(text)
-            if phone:
-                suggestion.phone = re.sub(r"\s+", " ", phone.group(0)).strip()
+            for line in text.splitlines():
+                phone = PHONE_RE.search(line)
+                if not phone:
+                    continue
+                cleaned_phone = self._clean_phone_candidate(phone.group(0), line)
+                if cleaned_phone:
+                    suggestion.phone = cleaned_phone
+                    break
 
         if not suggestion.postal_code or not suggestion.city:
             postal_city = POSTAL_CITY_RE.search(text)
@@ -291,10 +314,66 @@ class CustomerSuggestionService:
         if suggestion.display_name and not suggestion.entity_type:
             suggestion.entity_type = self._infer_entity_type(suggestion.display_name)
 
-    def _infer_entity_type(self, display_name: str) -> str:
-        lowered = display_name.casefold()
+    def _infer_entity_type(self, display_name: str, project_label: str = "") -> str:
+        label_name = project_label.split(",", 1)[0].strip() if project_label else ""
+        name_scope = label_name or display_name
+        lowered = name_scope.casefold()
         if any(marker in lowered for marker in COMPANY_MARKERS):
             return "Unternehmen"
-        if "," in display_name:
+        if any(marker in lowered for marker in ORGANIZATION_MARKERS):
+            return "Organisation"
+        if "," in project_label:
             return "Privatperson"
         return "Unternehmen"
+
+    def _clean_phone_candidate(self, value: str, line: str) -> str:
+        if NOISE_LINE_RE.search(line) or DATE_RE.search(line) or "," in value:
+            return ""
+        compact = re.sub(r"\D", "", value)
+        if value.strip().startswith("+"):
+            normalized = "+" + compact
+        else:
+            normalized = compact
+        if compact.startswith("00") and not compact.startswith("0049"):
+            return ""
+        if not (7 <= len(compact) <= 15):
+            return ""
+        if not PHONE_CONTEXT_RE.search(line) and value.strip().isdigit() and len(compact) > 11:
+            return ""
+        return re.sub(r"\s+", " ", value).strip()
+
+    def _clean_name_candidate(self, value: str) -> str:
+        candidate = re.split(r"\s{2,}|\t|\|", value.strip(), maxsplit=1)[0].strip(" :-")
+        if not candidate or len(candidate) > 60:
+            return ""
+        if EMAIL_RE.search(candidate) or PHONE_RE.search(candidate):
+            return ""
+        if NOISE_LINE_RE.search(candidate) or DATE_RE.search(candidate):
+            return ""
+        if any(character.isdigit() for character in candidate):
+            return ""
+        words = candidate.split()
+        if len(words) < 2:
+            return ""
+        alpha_count = sum(character.isalpha() for character in candidate)
+        if alpha_count < 5:
+            return ""
+        return candidate
+
+    def _nearest_name(self, lines: list[str], line_index: int) -> str:
+        for offset in (0, -1, -2, 1):
+            candidate_index = line_index + offset
+            if not 0 <= candidate_index < len(lines):
+                continue
+            candidate = self._clean_name_candidate(lines[candidate_index])
+            if candidate:
+                return candidate
+        return ""
+
+    def _name_from_email(self, email: str, fallback: str) -> str:
+        local = email.split("@", 1)[0]
+        token = re.sub(r"[^A-Za-zÄÖÜäöüß]+", " ", local).strip()
+        key = token.casefold().replace("ü", "ue").replace("ö", "oe").replace("ä", "ae")
+        if key in GENERIC_EMAIL_NAMES or len(token.split()) < 2:
+            return fallback or "Kontakt"
+        return token.title()

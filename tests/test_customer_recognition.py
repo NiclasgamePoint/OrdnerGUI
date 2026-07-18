@@ -47,6 +47,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(second.created, 0)
             self.assertEqual(len(customers), 1)
             self.assertEqual(customers[0].display_name, "Müller")
+            self.assertEqual(customers[0].entity_type, "Privatperson")
             self.assertEqual(customers[0].city, "Berlin")
             self.assertIn("Energieberatung", customers[0].service_types)
             self.assertEqual(
