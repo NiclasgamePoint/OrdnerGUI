@@ -118,6 +118,8 @@ class SearchPage(QWidget):
     def reset(self, customers: list[Customer] | None = None):
         if customers is None:
             self.customer_section.set_message("Suchbegriff eingeben")
+        elif not customers:
+            self.customer_section.set_message("")
         else:
             self.set_customers(customers, len(customers))
         self.folder_section.set_message("Suchbegriff eingeben")

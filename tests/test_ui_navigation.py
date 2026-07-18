@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from app.core.customer_models import Customer
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
+from app.core.search_models import RecentCustomerHistory
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
@@ -76,6 +77,24 @@ class UiNavigationTests(unittest.TestCase):
 
         self.assertEqual(page.customer_section.row_count, 1)
         self.assertEqual(page.folder_section.row_count, 1)
+
+    def test_search_page_can_start_with_empty_customer_overview(self):
+        page = SearchPage()
+
+        page.reset([])
+
+        self.assertEqual(page.customer_section.row_count, 0)
+        self.assertEqual(page.customer_section._message.text(), "")
+
+    def test_recent_customer_history_keeps_last_five_unique_ids(self):
+        history = RecentCustomerHistory(maximum=5)
+        history.clear()
+        self.addCleanup(history.clear)
+
+        history.remember([1, 2, 3])
+        history.remember([3, 4, 5, 6])
+
+        self.assertEqual(history.ids(), [3, 4, 5, 6, 1])
 
     def test_customer_editor_shows_compact_folder_context_but_keeps_full_path(self):
         with TemporaryDirectory() as directory:

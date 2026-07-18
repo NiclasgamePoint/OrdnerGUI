@@ -58,3 +58,54 @@ class SearchHistory:
 
     def clear(self):
         self.settings.remove(self.KEY)
+
+
+class RecentCustomerHistory:
+    """Persisted MRU list for customers shown on the empty search screen."""
+
+    KEY = "search/recent_customers"
+
+    def __init__(self, maximum: int = 5):
+        self.maximum = maximum
+        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+    def ids(self) -> list[int]:
+        raw = self.settings.value(self.KEY, [])
+        if isinstance(raw, (str, int)):
+            raw = [raw]
+        ids = []
+        seen = set()
+        for value in raw:
+            try:
+                customer_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if customer_id > 0 and customer_id not in seen:
+                ids.append(customer_id)
+                seen.add(customer_id)
+        return ids[: self.maximum]
+
+    def remember(self, customer_ids: list[int]) -> list[int]:
+        new_ids = []
+        seen = set()
+        for value in customer_ids:
+            try:
+                customer_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if customer_id > 0 and customer_id not in seen:
+                new_ids.append(customer_id)
+                seen.add(customer_id)
+        if not new_ids:
+            return self.ids()
+        values = [
+            customer_id
+            for customer_id in self.ids()
+            if customer_id not in seen
+        ]
+        values = [*new_ids, *values][: self.maximum]
+        self.settings.setValue(self.KEY, values)
+        return values
+
+    def clear(self):
+        self.settings.remove(self.KEY)
