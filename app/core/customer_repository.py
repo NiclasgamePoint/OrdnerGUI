@@ -30,7 +30,24 @@ class CustomerRepository:
 
     @staticmethod
     def _folder_key(folder_path: str) -> str:
-        return os.path.normcase(os.path.abspath(os.path.normpath(folder_path)))
+        value = folder_path.strip()
+        if value.startswith("customer://"):
+            return value
+        return os.path.abspath(os.path.normpath(value))
+
+    @classmethod
+    def _folder_lookup_key(cls, folder_path: str) -> str:
+        return os.path.normcase(cls._folder_key(folder_path))
+
+    @staticmethod
+    def _path_equals_sql(column: str) -> str:
+        comparator = "COLLATE NOCASE" if os.name == "nt" else ""
+        return f"{column} = ? {comparator}".strip()
+
+    @staticmethod
+    def _path_like_sql(column: str) -> str:
+        comparator = "COLLATE NOCASE" if os.name == "nt" else ""
+        return f"{column} LIKE ? {comparator}".strip()
 
     def _initialize(self):
         self.connection.executescript(
@@ -146,11 +163,16 @@ class CustomerRepository:
         include_ancestors: bool = True,
     ) -> Customer | None:
         normalized = self._folder_key(folder_path)
+        folder_match = self._path_equals_sql("customer_folders.folder_path")
+        customer_match = self._path_equals_sql("folder_path")
+        ancestor_match = "? LIKE customer_folders.folder_path || ? || '%'"
+        if os.name == "nt":
+            ancestor_match += " COLLATE NOCASE"
         row = self.connection.execute(
-            """
+            f"""
             SELECT customers.* FROM customers
             JOIN customer_folders ON customer_folders.customer_id = customers.id
-            WHERE customer_folders.folder_path = ?
+            WHERE {folder_match}
             LIMIT 1
             """,
             (normalized,),
@@ -159,10 +181,10 @@ class CustomerRepository:
             return self._hydrate(row)
         if include_ancestors:
             row = self.connection.execute(
-                """
+                f"""
                 SELECT customers.* FROM customers
                 JOIN customer_folders ON customer_folders.customer_id = customers.id
-                WHERE ? LIKE customer_folders.folder_path || ? || '%'
+                WHERE {ancestor_match}
                   AND customer_folders.folder_path NOT LIKE 'customer://%'
                 ORDER BY LENGTH(customer_folders.folder_path) DESC
                 LIMIT 1
@@ -172,7 +194,7 @@ class CustomerRepository:
             if row is not None:
                 return self._hydrate(row)
         row = self.connection.execute(
-            "SELECT * FROM customers WHERE folder_path = ?",
+            f"SELECT * FROM customers WHERE {customer_match}",
             (normalized,),
         ).fetchone()
         return self._hydrate(row) if row else None
@@ -212,10 +234,12 @@ class CustomerRepository:
 
     def customer_ids_within_folder(self, folder_path: str) -> list[int]:
         normalized = self._folder_key(folder_path)
+        folder_match = self._path_equals_sql("folder_path")
+        descendant_match = self._path_like_sql("folder_path")
         rows = self.connection.execute(
-            """
+            f"""
             SELECT DISTINCT customer_id FROM customer_folders
-            WHERE folder_path = ? OR folder_path LIKE ?
+            WHERE {folder_match} OR {descendant_match}
             """,
             (normalized, f"{normalized}{os.sep}%"),
         ).fetchall()
@@ -298,6 +322,13 @@ class CustomerRepository:
                         (customer_id,),
                     )
 
+                self.connection.execute(
+                    f"""
+                    DELETE FROM customer_folders
+                    WHERE customer_id = ? AND {self._path_equals_sql("folder_path")}
+                    """,
+                    (customer_id, normalized_folder),
+                )
                 self.connection.execute(
                     """
                     INSERT OR IGNORE INTO customer_folders (customer_id, folder_path)
@@ -415,7 +446,9 @@ class CustomerRepository:
                 primary_is_descendant = bool(
                     normalized_folders
                     and any(
-                        primary_folder.startswith(f"{root}{os.sep}")
+                        self._folder_lookup_key(primary_folder).startswith(
+                            f"{self._folder_lookup_key(root)}{os.sep}"
+                        )
                         for root in normalized_folders
                     )
                 )
@@ -439,14 +472,21 @@ class CustomerRepository:
                         )
                     descendant_pattern = f"{normalized}{os.sep}%"
                     self.connection.execute(
-                        "DELETE FROM customer_folders "
-                        "WHERE customer_id=? AND folder_path LIKE ?",
+                        f"DELETE FROM customer_folders "
+                        f"WHERE customer_id=? AND {self._path_like_sql('folder_path')}",
                         (customer_id, descendant_pattern),
                     )
                     self.connection.execute(
-                        "DELETE FROM automatic_customer_sources "
-                        "WHERE customer_id=? AND folder_path LIKE ?",
+                        f"DELETE FROM automatic_customer_sources "
+                        f"WHERE customer_id=? AND {self._path_like_sql('folder_path')}",
                         (customer_id, descendant_pattern),
+                    )
+                    self.connection.execute(
+                        f"""
+                        DELETE FROM customer_folders
+                        WHERE customer_id = ? AND {self._path_equals_sql("folder_path")}
+                        """,
+                        (customer_id, normalized),
                     )
                     self.connection.execute(
                         "INSERT OR IGNORE INTO customer_folders (customer_id, folder_path) "
@@ -805,7 +845,7 @@ class CustomerRepository:
 
         folders = unique_strings(
             (folder for source in sources for folder in source.folder_paths),
-            cls._folder_key,
+            cls._folder_lookup_key,
         )
         physical_folders = [
             folder for folder in folders if not folder.startswith("customer://")
@@ -868,9 +908,10 @@ class CustomerRepository:
         seen_paths = set()
         for folder in folder_paths:
             normalized = self._folder_key(folder)
-            if normalized not in seen_paths:
+            lookup_key = self._folder_lookup_key(normalized)
+            if lookup_key not in seen_paths:
                 normalized_paths.append(normalized)
-                seen_paths.add(normalized)
+                seen_paths.add(lookup_key)
 
         primary_folder = customer.folder_path.strip()
         if primary_folder:
