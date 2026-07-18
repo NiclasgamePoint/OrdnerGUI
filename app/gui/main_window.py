@@ -41,7 +41,7 @@ from app.core.index_store import (
     create_restore_build,
     validate_index,
 )
-from app.core.search_models import SearchFilters, SearchHistory
+from app.core.search_models import RecentCustomerHistory, SearchFilters, SearchHistory
 from app.gui.dialogs import CustomerEditorDialog, CustomerRecognitionReviewDialog
 from app.gui.navigation import NavigationController, NavigationEntry
 from app.gui.pages import CustomerPage, FolderPage, SearchPage
@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
             "folders": None,
         }
         self.search_history = SearchHistory()
+        self.recent_customer_history = RecentCustomerHistory(maximum=5)
         self.search_debounce = QTimer(self)
         self.search_debounce.setSingleShot(True)
         self.search_debounce.setInterval(250)
@@ -247,14 +248,19 @@ class MainWindow(QMainWindow):
             self._show_route(self.navigator.current)
 
     def _show_initial_customers(self):
-        customers = self.customer_repository.list_customers()[
-            : self.index_options.result_limit
+        customers = [
+            customer
+            for customer_id in self.recent_customer_history.ids()
+            if (customer := self.customer_repository.get(customer_id)) is not None
         ]
         self.search_page.reset(customers)
         self.search_counts = {"customers": len(customers), "folders": None}
-        self.status_bar.set_text(
-            f"{len(customers)} Kunden · Suchbegriff für Kunden oder Ordner eingeben"
-        )
+        if customers:
+            self.status_bar.set_text(
+                f"{len(customers)} zuletzt gesuchte Kunden · Suchbegriff eingeben"
+            )
+        else:
+            self.status_bar.set_text("Suchbegriff für Kunden oder Ordner eingeben")
 
     def _refresh_customer_results_only(self):
         query = self.header.query()
@@ -264,9 +270,8 @@ class MainWindow(QMainWindow):
                 self.index_options.result_limit,
             )
         else:
-            customers = self.customer_repository.list_customers()[
-                : self.index_options.result_limit
-            ]
+            self._show_initial_customers()
+            return
         self.search_page.set_customers(customers, len(customers))
 
     def on_search_text_changed(self, text: str):
@@ -347,6 +352,11 @@ class MainWindow(QMainWindow):
             self.search_counts[category] = page.total
             if category == "customers":
                 self.search_page.set_customers(page.items, page.total)
+                self.recent_customer_history.remember([
+                    int(customer.id)
+                    for customer in page.items
+                    if customer.id is not None
+                ])
             elif category == "folders":
                 self.search_page.set_folders(page.items, page.total)
         self._update_search_status()
@@ -557,6 +567,7 @@ class MainWindow(QMainWindow):
     def clear_customer_data(self):
         try:
             self.customer_repository.clear_all_customer_data()
+            self.recent_customer_history.clear()
             self.customer_repository.close()
             self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
             self.navigator.reset("search")
