@@ -1,6 +1,10 @@
 ## Papa
 
 - integration vom Imap Server
+- Schriftgrößen anpassen
+- Kontrast anpassbar machen
+- Multiwortsuche
+- 
 
 
 
