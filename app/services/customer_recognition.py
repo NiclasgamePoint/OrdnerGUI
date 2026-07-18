@@ -192,6 +192,7 @@ class CustomerRecognitionService:
                             folder_path, candidate.service_types
                         ),
                         years=self._years_for_path(folder_path, candidate.years),
+                        entity_type=candidate.entity_type,
                         email=candidate.email,
                         phone=candidate.phone,
                         street=candidate.street,
@@ -230,6 +231,7 @@ class CustomerRecognitionService:
                 folder_paths=[str(root["path"])],
                 service_types=[str(root["service_type"])],
                 years=[int(root["year"])],
+                entity_type=suggestion.entity_type,
                 email=suggestion.email,
                 phone=suggestion.phone,
                 street=suggestion.street,
@@ -289,6 +291,10 @@ class CustomerRecognitionService:
                 folder_paths=[str(row["path"])],
                 service_types=[service_type],
                 years=[year],
+                entity_type=self._suggestions._infer_entity_type(
+                    customer_name,
+                    customer_label,
+                ),
                 reason="Dieser Ordner liegt vor 2016 und wartet auf manuelle Prüfung.",
             ))
         return candidates
@@ -319,6 +325,7 @@ class CustomerRecognitionService:
                 value for candidate in candidates for value in candidate.service_types
             }, key=str.casefold),
             years=sorted({value for candidate in candidates for value in candidate.years}),
+            entity_type=next((item.entity_type for item in candidates if item.entity_type), ""),
             email=next((item.email for item in candidates if item.email), ""),
             phone=next((item.phone for item in candidates if item.phone), ""),
             street=next((item.street for item in candidates if item.street), ""),
@@ -438,6 +445,7 @@ class CustomerRecognitionService:
                         folder_paths=[folder_path],
                         service_types=self._services_for_path(folder_path, candidate.service_types),
                         years=self._years_for_path(folder_path, candidate.years),
+                        entity_type=candidate.entity_type,
                     )
                     repository.apply_recognition_candidate(individual)
             stats.assigned += 1

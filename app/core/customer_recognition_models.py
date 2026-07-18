@@ -15,6 +15,7 @@ class RecognitionCandidate:
     folder_paths: list[str]
     service_types: list[str]
     years: list[int]
+    entity_type: str = ""
     email: str = ""
     phone: str = ""
     street: str = ""
@@ -39,6 +40,7 @@ class RecognitionCandidate:
             "folder_paths": list(self.folder_paths),
             "service_types": list(self.service_types),
             "years": list(self.years),
+            "entity_type": self.entity_type,
             "email": self.email,
             "phone": self.phone,
             "street": self.street,
@@ -57,6 +59,7 @@ class RecognitionCandidate:
             folder_paths=[str(value) for value in values.get("folder_paths") or []],
             service_types=[str(value) for value in values.get("service_types") or []],
             years=[int(value) for value in values.get("years") or []],
+            entity_type=str(values.get("entity_type") or ""),
             email=str(values.get("email") or ""),
             phone=str(values.get("phone") or ""),
             street=str(values.get("street") or ""),
