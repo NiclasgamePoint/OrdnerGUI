@@ -124,6 +124,76 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(updated.phone, "030 111111")
             self.assertEqual(updated.street, "Altweg 1")
             self.assertIn(str(project.resolve()), updated.folder_paths)
+            suggestions = repository.list_data_suggestions(updated.id)
+            self.assertTrue(any(
+                suggestion.field_name == "email"
+                and suggestion.suggested_value == "neu@example.de"
+                for suggestion in suggestions
+            ))
+            repository.close()
+
+    def test_recognition_creates_project_records_and_service_types(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            projects = [
+                root / "Blower Door" / "2020" / "Mustermann, Musterstadt",
+                root / "Blower Door" / "2022" / "Mustermann, Hamburg",
+                root / "Baubegleitung" / "2024" / "Mustermann, Musterstadt",
+            ]
+            for project in projects:
+                project.mkdir(parents=True)
+                (project / "info.txt").write_text("Kontakt: Max Mustermann", encoding="utf-8")
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+
+            stats = CustomerRecognitionService(
+                index_path,
+                customer_path,
+                CustomerRecognitionOptions(enabled=True),
+            ).synchronize()
+            repository = CustomerRepository(customer_path)
+            customers = repository.list_customers()
+            customer_projects = repository.list_projects_for_customer(int(customers[0].id))
+
+            self.assertEqual(stats.created, 1)
+            self.assertEqual(len(customers), 1)
+            self.assertEqual(len(customer_projects), 3)
+            self.assertEqual(
+                {project.service_type for project in customer_projects},
+                {"Blower Door", "Baubegleitung"},
+            )
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM service_types").fetchone()[0],
+                2,
+            )
+            repository.close()
+
+    def test_pre_2016_structured_folder_waits_for_review(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            legacy = root / "Blower Door" / "2015" / "Mustermann, Musterstadt"
+            legacy.mkdir(parents=True)
+            (legacy / "info.txt").write_text("Altprojekt", encoding="utf-8")
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+
+            stats = CustomerRecognitionService(
+                index_path,
+                customer_path,
+                CustomerRecognitionOptions(enabled=True),
+            ).synchronize()
+            repository = CustomerRepository(customer_path)
+            cases = repository.list_pending_recognition_cases()
+
+            self.assertEqual(stats.created, 0)
+            self.assertEqual(stats.pending, 1)
+            self.assertEqual(len(repository.list_customers()), 0)
+            self.assertEqual(cases[0].display_name, "Mustermann")
+            self.assertIn("vor 2016", cases[0].reason)
             repository.close()
 
     def test_similar_name_waits_for_persistent_review_decision(self):

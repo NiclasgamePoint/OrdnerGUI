@@ -121,6 +121,9 @@ class CustomerRecognitionService:
                 if decision is not None:
                     self._apply_stored_decision(repository, candidate, decision, stats)
                     continue
+                if candidate.reason:
+                    pending.append(candidate)
+                    continue
                 if repository.has_previous_recognition_decision(
                     candidate.recognition_key, candidate.signature
                 ):
@@ -234,15 +237,68 @@ class CustomerRecognitionService:
                 contacts=suggestion.contacts,
             ))
 
+        individual.extend(self._load_legacy_review_candidates(manager))
+
         grouped: dict[str, list[RecognitionCandidate]] = defaultdict(list)
         for candidate in individual:
+            if candidate.reason:
+                grouped[f"{candidate.recognition_key}:{candidate.signature}"].append(candidate)
+                continue
             grouped[candidate.recognition_key].append(candidate)
         return [self._merge_candidates(group) for group in grouped.values()]
+
+    def _load_legacy_review_candidates(
+        self,
+        manager: IndexManager,
+    ) -> list[RecognitionCandidate]:
+        rows = manager.conn.execute(
+            """
+            SELECT path, relative_path, name
+            FROM folders
+            WHERE relative_path != ''
+            ORDER BY relative_path
+            """
+        ).fetchall()
+        candidates: list[RecognitionCandidate] = []
+        for row in rows:
+            relative_parts = Path(str(row["relative_path"])).parts
+            if len(relative_parts) != 3:
+                continue
+            service_type, year_value, customer_label = (
+                relative_parts[0].strip(),
+                relative_parts[1].strip(),
+                relative_parts[2].strip(),
+            )
+            if not re.fullmatch(r"\d{4}", year_value):
+                continue
+            year = int(year_value)
+            if year >= 2016:
+                continue
+            if "," in customer_label:
+                customer_name, city = (
+                    value.strip() for value in customer_label.split(",", 1)
+                )
+            else:
+                customer_name, city = customer_label, ""
+            if not customer_name:
+                continue
+            candidates.append(RecognitionCandidate(
+                recognition_key=normalize_identity(customer_name),
+                display_name=customer_name,
+                city=city,
+                folder_paths=[str(row["path"])],
+                service_types=[service_type],
+                years=[year],
+                reason="Dieser Ordner liegt vor 2016 und wartet auf manuelle Prüfung.",
+            ))
+        return candidates
 
     def _merge_candidates(
         self, candidates: list[RecognitionCandidate]
     ) -> RecognitionCandidate:
         first = candidates[0]
+        if first.reason:
+            return first
         contacts: dict[tuple[str, str, str], Contact] = {}
         for candidate in candidates:
             for contact in candidate.contacts:
