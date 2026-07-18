@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -10,6 +11,8 @@ from tempfile import TemporaryDirectory
 import time
 from typing import Callable
 
+from app.core.config import DATA_DIR
+
 try:
     import olefile
 except Exception:  # pragma: no cover - optional dependency fallback
@@ -18,6 +21,8 @@ except Exception:  # pragma: no cover - optional dependency fallback
 
 class DocumentConverter:
     """Isolated, optional LibreOffice/catdoc integration for legacy documents."""
+
+    WORD_PREVIEW_CACHE_DIR = DATA_DIR / "preview_cache" / "word"
 
     def __init__(self):
         self._temporary_directory: TemporaryDirectory | None = None
@@ -167,6 +172,64 @@ class DocumentConverter:
         self._set_last_operation(converted=False, tool="Nicht verfügbar", action="convert")
         raise RuntimeError("Kein geeigneter Konverter gefunden (weder LibreOffice noch MS Office)")
 
+    def convert_word_to_pdf(
+        self,
+        path: Path,
+        should_cancel: Callable[[], bool] | None = None,
+        prefer_ms_office: bool = True,
+    ) -> Path:
+        """Render a Word document to PDF for the in-app preview."""
+        path = path.resolve()
+        if path.suffix.lower().lstrip(".") not in {"doc", "docx"}:
+            raise ValueError("Nur Word-Dokumente können als Word-Vorschau gerendert werden.")
+
+        cache_path = self._word_preview_cache_path(path)
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            self._set_last_operation(converted=True, tool="Cache", action="convert")
+            return cache_path
+
+        if prefer_ms_office and sys.platform == "win32":
+            if converted := self._convert_with_ms_office(path, "pdf", should_cancel):
+                cached = self._store_word_preview_cache(converted, cache_path)
+                self._set_last_operation(converted=True, tool="MS Office", action="convert")
+                return cached
+            if should_cancel is not None and should_cancel():
+                raise InterruptedError("Konvertierung wurde abgebrochen")
+
+        if converted := self._convert_with_libreoffice(path, "pdf", should_cancel):
+            cached = self._store_word_preview_cache(converted, cache_path)
+            self._set_last_operation(converted=True, tool="LibreOffice", action="convert")
+            return cached
+        if should_cancel is not None and should_cancel():
+            raise InterruptedError("Konvertierung wurde abgebrochen")
+
+        if not prefer_ms_office and sys.platform == "win32":
+            if converted := self._convert_with_ms_office(path, "pdf", should_cancel):
+                cached = self._store_word_preview_cache(converted, cache_path)
+                self._set_last_operation(converted=True, tool="MS Office", action="convert")
+                return cached
+
+        self._set_last_operation(converted=False, tool="Nicht verfügbar", action="convert")
+        raise RuntimeError("Kein geeigneter Word-Konverter gefunden (weder MS Office noch LibreOffice)")
+
+    def _word_preview_cache_path(self, path: Path) -> Path:
+        stat = path.stat()
+        payload = "|".join((
+            str(path.resolve()),
+            str(stat.st_size),
+            str(stat.st_mtime_ns),
+            path.suffix.lower(),
+        ))
+        digest = hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()
+        return self.WORD_PREVIEW_CACHE_DIR / f"{digest}.pdf"
+
+    def _store_word_preview_cache(self, source: Path, cache_path: Path) -> Path:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_cache_path = cache_path.with_suffix(".tmp.pdf")
+        shutil.copyfile(source, temporary_cache_path)
+        temporary_cache_path.replace(cache_path)
+        return cache_path
+
     def _convert_with_libreoffice(
         self,
         path: Path,
@@ -221,10 +284,13 @@ class DocumentConverter:
         target_extension: str,
         should_cancel: Callable[[], bool] | None,
     ) -> Path | None:
-        if not self._can_use_ms_office(should_cancel):
+        source_extension = path.suffix.lower().lstrip(".")
+        if source_extension in {"doc", "docx"}:
+            if not self._can_use_ms_word(should_cancel):
+                return None
+        elif not self._can_use_ms_office(should_cancel):
             return None
 
-        source_extension = path.suffix.lower().lstrip(".")
         self.cleanup()
         self._temporary_directory = TemporaryDirectory(prefix="papagui-viewer-")
         output_dir = Path(self._temporary_directory.name)
@@ -255,6 +321,31 @@ class DocumentConverter:
         script = (
             "$ErrorActionPreference='Stop';"
             "try {$x=New-Object -ComObject Excel.Application; $x.Quit(); 'ok'} catch {'no'}"
+        )
+        try:
+            result = self._run_command(
+                [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                timeout=10,
+                should_cancel=should_cancel,
+            )
+        except InterruptedError:
+            raise
+        except Exception:
+            return False
+        return result.returncode == 0 and "ok" in result.stdout.lower()
+
+    def _can_use_ms_word(
+        self,
+        should_cancel: Callable[[], bool] | None,
+    ) -> bool:
+        if sys.platform != "win32":
+            return False
+        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        if powershell is None:
+            return False
+        script = (
+            "$ErrorActionPreference='Stop';"
+            "try {$w=New-Object -ComObject Word.Application; $w.Quit(); 'ok'} catch {'no'}"
         )
         try:
             result = self._run_command(
@@ -321,13 +412,19 @@ class DocumentConverter:
         file_format = "17" if target_extension == "pdf" else "2"
         script = (
             "$ErrorActionPreference='Stop';"
+            "$word=$null;"
+            "$doc=$null;"
+            "try {"
             "$word=New-Object -ComObject Word.Application;"
             "$word.Visible=$false;"
             "$word.DisplayAlerts=0;"
             f"$doc=$word.Documents.Open('{source_path}', $false, $true);"
             f"$doc.SaveAs([ref]'{target_path}', [ref]{file_format});"
-            "$doc.Close($false);"
-            "$word.Quit();"
+            "}"
+            "finally {"
+            "if ($doc -ne $null) {$doc.Close($false)};"
+            "if ($word -ne $null) {$word.Quit()};"
+            "}"
         )
         try:
             result = self._run_command(
@@ -392,3 +489,7 @@ class DocumentConverter:
         if self._temporary_directory is not None:
             self._temporary_directory.cleanup()
             self._temporary_directory = None
+
+    @classmethod
+    def clear_word_preview_cache(cls):
+        shutil.rmtree(cls.WORD_PREVIEW_CACHE_DIR, ignore_errors=True)
