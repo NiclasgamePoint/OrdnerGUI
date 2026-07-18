@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QCoreApplication, QEvent, QPointF
 from PySide6.QtPdf import QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget
 
 from app.gui.widgets.buttons import AppButton
 
@@ -61,7 +61,7 @@ class PdfViewerWidget(QWidget):
         self.view.pageNavigator().currentPageChanged.connect(self._update_page_label)
 
     def load(self, path: Path):
-        self.document.close()
+        self.close_document()
         error = self.document.load(str(path))
         if error != QPdfDocument.Error.None_:
             raise ValueError(f"PDF konnte nicht geladen werden ({error.name}).")
@@ -94,4 +94,22 @@ class PdfViewerWidget(QWidget):
         self.view.setCurrentSearchResultIndex(index)
 
     def close_document(self):
-        self.document.close()
+        old_document = self.document
+        try:
+            self.view.setDocument(None)
+        except TypeError:
+            pass
+        try:
+            self.search_model.setDocument(None)
+        except TypeError:
+            pass
+        old_document.close()
+        old_document.deleteLater()
+        app = QApplication.instance()
+        if app is not None:
+            QCoreApplication.sendPostedEvents(old_document, QEvent.DeferredDelete)
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            app.processEvents()
+        self.document = QPdfDocument(self)
+        self.search_model.setDocument(self.document)
+        self._update_page_label(0)
