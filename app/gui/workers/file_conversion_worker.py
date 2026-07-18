@@ -14,6 +14,7 @@ class FileConversionWorker(QThread):
 
     XLS_TO_XLSX = "xls_to_xlsx"
     EXTRACT_DOC = "extract_doc"
+    WORD_TO_PDF = "word_to_pdf"
 
     def __init__(
         self,
@@ -39,6 +40,11 @@ class FileConversionWorker(QThread):
                 )
             elif self.operation == self.EXTRACT_DOC:
                 result = self.converter.extract_legacy_doc(
+                    self.source_path,
+                    should_cancel=self.isInterruptionRequested,
+                )
+            elif self.operation == self.WORD_TO_PDF:
+                result = self.converter.convert_word_to_pdf(
                     self.source_path,
                     should_cancel=self.isInterruptionRequested,
                 )

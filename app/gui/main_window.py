@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -50,6 +51,10 @@ from app.gui.theme import ThemeManager
 from app.gui.widgets import AppHeader, IndexStatusBar, SearchFilterPopup
 from app.gui.workers import IndexJobController, SearchWorker, SettingsDataWorker
 from app.services import FileSystemMonitor
+from app.services.document_converter import DocumentConverter
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -985,6 +990,10 @@ class MainWindow(QMainWindow):
             self.settings_data_worker.requestInterruption()
             self.settings_data_worker.wait()
         self.folder_page.cleanup()
+        try:
+            DocumentConverter.clear_word_preview_cache()
+        except Exception:
+            LOGGER.exception("Word-Preview-Cache konnte nicht gelöscht werden.")
         self.index_manager.close()
         self.customer_repository.close()
         self.index_controller.release_owner()

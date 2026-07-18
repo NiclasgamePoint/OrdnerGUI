@@ -93,6 +93,7 @@ class FileViewer(QWidget):
         self._load_generation = 0
         self._conversion_workers: set[FileConversionWorker] = set()
         self._active_converter: DocumentConverter | None = None
+        self._word_preview_error = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -156,6 +157,7 @@ class FileViewer(QWidget):
         self._load_generation += 1
         self._cancel_conversions()
         self._cleanup_active_converter()
+        self._word_preview_error = ""
         self._stop_loading()
         self.pdf_viewer.close_document()
         self.current_file = filepath
@@ -174,9 +176,9 @@ class FileViewer(QWidget):
             elif suffix in self.TEXT_TYPES:
                 self._show_text(filepath.read_text(encoding="utf-8", errors="replace"))
             elif suffix == "docx":
-                self._show_docx(filepath)
+                self._show_word_preview(filepath)
             elif suffix == "doc":
-                self._show_legacy_doc(filepath)
+                self._show_word_preview(filepath)
             elif suffix in self.IMAGE_TYPES:
                 self._show_image(filepath)
             else:
@@ -208,19 +210,29 @@ class FileViewer(QWidget):
         self.stack.setCurrentWidget(self.spreadsheet_viewer)
         self._set_conversion_meta(converted=False, tool="Direkt")
 
-    def _show_docx(self, path: Path):
+    def _show_docx_text(self, path: Path, prefix: str = ""):
         document = Document(str(path))
         lines = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
         for table in document.tables:
             lines.extend("\t".join(cell.text for cell in row.cells) for row in table.rows)
-        self._show_text("\n".join(lines))
+        text = "\n".join(lines)
+        if prefix:
+            text = f"{prefix}\n\n{text}"
+        self._show_text(text)
         self._set_conversion_meta(converted=False, tool="Direkt")
+
+    def _show_word_preview(self, path: Path):
+        self._start_conversion(
+            FileConversionWorker.WORD_TO_PDF,
+            path,
+            "Word-Datei wird als formatierte Vorschau vorbereitet …",
+        )
 
     def _show_legacy_doc(self, path: Path):
         self._start_conversion(
             FileConversionWorker.EXTRACT_DOC,
             path,
-            "Word-Datei wird im Hintergrund verarbeitet …",
+            "Word-Datei wird als Textvorschau verarbeitet …",
         )
 
     def _start_conversion(self, operation: str, path: Path, message: str):
@@ -253,11 +265,7 @@ class FileViewer(QWidget):
             self._stop_loading()
             if error:
                 if error != "abgebrochen":
-                    self._set_conversion_meta(converted=False, tool="")
-                    self._show_text(
-                        "Datei konnte nicht konvertiert werden:\n\n"
-                        f"{error}"
-                    )
+                    self._handle_conversion_error(operation, error)
                 return
 
             if operation == FileConversionWorker.XLS_TO_XLSX:
@@ -265,12 +273,23 @@ class FileViewer(QWidget):
                 if isinstance(worker, FileConversionWorker):
                     self._active_converter = worker.take_converter()
                 self.stack.setCurrentWidget(self.spreadsheet_viewer)
+            elif operation == FileConversionWorker.WORD_TO_PDF:
+                self.pdf_viewer.load(Path(result))
+                if isinstance(worker, FileConversionWorker):
+                    self._active_converter = worker.take_converter()
+                self.stack.setCurrentWidget(self.pdf_viewer)
             elif operation == FileConversionWorker.EXTRACT_DOC:
                 text = str(result or "")
                 if not text.strip():
                     raise ValueError(
                         "Inhalt der .doc-Datei konnte nicht extrahiert werden"
                     )
+                if self._word_preview_error:
+                    text = (
+                        "Formatierte Word-Vorschau konnte nicht erstellt werden:\n"
+                        f"{self._word_preview_error}\n\nTextinhalt:\n\n{text}"
+                    )
+                    self._word_preview_error = ""
                 self._show_text(text)
             self._set_conversion_meta(
                 converted=bool(metadata.get("converted", False)),
@@ -288,8 +307,37 @@ class FileViewer(QWidget):
             if isinstance(worker, FileConversionWorker):
                 worker.cleanup()
 
+    def _handle_conversion_error(self, operation: str, error: str):
+        if operation == FileConversionWorker.WORD_TO_PDF and self.current_file is not None:
+            suffix = self.current_file.suffix.lower()
+            self._word_preview_error = error
+            if suffix == ".docx":
+                try:
+                    self._show_docx_text(
+                        self.current_file,
+                        prefix=(
+                            "Formatierte Word-Vorschau konnte nicht erstellt werden:\n"
+                            f"{error}\n\nTextinhalt:"
+                        ),
+                    )
+                    return
+                except Exception as fallback_error:
+                    self._set_conversion_meta(converted=False, tool="")
+                    self._show_text(
+                        "Datei konnte nicht angezeigt werden:\n\n"
+                        f"{fallback_error}"
+                    )
+                    return
+            if suffix == ".doc":
+                self._show_legacy_doc(self.current_file)
+                return
+        self._set_conversion_meta(converted=False, tool="")
+        self._show_text(
+            "Datei konnte nicht konvertiert werden:\n\n"
+            f"{error}"
+        )
+
     def _release_conversion_worker(self, worker: FileConversionWorker):
-        worker.cleanup()
         self._conversion_workers.discard(worker)
         worker.deleteLater()
 
