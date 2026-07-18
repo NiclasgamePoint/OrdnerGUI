@@ -41,6 +41,34 @@ class CustomerRepositoryTests(unittest.TestCase):
                 repository.add_folder_to_customer(second.id, str(folder))
             repository.close()
 
+    def test_project_records_are_created_from_customer_folders(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "customers.db"
+            repository = CustomerRepository(database)
+            folder_a = Path(directory) / "Blower Door" / "2020" / "Mustermann, Musterstadt"
+            folder_b = Path(directory) / "Blower Door" / "2022" / "Mustermann, Hamburg"
+            customer = repository.save(Customer(
+                display_name="Mustermann",
+                company="Mustermann",
+                folder_paths=[str(folder_a), str(folder_b)],
+                service_types=["Blower Door"],
+            ))
+
+            projects = repository.list_projects_for_customer(int(customer.id))
+            services = repository.connection.execute(
+                "SELECT name FROM service_types ORDER BY name"
+            ).fetchall()
+
+            self.assertEqual(len(projects), 2)
+            self.assertEqual({project.service_type for project in projects}, {"Blower Door"})
+            self.assertEqual([row[0] for row in services], ["Blower Door"])
+            self.assertEqual(repository.find_project_by_folder(str(folder_a)).customer_id, customer.id)
+            self.assertEqual(set(repository.get(customer.id).folder_paths), {
+                str(folder_a.resolve()),
+                str(folder_b.resolve()),
+            })
+            repository.close()
+
     def test_customer_contacts_notes_and_tags_crud(self):
         with TemporaryDirectory() as directory:
             database = Path(directory) / "customers.db"

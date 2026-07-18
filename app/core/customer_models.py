@@ -12,6 +12,38 @@ class Contact:
 
 
 @dataclass
+class ServiceType:
+    id: int | None = None
+    name: str = ""
+    normalized_name: str = ""
+
+
+@dataclass
+class CustomerProject:
+    id: int | None = None
+    customer_id: int | None = None
+    service_type_id: int | None = None
+    service_type: str = ""
+    folder_path: str = ""
+    folder_key: str = ""
+    project_label: str = ""
+    project_city: str = ""
+    year: int | None = None
+    source: str = "folder"
+
+
+@dataclass
+class CustomerDataSuggestion:
+    id: int | None = None
+    customer_id: int | None = None
+    project_id: int | None = None
+    field_name: str = ""
+    suggested_value: str = ""
+    source_path: str = ""
+    status: str = "pending"
+
+
+@dataclass
 class Customer:
     id: int | None = None
     folder_path: str = ""
