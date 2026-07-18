@@ -136,36 +136,7 @@ class CustomerRecognitionService:
                     })
                     pending.append(candidate)
                     continue
-                if len(candidate.folder_paths) > 1:
-                    owners_per_folder = [
-                        self._owner_ids_for_folder(repository, folder_path)
-                        for folder_path in candidate.folder_paths
-                    ]
-                    owner_ids = sorted({
-                        owner_id
-                        for owners in owners_per_folder
-                        for owner_id in owners
-                    })
-                    if len(owner_ids) == 1 and all(owners_per_folder):
-                        repository.apply_recognition_candidate(candidate, owner_ids[0])
-                        stats.assigned += len(candidate.folder_paths)
-                        continue
-                    candidate.reason = (
-                        "Projektordner besitzen denselben Kundennamen und Ort, sind "
-                        "aber noch nicht eindeutig demselben Kunden zugeordnet."
-                    )
-                    candidate.suggested_customer_ids = sorted(set(
-                        owner_ids + [
-                            int(customer.id)
-                            for customer in repository.find_by_identity(
-                                candidate.display_name, candidate.city
-                            )
-                            if customer.id is not None
-                        ]
-                    ))
-                    pending.append(candidate)
-                    continue
-                if self._process_single(repository, candidate, stats, pending):
+                if self._process_candidate(repository, candidate, stats, pending):
                     continue
             repository.replace_pending_recognition_cases(pending)
             stats.pending = len(pending)
@@ -248,7 +219,9 @@ class CustomerRecognitionService:
             )
             suggestion = self._blacklist.filter_suggestion(suggestion)
             individual.append(RecognitionCandidate(
-                recognition_key=str(root["recognition_key"]),
+                # Recompute the key so an existing index built with the former
+                # name-and-city identity is migrated without another rebuild.
+                recognition_key=normalize_identity(str(root["customer_name"])),
                 display_name=str(root["customer_name"]),
                 city=str(root["city"]),
                 folder_paths=[str(root["path"])],
@@ -297,37 +270,46 @@ class CustomerRecognitionService:
             contacts=list(contacts.values()),
         )
 
-    def _process_single(
+    def _process_candidate(
         self,
         repository: CustomerRepository,
         candidate: RecognitionCandidate,
         stats: RecognitionStats,
         pending: list[RecognitionCandidate],
     ) -> bool:
-        folder_path = candidate.folder_paths[0]
-        owner_ids = self._owner_ids_for_folder(repository, folder_path)
+        owner_ids = sorted({
+            owner_id
+            for folder_path in candidate.folder_paths
+            for owner_id in self._owner_ids_for_folder(repository, folder_path)
+        })
         if len(owner_ids) > 1:
-            candidate.reason = "Unterordner sind bereits verschiedenen Kunden zugeordnet."
+            candidate.reason = (
+                "Projektordner mit demselben Kundennamen sind bereits verschiedenen "
+                "Bestandskunden zugeordnet."
+            )
             candidate.suggested_customer_ids = owner_ids
             pending.append(candidate)
             return False
         if len(owner_ids) == 1:
             repository.apply_recognition_candidate(candidate, owner_ids[0])
-            stats.assigned += 1
+            stats.assigned += len(candidate.folder_paths)
             return True
 
-        exact = repository.find_by_identity(candidate.display_name, candidate.city)
+        exact = repository.find_by_name(candidate.display_name)
         if len(exact) == 1 and exact[0].id is not None:
             repository.apply_recognition_candidate(candidate, exact[0].id)
-            stats.assigned += 1
+            stats.assigned += len(candidate.folder_paths)
             return True
         if len(exact) > 1:
-            candidate.reason = "Mehrere Bestandskunden besitzen denselben Namen und Ort."
-            candidate.suggested_customer_ids = [
-                int(customer.id) for customer in exact if customer.id is not None
-            ]
-            pending.append(candidate)
-            return False
+            # Writable repositories consolidate these during initialization.  The
+            # fallback keeps synchronization safe if legacy data is injected while
+            # this process is already running.
+            repository.merge_duplicate_customers_by_name()
+            exact = repository.find_by_name(candidate.display_name)
+            if len(exact) == 1 and exact[0].id is not None:
+                repository.apply_recognition_candidate(candidate, exact[0].id)
+                stats.assigned += len(candidate.folder_paths)
+                return True
 
         similar = self._similar_customers(repository, candidate)
         if similar:

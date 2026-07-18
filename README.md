@@ -90,7 +90,8 @@ Die Anwendung unterstützt eine Kundenverwaltung, die von einzelnen Dienstleistu
 - Kundentypen sind dynamisch und können beim Bearbeiten frei gepflegt werden (z. B. Privatkunde, Firma, Gemeinde).
 - Kundendaten können über Vorschläge aus Ordnerstruktur und Dokumentinhalten vorbereitet und anschließend im Dialog bestätigt werden.
 - Die automatische Erkennung ist standardmäßig deaktiviert und muss unter „Kundenerkennung“ ausdrücklich eingeschaltet werden.
-- Mehrdeutige Treffer werden nicht automatisch zusammengeführt, sondern dauerhaft zur manuellen Prüfung vorgemerkt.
+- Projektordner mit demselben normalisierten Kundennamen werden automatisch einem gemeinsamen Kunden zugeordnet. Bereits vorhandene Namensdubletten werden beim Öffnen der Kundendatenbank verlustfrei zusammengeführt und intern protokolliert.
+- Nur ähnliche Namen oder widersprüchliche bestehende Ordnerzuordnungen werden dauerhaft zur manuellen Prüfung vorgemerkt.
 - Unterhalb des Hauptbereichs gibt es eine Kundenübersicht mit Kundenliste (links) und dynamischer Detailansicht (rechts).
 
 Die Übersicht ist Teil der normalen Seitenansicht und über vertikales Scrollen erreichbar.

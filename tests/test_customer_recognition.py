@@ -126,19 +126,23 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertIn(str(project.resolve()), updated.folder_paths)
             repository.close()
 
-    def test_ambiguous_roots_wait_for_persistent_review_decision(self):
+    def test_similar_name_waits_for_persistent_review_decision(self):
         with TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "Bauvorhaben"
-            first = root / "DEKRA" / "2026" / "Müller, Berlin"
-            second = root / "Baubegleitung" / "2025" / "Müller, Berlin"
-            first.mkdir(parents=True)
-            second.mkdir(parents=True)
-            (first / "a.txt").write_text("A", encoding="utf-8")
-            (second / "b.txt").write_text("B", encoding="utf-8")
+            project = root / "DEKRA" / "2026" / "Müller GmbH, Berlin"
+            project.mkdir(parents=True)
+            (project / "a.txt").write_text("A", encoding="utf-8")
             index_path = base / "index.db"
             customer_path = base / "customers.db"
             self._build_index(root, index_path)
+            repository = CustomerRepository(customer_path)
+            existing = repository.save(Customer(
+                display_name="Müller Gmb",
+                company="Manuell gepflegt",
+                city="Berlin",
+            ))
+            repository.close()
             options = CustomerRecognitionOptions(enabled=True)
             service = CustomerRecognitionService(index_path, customer_path, options)
 
@@ -146,10 +150,10 @@ class CustomerRecognitionTests(unittest.TestCase):
             repository = CustomerRepository(customer_path)
             cases = repository.list_pending_recognition_cases()
             self.assertEqual(initial.pending, 1)
-            self.assertEqual(len(repository.list_customers()), 0)
+            self.assertEqual(len(repository.list_customers()), 1)
             repository.close()
 
-            affected = service.resolve_case(cases[0], "together")
+            affected = service.resolve_case(cases[0], "assign", int(existing.id))
             repeated = service.synchronize()
             repository = CustomerRepository(customer_path)
             customer = repository.get(affected[0])
@@ -157,30 +161,29 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(repeated.pending, 0)
             self.assertEqual(repository.pending_recognition_count(), 0)
             self.assertEqual(len(repository.list_customers()), 1)
-            self.assertEqual(set(customer.folder_paths), {
-                str(first.resolve()), str(second.resolve())
-            })
+            self.assertIn(str(project.resolve()), customer.folder_paths)
             repository.close()
 
-            (first / "a.txt").write_text("neu@example.de", encoding="utf-8")
+            (project / "a.txt").write_text("neu@example.de", encoding="utf-8")
             self._build_index(root, index_path)
             changed = service.synchronize()
             self.assertEqual(changed.pending, 1)
 
-    def test_multiple_existing_matches_are_never_merged(self):
+    def test_project_roots_with_same_name_are_automatically_combined(self):
         with TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "Bauvorhaben"
-            project = root / "DEKRA" / "2026" / "Müller, Berlin"
-            project.mkdir(parents=True)
-            (project / "a.txt").write_text("A", encoding="utf-8")
+            projects = [
+                root / "Blower Door" / "2026" / "AB S+E, Ersatzbau Arche",
+                root / "Blower Door" / "2025" / "AB S+E, Erweiterung Amt",
+                root / "DEKRA" / "2024" / "AB S+E, Kita Rickling",
+            ]
+            for position, project in enumerate(projects):
+                project.mkdir(parents=True)
+                (project / f"{position}.txt").write_text("A", encoding="utf-8")
             index_path = base / "index.db"
             customer_path = base / "customers.db"
             self._build_index(root, index_path)
-            repository = CustomerRepository(customer_path)
-            repository.save(Customer(display_name="Müller", company="A", city="Berlin"))
-            repository.save(Customer(display_name="Müller", company="B", city="Berlin"))
-            repository.close()
 
             stats = CustomerRecognitionService(
                 index_path,
@@ -188,9 +191,121 @@ class CustomerRecognitionTests(unittest.TestCase):
                 CustomerRecognitionOptions(enabled=True),
             ).synchronize()
             repository = CustomerRepository(customer_path)
+            customers = repository.list_customers()
 
-            self.assertEqual(stats.pending, 1)
-            self.assertEqual(len(repository.list_customers()), 2)
+            self.assertEqual(stats.created, 1)
+            self.assertEqual(stats.pending, 0)
+            self.assertEqual(len(customers), 1)
+            self.assertEqual(customers[0].display_name, "AB S+E")
+            self.assertEqual(set(customers[0].folder_paths), {
+                str(project.resolve()) for project in projects
+            })
+            self.assertEqual(set(customers[0].service_types), {"Blower Door", "DEKRA"})
+            repository.close()
+
+    def test_existing_duplicates_are_merged_without_losing_related_data(self):
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "customers.db"
+            repository = CustomerRepository(database_path)
+            first = repository.save(Customer(
+                display_name="AB S+E",
+                company="AB S+E",
+                email="kontakt@example.de",
+                city="Erster Ort",
+                folder_paths=[str(Path(directory) / "Projekt A")],
+                service_types=["Blower Door"],
+                contacts=[Contact("Erster Kontakt", email="eins@example.de")],
+                notes=["Erste Notiz"],
+                tags=["Bestand"],
+            ))
+            second_folder = str((Path(directory) / "Projekt B").resolve())
+            cursor = repository.connection.execute(
+                """
+                INSERT INTO customers
+                    (folder_path, display_name, company, phone, street, city)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    second_folder,
+                    "  ab s+e  ",
+                    "AB S+E",
+                    "040 12345",
+                    "Zweiter Weg 2",
+                    "Zweiter Ort",
+                ),
+            )
+            duplicate_id = int(cursor.lastrowid)
+            repository.connection.execute(
+                "INSERT INTO customer_folders (customer_id, folder_path) VALUES (?, ?)",
+                (duplicate_id, second_folder),
+            )
+            repository.connection.execute(
+                "INSERT INTO customer_services (customer_id, name) VALUES (?, ?)",
+                (duplicate_id, "DEKRA"),
+            )
+            repository.connection.execute(
+                "INSERT INTO contacts (customer_id, name, phone) VALUES (?, ?, ?)",
+                (duplicate_id, "Zweiter Kontakt", "040 98765"),
+            )
+            repository.connection.execute(
+                "INSERT INTO notes (customer_id, body) VALUES (?, ?)",
+                (duplicate_id, "Zweite Notiz"),
+            )
+            repository.connection.execute("INSERT OR IGNORE INTO tags (name) VALUES ('Import')")
+            tag_id = repository.connection.execute(
+                "SELECT id FROM tags WHERE name='Import'"
+            ).fetchone()[0]
+            repository.connection.execute(
+                "INSERT INTO customer_tags (customer_id, tag_id) VALUES (?, ?)",
+                (duplicate_id, tag_id),
+            )
+            repository.connection.commit()
+
+            merged_ids = repository.merge_duplicate_customers_by_name()
+            customers = repository.list_customers()
+
+            self.assertEqual(len(customers), 1)
+            merged = customers[0]
+            absorbed_id = duplicate_id if merged.id != duplicate_id else int(first.id)
+            self.assertEqual(merged_ids[absorbed_id], int(merged.id))
+            self.assertEqual(set(merged.folder_paths), {
+                str((Path(directory) / "Projekt A").resolve()), second_folder
+            })
+            self.assertEqual(set(merged.service_types), {"Blower Door", "DEKRA"})
+            self.assertEqual({item.name for item in merged.contacts}, {
+                "Erster Kontakt", "Zweiter Kontakt"
+            })
+            self.assertEqual(set(merged.notes), {"Erste Notiz", "Zweite Notiz"})
+            self.assertEqual(set(merged.tags), {"Bestand", "Import"})
+            self.assertEqual(merged.email, "kontakt@example.de")
+            self.assertEqual(merged.phone, "040 12345")
+            self.assertEqual(
+                repository.connection.execute(
+                    "SELECT COUNT(*) FROM customer_merge_log WHERE absorbed_id=?",
+                    (absorbed_id,),
+                ).fetchone()[0],
+                1,
+            )
+            repository.close()
+
+    def test_saving_same_name_reuses_existing_customer(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            first = repository.save(Customer(
+                display_name="Müller",
+                folder_paths=[str(Path(directory) / "A")],
+                service_types=["DEKRA"],
+            ))
+            repeated = repository.save(Customer(
+                display_name=" müller ",
+                folder_paths=[str(Path(directory) / "B")],
+                service_types=["Blower Door"],
+            ))
+
+            self.assertEqual(repeated.id, first.id)
+            self.assertEqual(len(repository.list_customers()), 1)
+            self.assertEqual(set(repeated.service_types), {"DEKRA", "Blower Door"})
+            self.assertEqual(len(repeated.folder_paths), 2)
             repository.close()
 
 

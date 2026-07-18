@@ -56,8 +56,8 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         title.setObjectName("PopupSectionTitle")
         layout.addWidget(title)
         hint = QLabel(
-            "Nur mehrdeutige Fälle werden hier angezeigt. Bereits vorhandene "
-            "Kundeneinträge werden niemals miteinander verschmolzen."
+            "Gleiche Kundennamen werden automatisch zusammengeführt. Hier werden "
+            "nur ähnliche Namen und widersprüchliche Ordnerzuordnungen angezeigt."
         )
         hint.setObjectName("PopupCaption")
         hint.setWordWrap(True)
