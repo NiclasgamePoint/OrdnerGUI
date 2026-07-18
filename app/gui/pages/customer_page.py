@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.customer_models import Customer
+from app.core.customer_models import Customer, CustomerProject
 from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs import CustomerEditorDialog
 from app.gui.widgets.buttons import AppButton
@@ -128,7 +128,7 @@ class CustomerPage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 16)
         layout.setSpacing(10)
-        title = QLabel("Zugehörige Ordner")
+        title = QLabel("Dienstleistungen")
         title.setObjectName("PageTitle")
         layout.addWidget(title)
 
@@ -140,7 +140,7 @@ class CustomerPage(QWidget):
         self.folder_layout = QVBoxLayout(content)
         self.folder_layout.setContentsMargins(2, 2, 6, 2)
         self.folder_layout.setSpacing(7)
-        self.folder_message = QLabel("Keine Ordner verknüpft")
+        self.folder_message = QLabel("Keine Dienstleistungen verknüpft")
         self.folder_message.setObjectName("SearchSectionMessage")
         self.folder_layout.addWidget(self.folder_message)
         self.folder_layout.addStretch(1)
@@ -188,27 +188,22 @@ class CustomerPage(QWidget):
             self.contacts_table.setItem(row, 1, QTableWidgetItem(contact.email))
             self.contacts_table.setItem(row, 2, QTableWidgetItem(contact.phone))
         self.notes.setPlainText("\n\n".join(customer.notes))
-        self._set_folders(
-            customer.folder_paths
-            or ([customer.folder_path] if customer.folder_path else []),
-            folder_summaries or {},
-        )
+        self._set_projects(customer, folder_summaries or {})
 
-    def _set_folders(self, folders: list[str], summaries: dict[str, dict]):
+    def _set_projects(self, customer: Customer, summaries: dict[str, dict]):
         for row in self._folder_rows:
             self.folder_layout.removeWidget(row)
             row.deleteLater()
         self._folder_rows.clear()
-        self.folder_message.setVisible(not folders)
-        for path in folders:
+
+        projects = self._projects_for_customer(customer)
+        self.folder_message.setVisible(not projects)
+        for project in projects:
+            path = project.folder_path
             summary = summaries.get(path, {})
-            details = []
-            services = ", ".join(summary.get("service_types") or [])
-            years = ", ".join(summary.get("time_buckets") or [])
-            if services:
-                details.append(services)
-            if years:
-                details.append(years)
+            details = [project.service_type or "Dienstleistung"]
+            if project.year is not None:
+                details.append(str(project.year))
             details.append(f"{int(summary.get('file_count') or 0)} Dateien")
             modified = str(summary.get("last_modified") or "")
             if modified:
@@ -218,8 +213,18 @@ class CustomerPage(QWidget):
                     pass
                 details.append(f"geändert {modified}")
             details.append(path)
+            folder_name = project.project_label or Path(path).name or path
+            title = " · ".join(
+                value
+                for value in (
+                    project.service_type or "Dienstleistung",
+                    str(project.year) if project.year is not None else "",
+                    folder_name,
+                )
+                if value
+            )
             row = ResultRow(
-                Path(path).name or path,
+                title,
                 " · ".join(details),
                 path,
                 path,
@@ -228,6 +233,53 @@ class CustomerPage(QWidget):
             row.openPathRequested.connect(self.openPathRequested.emit)
             self.folder_layout.insertWidget(self.folder_layout.count() - 1, row)
             self._folder_rows.append(row)
+
+    def _projects_for_customer(self, customer: Customer) -> list[CustomerProject]:
+        if customer.id is not None:
+            projects = self.repository.list_projects_for_customer(int(customer.id))
+            if projects:
+                return projects
+        folders = customer.folder_paths or (
+            [customer.folder_path] if customer.folder_path else []
+        )
+        fallback_projects = []
+        for index, folder in enumerate(folders):
+            service = (
+                customer.service_types[min(index, len(customer.service_types) - 1)]
+                if customer.service_types
+                else ""
+            )
+            fallback_projects.append(self._project_from_folder(folder, service))
+        return sorted(
+            fallback_projects,
+            key=lambda project: (
+                project.year is None,
+                -(project.year or 0),
+                project.service_type.casefold(),
+                project.project_label.casefold(),
+            ),
+        )
+
+    def _project_from_folder(self, folder: str, service_type: str) -> CustomerProject:
+        path = Path(folder)
+        year = None
+        service = service_type.strip()
+        project_label = path.name if folder else ""
+        parts = path.parts
+        for index, part in enumerate(parts):
+            if part.isdigit() and len(part) == 4:
+                year = int(part)
+                if not service and index > 0:
+                    service = parts[index - 1]
+                if index + 1 < len(parts):
+                    project_label = parts[index + 1]
+                break
+        return CustomerProject(
+            service_type=service or "Dienstleistung",
+            folder_path=folder,
+            project_label=project_label,
+            year=year,
+        )
 
     def _edit_customer(self):
         if self.customer is None or self.customer.id is None:
