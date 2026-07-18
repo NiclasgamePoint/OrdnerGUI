@@ -67,9 +67,10 @@ class FolderStructureClassifier:
 
         root_relative = Path(service_type) / year_value / customer_label
         root_path = root / root_relative
-        recognition_key = "|".join(
-            (normalize_identity(customer_name), normalize_identity(city))
-        )
+        # A customer may own projects in several places.  The place describes the
+        # project root, not a separate customer identity, so grouping by city here
+        # would create duplicate customer records.
+        recognition_key = normalize_identity(customer_name)
         return ProjectRoot(
             path=str(root_path),
             relative_path=str(root_relative),

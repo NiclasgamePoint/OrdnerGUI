@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 import json
 import os
@@ -115,6 +116,15 @@ class CustomerRepository:
                 recognition_key TEXT NOT NULL,
                 last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS customer_merge_log (
+                id INTEGER PRIMARY KEY,
+                survivor_id INTEGER NOT NULL,
+                absorbed_id INTEGER NOT NULL,
+                normalized_name TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'same_normalized_name',
+                merged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         self.connection.executemany(
@@ -128,6 +138,7 @@ class CustomerRepository:
             """
         )
         self.connection.commit()
+        self.merge_duplicate_customers_by_name()
 
     def get_by_folder(
         self,
@@ -186,6 +197,17 @@ class CustomerRepository:
             for customer in self.list_customers()
             if normalize_identity(customer.display_name) == name_key
             and normalize_identity(customer.city) == city_key
+        ]
+
+    def find_by_name(self, display_name: str) -> list[Customer]:
+        """Return customers with the same stable name, independent of project place."""
+        name_key = normalize_identity(display_name)
+        if not name_key:
+            return []
+        return [
+            customer
+            for customer in self.list_customers()
+            if normalize_identity(customer.display_name) == name_key
         ]
 
     def customer_ids_within_folder(self, folder_path: str) -> list[int]:
@@ -605,7 +627,242 @@ class CustomerRepository:
         ).fetchone()
         return dict(row) if row is not None else {}
 
+    def merge_duplicate_customers_by_name(self) -> dict[int, int]:
+        """Merge exact normalized-name duplicates without dropping related data.
+
+        The returned mapping contains ``absorbed_id -> survivor_id`` entries.  A
+        merge log keeps the complete absorbed records for auditing and recovery.
+        """
+        grouped: dict[str, list[Customer]] = {}
+        for customer in self.list_customers():
+            key = normalize_identity(customer.display_name)
+            if key:
+                grouped.setdefault(key, []).append(customer)
+
+        duplicate_groups = [group for group in grouped.values() if len(group) > 1]
+        if not duplicate_groups:
+            return {}
+
+        merged_ids: dict[int, int] = {}
+        with self.connection:
+            for group in duplicate_groups:
+                survivor = self._merge_customer_group(group)
+                if survivor.id is None:
+                    continue
+                for customer in group:
+                    if customer.id is not None and customer.id != survivor.id:
+                        merged_ids[int(customer.id)] = int(survivor.id)
+        return merged_ids
+
+    def _merge_customer_group(
+        self,
+        customers: list[Customer],
+        preferred_id: int | None = None,
+    ) -> Customer:
+        if not customers:
+            raise ValueError("Es wurden keine Kunden zum Zusammenführen übergeben.")
+
+        survivor = next(
+            (customer for customer in customers if customer.id == preferred_id),
+            None,
+        )
+        if survivor is None:
+            survivor = max(customers, key=self._customer_data_score)
+        if survivor.id is None:
+            raise ValueError("Ein gespeicherter Kunde besitzt keine ID.")
+
+        ordered = [survivor] + sorted(
+            (customer for customer in customers if customer.id != survivor.id),
+            key=lambda customer: customer.id or 0,
+        )
+        merged = self._combine_customer_data(ordered[0], ordered[1:])
+        merged.id = int(survivor.id)
+        absorbed = [
+            customer for customer in customers
+            if customer.id is not None and customer.id != survivor.id
+        ]
+        if not absorbed:
+            return merged
+
+        survivor_id = int(survivor.id)
+        absorbed_ids = [int(customer.id) for customer in absorbed if customer.id is not None]
+        all_ids = [survivor_id, *absorbed_ids]
+        placeholders = ",".join("?" for _ in all_ids)
+
+        for absorbed_id in absorbed_ids:
+            self.connection.execute(
+                "UPDATE automatic_customer_sources SET customer_id=? WHERE customer_id=?",
+                (survivor_id, absorbed_id),
+            )
+            self.connection.execute(
+                "UPDATE recognition_decisions SET customer_id=? WHERE customer_id=?",
+                (survivor_id, absorbed_id),
+            )
+
+        for table in (
+            "contacts",
+            "customer_services",
+            "customer_folders",
+            "notes",
+            "customer_tags",
+        ):
+            self.connection.execute(
+                f"DELETE FROM {table} WHERE customer_id IN ({placeholders})",
+                all_ids,
+            )
+        self.connection.execute(
+            f"DELETE FROM customers WHERE id IN ({','.join('?' for _ in absorbed_ids)})",
+            absorbed_ids,
+        )
+        self.connection.execute(
+            """
+            UPDATE customers SET
+                folder_path=?, display_name=?, entity_type=?, company=?, email=?,
+                phone=?, street=?, postal_code=?, city=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                merged.folder_path,
+                merged.display_name,
+                merged.entity_type,
+                merged.company,
+                merged.email,
+                merged.phone,
+                merged.street,
+                merged.postal_code,
+                merged.city,
+                survivor_id,
+            ),
+        )
+        self._replace_contacts(survivor_id, merged.contacts)
+        self._replace_services(survivor_id, merged.service_types)
+        self._replace_folders(survivor_id, merged.folder_paths or [merged.folder_path])
+        self._replace_notes(survivor_id, merged.notes)
+        self._replace_tags(survivor_id, merged.tags)
+
+        name_key = normalize_identity(merged.display_name)
+        for customer in absorbed:
+            self.connection.execute(
+                """
+                INSERT INTO customer_merge_log
+                    (survivor_id, absorbed_id, normalized_name, snapshot_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    survivor_id,
+                    int(customer.id),
+                    name_key,
+                    json.dumps(asdict(customer), ensure_ascii=False, sort_keys=True),
+                ),
+            )
+        return merged
+
+    @staticmethod
+    def _customer_data_score(customer: Customer) -> tuple[int, int]:
+        populated_fields = sum(bool(str(value or "").strip()) for value in (
+            customer.company,
+            customer.email,
+            customer.phone,
+            customer.street,
+            customer.postal_code,
+            customer.city,
+        ))
+        related_data = (
+            len(customer.folder_paths)
+            + len(customer.service_types)
+            + len(customer.contacts)
+            + len(customer.notes)
+            + len(customer.tags)
+        )
+        # A lower ID wins a tie, keeping migrations deterministic.
+        return populated_fields + related_data, -(customer.id or 0)
+
+    @classmethod
+    def _combine_customer_data(
+        cls,
+        primary: Customer,
+        others: list[Customer],
+    ) -> Customer:
+        sources = [primary, *others]
+
+        def first_value(field: str) -> str:
+            return next(
+                (
+                    str(getattr(source, field) or "").strip()
+                    for source in sources
+                    if str(getattr(source, field) or "").strip()
+                ),
+                "",
+            )
+
+        def unique_strings(values, key_function):
+            unique = {}
+            for value in values:
+                cleaned = str(value or "").strip()
+                if cleaned:
+                    unique.setdefault(key_function(cleaned), cleaned)
+            return list(unique.values())
+
+        folders = unique_strings(
+            (folder for source in sources for folder in source.folder_paths),
+            cls._folder_key,
+        )
+        physical_folders = [
+            folder for folder in folders if not folder.startswith("customer://")
+        ]
+        if physical_folders:
+            folders = physical_folders
+
+        preferred_folder = str(primary.folder_path or "").strip()
+        if preferred_folder.startswith("customer://") and physical_folders:
+            preferred_folder = physical_folders[0]
+        elif not preferred_folder:
+            preferred_folder = folders[0] if folders else f"customer://{uuid.uuid4().hex}"
+
+        contacts_by_key: dict[tuple[str, str, str], Contact] = {}
+        for source in sources:
+            for contact in source.contacts:
+                key = (
+                    normalize_identity(contact.name),
+                    contact.email.strip().casefold(),
+                    cls._normalize_phone(contact.phone),
+                )
+                if contact.name.strip():
+                    contacts_by_key.setdefault(key, contact)
+
+        return Customer(
+            id=primary.id,
+            folder_path=preferred_folder,
+            folder_paths=folders,
+            display_name=first_value("display_name"),
+            entity_type=first_value("entity_type") or "Unternehmen",
+            service_types=unique_strings(
+                (value for source in sources for value in source.service_types),
+                str.casefold,
+            ),
+            company=first_value("company"),
+            email=first_value("email"),
+            phone=first_value("phone"),
+            street=first_value("street"),
+            postal_code=first_value("postal_code"),
+            city=first_value("city"),
+            contacts=list(contacts_by_key.values()),
+            notes=unique_strings(
+                (value for source in sources for value in source.notes),
+                lambda value: " ".join(value.casefold().split()),
+            ),
+            tags=unique_strings(
+                (value for source in sources for value in source.tags),
+                str.casefold,
+            ),
+        )
+
     def save(self, customer: Customer, commit: bool = True) -> Customer:
+        same_name = self.find_by_name(customer.display_name)
+        if customer.id is None and same_name:
+            customer = self._combine_customer_data(same_name[0], [customer])
+            customer.id = same_name[0].id
+
         folder_paths = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
         normalized_paths = []
         seen_paths = set()
@@ -660,6 +917,11 @@ class CustomerRepository:
         self._replace_folders(customer_id, normalized_paths or [primary_folder])
         self._replace_notes(customer_id, customer.notes)
         self._replace_tags(customer_id, customer.tags)
+        same_name = self.find_by_name(customer.display_name)
+        if len(same_name) > 1:
+            customer_id = int(
+                self._merge_customer_group(same_name, preferred_id=customer_id).id
+            )
         if commit:
             self.connection.commit()
         return self.get(customer_id)
