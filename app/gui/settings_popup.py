@@ -35,6 +35,7 @@ class SettingsPopup(QFrame):
     indexOptionsChanged = Signal(object)
     customerRecognitionOptionsChanged = Signal(object)
     reviewRecognitionRequested = Signal()
+    clearCustomerDataRequested = Signal()
 
     def __init__(
         self,
@@ -106,10 +107,6 @@ class SettingsPopup(QFrame):
         recognition_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(recognition_item)
 
-        diagnostics_item = QListWidgetItem("Diagnose")
-        diagnostics_item.setSizeHint(QSize(164, 42))
-        self.nav_list.addItem(diagnostics_item)
-
         appearance_item = QListWidgetItem("Aussehen")
         appearance_item.setSizeHint(QSize(164, 42))
         self.nav_list.addItem(appearance_item)
@@ -123,7 +120,6 @@ class SettingsPopup(QFrame):
         self.stack.addWidget(self._build_general_page())
         self.stack.addWidget(self._build_index_page())
         self.stack.addWidget(self._build_recognition_page())
-        self.stack.addWidget(self._build_diagnostics_page())
         self.stack.addWidget(self._build_appearance_page())
 
         content_layout.addLayout(split_layout)
@@ -186,50 +182,7 @@ class SettingsPopup(QFrame):
         apply_row.addWidget(apply_button)
         layout.addLayout(apply_row)
 
-        index_label = QLabel("Suchindex")
-        index_label.setObjectName("PopupCaption")
-        layout.addWidget(index_label)
-
-        index_hint = QLabel(
-            "Verarbeitet nur neue oder geänderte Dateien. Der Lauf wird nach dem Schließen "
-            "des Programms im Hintergrund fortgesetzt."
-        )
-        index_hint.setObjectName("PopupCaption")
-        index_hint.setWordWrap(True)
-        layout.addWidget(index_hint)
-
-        reindex_row = QHBoxLayout()
-        self.reindex_button = AppButton("Index aktualisieren", AppButton.SECONDARY)
-        self.reindex_button.clicked.connect(self.request_reindex)
-        reindex_row.addWidget(self.reindex_button)
-        self.index_busy_indicator = BusyIndicator()
-        reindex_row.addWidget(self.index_busy_indicator)
-        self.cancel_index_button = AppButton("Abbrechen", AppButton.DANGER)
-        self.cancel_index_button.clicked.connect(self.cancelIndexRequested.emit)
-        reindex_row.addWidget(self.cancel_index_button)
-        reindex_row.addStretch()
-        layout.addLayout(reindex_row)
-
-        self.index_progress_label = QLabel("")
-        self.index_progress_label.setObjectName("PopupCaption")
-        self.index_progress_label.setWordWrap(True)
-        layout.addWidget(self.index_progress_label)
-
-        backup_label = QLabel("Alte Indexstände")
-        backup_label.setObjectName("PopupCaption")
-        layout.addWidget(backup_label)
-
-        backup_row = QHBoxLayout()
-        self.backup_combo = QComboBox()
-        backup_row.addWidget(self.backup_combo, 1)
-        self.load_backup_button = AppButton("Index laden", AppButton.SECONDARY)
-        self.load_backup_button.clicked.connect(self.load_selected_backup)
-        backup_row.addWidget(self.load_backup_button)
-        layout.addLayout(backup_row)
-        self.set_backups(self.backups)
-
         layout.addStretch()
-        self.set_indexing(self.indexing)
         return page
 
     def request_reindex(self):
@@ -268,6 +221,14 @@ class SettingsPopup(QFrame):
             self.backup_combo.addItem("Keine Sicherung vorhanden", "")
         self.load_backup_button.setEnabled(bool(self.backups) and not self.indexing)
 
+    def set_backups_loading(self):
+        self.backups = []
+        if not hasattr(self, "backup_combo"):
+            return
+        self.backup_combo.clear()
+        self.backup_combo.addItem("Sicherungen werden geladen …", "")
+        self.load_backup_button.setEnabled(False)
+
     def load_selected_backup(self):
         backup_path = self.backup_combo.currentData()
         if backup_path:
@@ -276,13 +237,58 @@ class SettingsPopup(QFrame):
     def _build_index_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("SettingsPage")
-        layout = QVBoxLayout(page)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(12)
 
         heading = QLabel("Indexierung")
         heading.setObjectName("PopupSectionTitle")
         layout.addWidget(heading)
+
+        index_hint = QLabel(
+            "Verarbeitet nur neue oder geänderte Dateien. Der Lauf wird nach dem Schließen "
+            "des Programms im Hintergrund fortgesetzt."
+        )
+        index_hint.setObjectName("PopupCaption")
+        index_hint.setWordWrap(True)
+        layout.addWidget(index_hint)
+
+        reindex_row = QHBoxLayout()
+        self.reindex_button = AppButton("Index aktualisieren", AppButton.SECONDARY)
+        self.reindex_button.clicked.connect(self.request_reindex)
+        reindex_row.addWidget(self.reindex_button)
+        self.index_busy_indicator = BusyIndicator()
+        reindex_row.addWidget(self.index_busy_indicator)
+        self.cancel_index_button = AppButton("Abbrechen", AppButton.DANGER)
+        self.cancel_index_button.clicked.connect(self.cancelIndexRequested.emit)
+        reindex_row.addWidget(self.cancel_index_button)
+        reindex_row.addStretch()
+        layout.addLayout(reindex_row)
+
+        self.index_progress_label = QLabel("")
+        self.index_progress_label.setObjectName("PopupCaption")
+        self.index_progress_label.setWordWrap(True)
+        layout.addWidget(self.index_progress_label)
+
+        backup_label = QLabel("Alte Indexstände")
+        backup_label.setObjectName("PopupCaption")
+        layout.addWidget(backup_label)
+
+        backup_row = QHBoxLayout()
+        self.backup_combo = QComboBox()
+        backup_row.addWidget(self.backup_combo, 1)
+        self.load_backup_button = AppButton("Index laden", AppButton.SECONDARY)
+        self.load_backup_button.clicked.connect(self.load_selected_backup)
+        backup_row.addWidget(self.load_backup_button)
+        layout.addLayout(backup_row)
+        self.set_backups(self.backups)
 
         form = QFormLayout()
         form.setHorizontalSpacing(16)
@@ -342,7 +348,46 @@ class SettingsPopup(QFrame):
         save_button.clicked.connect(self.save_index_options)
         save_row.addWidget(save_button)
         layout.addLayout(save_row)
+
+        diagnostics_heading = QLabel("Index-Diagnose")
+        diagnostics_heading.setObjectName("PopupCaption")
+        layout.addWidget(diagnostics_heading)
+
+        self.diagnostics_text = QPlainTextEdit()
+        self.diagnostics_text.setObjectName("DiagnosticsText")
+        self.diagnostics_text.setReadOnly(True)
+        self.diagnostics_text.setMinimumHeight(170)
+        layout.addWidget(self.diagnostics_text)
+        self.set_diagnostics(self.diagnostics)
+
+        reset_heading = QLabel("Kundendaten")
+        reset_heading.setObjectName("PopupCaption")
+        layout.addWidget(reset_heading)
+
+        reset_note = QLabel(
+            "Löscht alle Kunden, Kontakte, Projekte, Dienstleistungstypen, "
+            "Prüffälle und Vorschläge. Der Dokumentindex bleibt erhalten."
+        )
+        reset_note.setObjectName("SettingsError")
+        reset_note.setWordWrap(True)
+        layout.addWidget(reset_note)
+
+        reset_row = QHBoxLayout()
+        self.clear_customer_data_button = AppButton(
+            "Kundendaten löschen",
+            AppButton.DANGER,
+        )
+        self.clear_customer_data_button.clicked.connect(
+            self.clearCustomerDataRequested.emit
+        )
+        reset_row.addWidget(self.clear_customer_data_button)
+        reset_row.addStretch()
+        layout.addLayout(reset_row)
+
         layout.addStretch()
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
+        self.set_indexing(self.indexing)
         return page
 
     def _build_diagnostics_page(self) -> QWidget:
@@ -471,6 +516,13 @@ class SettingsPopup(QFrame):
         )
         self.review_recognition_button.setEnabled(self.pending_recognition_cases > 0)
 
+    def set_recognition_state_loading(self):
+        if not hasattr(self, "recognition_status"):
+            return
+        self.recognition_status.setText("Erkennungsstatus wird geladen …")
+        self.review_recognition_button.setText("Prüffälle öffnen")
+        self.review_recognition_button.setEnabled(False)
+
     def set_diagnostics(self, diagnostics: IndexDiagnostics | None):
         self.diagnostics = diagnostics
         if not hasattr(self, "diagnostics_text"):
@@ -509,6 +561,10 @@ class SettingsPopup(QFrame):
             for entry in diagnostics.errors:
                 lines.append(f"  {entry['path']}: {entry['error']}")
         self.diagnostics_text.setPlainText("\n".join(lines))
+
+    def set_diagnostics_loading(self):
+        if hasattr(self, "diagnostics_text"):
+            self.diagnostics_text.setPlainText("Indexdiagnose wird geladen …")
 
     def _form_label(self, text: str) -> QLabel:
         label = QLabel(text)

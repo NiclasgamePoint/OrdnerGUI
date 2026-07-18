@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.core.customer_models import Contact, Customer
+from app.core.customer_recognition_models import RecognitionCandidate, RecognitionStats
 from app.core.customer_repository import CustomerRepository
 from app.core.config import IndexOptions
 from app.core.index_manager import IndexManager
@@ -100,6 +101,72 @@ class CustomerRepositoryTests(unittest.TestCase):
 
             repository.delete(updated.id)
             self.assertIsNone(repository.get(updated.id))
+            repository.close()
+
+    def test_clear_all_customer_data_keeps_schema_and_removes_customer_owned_data(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "customers.db"
+            repository = CustomerRepository(database)
+            customer = repository.save(Customer(
+                display_name="Muster GmbH",
+                company="Muster GmbH",
+                contacts=[Contact("Erika Muster", "", "e@example.de", "12345")],
+                notes=["Rueckruf vereinbart"],
+                tags=["VIP"],
+            ))
+            folder = Path(directory) / "Blower Door" / "2026" / "Muster GmbH, Kiel"
+            repository.add_folder_to_customer(
+                int(customer.id),
+                str(folder),
+                "Blower Door",
+            )
+            project = repository.find_project_by_folder(str(folder))
+            self.assertIsNotNone(project)
+            repository.apply_project_suggestion(
+                int(customer.id),
+                int(project.id),
+                "email",
+                "neu@example.de",
+                str(folder / "angebot.pdf"),
+            )
+            repository.replace_pending_recognition_cases([
+                RecognitionCandidate(
+                    recognition_key="muster",
+                    display_name="Muster GmbH",
+                    city="Kiel",
+                    folder_paths=[str(folder)],
+                    service_types=["Blower Door"],
+                    years=[2026],
+                    reason="Testfall",
+                )
+            ])
+            repository.record_recognition_run(RecognitionStats(detected=1, pending=1))
+
+            repository.clear_all_customer_data()
+
+            self.assertEqual(repository.list_customers(), [])
+            self.assertEqual(repository.pending_recognition_count(), 0)
+            self.assertEqual(repository.last_recognition_run(), {})
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM contacts").fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM customer_projects").fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM service_types").fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM customer_data_suggestions").fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                repository.connection.execute("SELECT COUNT(*) FROM customer_types").fetchone()[0],
+                3,
+            )
             repository.close()
 
     def test_customer_tag_is_returned_as_separate_customer_search_result(self):

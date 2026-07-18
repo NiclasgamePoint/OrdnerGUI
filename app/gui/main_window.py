@@ -48,7 +48,7 @@ from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
 from app.gui.theme import ThemeManager
 from app.gui.widgets import AppHeader, IndexStatusBar, SearchFilterPopup
-from app.gui.workers import IndexJobController, SearchWorker
+from app.gui.workers import IndexJobController, SearchWorker, SettingsDataWorker
 from app.services import FileSystemMonitor
 
 
@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self.theme_manager = ThemeManager()
         self.diagnostics_service = IndexDiagnosticsService()
         self.settings_popup: SettingsPopup | None = None
+        self.settings_data_worker: SettingsDataWorker | None = None
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
 
@@ -439,15 +440,16 @@ class MainWindow(QMainWindow):
             self,
             data_path=self.index_source,
             indexing=self.index_controller.is_active(),
-            backups=available_backups(DB_FILE),
+            backups=[],
             index_options=self.index_options,
-            diagnostics=self.diagnostics_service.inspect(DB_FILE),
+            diagnostics=None,
             recognition_options=self.recognition_options,
-            recognition_summary=self.customer_repository.last_recognition_run(),
-            pending_recognition_cases=(
-                self.customer_repository.pending_recognition_count()
-            ),
+            recognition_summary={},
+            pending_recognition_cases=0,
         )
+        self.settings_popup.set_backups_loading()
+        self.settings_popup.set_diagnostics_loading()
+        self.settings_popup.set_recognition_state_loading()
         self.settings_popup.appearanceChanged.connect(
             self.on_settings_appearance_changed
         )
@@ -472,17 +474,103 @@ class MainWindow(QMainWindow):
         self.settings_popup.reviewRecognitionRequested.connect(
             self.open_customer_recognition_review
         )
+        self.settings_popup.clearCustomerDataRequested.connect(
+            self.confirm_clear_customer_data
+        )
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
         self._center_settings_popup()
         self.settings_popup.show()
         self.settings_popup.raise_()
+        self._refresh_settings_popup_data()
 
     def open_index_diagnostics(self):
         if self.settings_popup is None or not self.settings_popup.isVisible():
             self.open_settings_popup()
         if self.settings_popup is not None:
-            self.settings_popup.nav_list.setCurrentRow(3)
+            self.settings_popup.nav_list.setCurrentRow(1)
+
+    def _start_settings_data_load(self):
+        if self.settings_data_worker is not None and self.settings_data_worker.isRunning():
+            self.settings_data_worker.requestInterruption()
+            self.settings_data_worker.wait()
+        self.settings_data_worker = SettingsDataWorker(
+            DB_FILE,
+            CUSTOMER_DB_FILE,
+            parent=self,
+        )
+        self.settings_data_worker.completed.connect(self._on_settings_data_loaded)
+        self.settings_data_worker.finished.connect(self._release_settings_data_worker)
+        self.settings_data_worker.start()
+
+    def _refresh_settings_popup_data(self):
+        if self.settings_popup is None:
+            return
+        self.settings_popup.set_backups_loading()
+        self.settings_popup.set_diagnostics_loading()
+        self.settings_popup.set_recognition_state_loading()
+        self._start_settings_data_load()
+
+    def _on_settings_data_loaded(self, payload):
+        if self.settings_popup is None:
+            return
+        self.settings_popup.set_backups(payload.get("backups", []))
+        self.settings_popup.set_diagnostics(payload.get("diagnostics"))
+        self.settings_popup.set_recognition_state(
+            payload.get("recognition_summary") or {},
+            int(payload.get("pending_recognition_cases") or 0),
+        )
+        error = str(payload.get("error") or "")
+        if error:
+            self.status_bar.set_text(f"Einstellungsdaten konnten nicht geladen werden: {error}")
+
+    def _release_settings_data_worker(self):
+        worker = self.sender()
+        if isinstance(worker, SettingsDataWorker):
+            worker.deleteLater()
+            if self.settings_data_worker is worker:
+                self.settings_data_worker = None
+
+    def confirm_clear_customer_data(self):
+        if self.index_controller.is_active():
+            QMessageBox.information(
+                self,
+                "Kundendaten löschen",
+                "Bitte die laufende Indexierung zuerst abschließen.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Kundendaten löschen",
+            "Alle Kunden, Kontakte, Projekte, Dienstleistungstypen, Prüffälle "
+            "und Vorschläge werden gelöscht.\n\n"
+            "Der Dokumentindex bleibt erhalten. Neue Kunden entstehen erst beim "
+            "nächsten Index-/Erkennungslauf.\n\n"
+            "Kundendaten wirklich löschen?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.clear_customer_data()
+
+    def clear_customer_data(self):
+        try:
+            self.customer_repository.clear_all_customer_data()
+            self.customer_repository.close()
+            self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            self.navigator.reset("search")
+            self._show_initial_customers()
+            self.status_bar.set_text("Kundendaten gelöscht · Kundenliste ist leer")
+            if self.settings_popup is not None:
+                self.settings_popup.set_recognition_state({}, 0)
+        except Exception as exc:
+            self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            QMessageBox.warning(
+                self,
+                "Kundendaten konnten nicht gelöscht werden",
+                str(exc),
+            )
 
     def on_customer_recognition_options_changed(self, options):
         self.recognition_options = options
@@ -732,19 +820,10 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text(f"Index fertig geladen ✓ · {count} Dateien")
             self._show_customer_recognition_result(state)
             if self.settings_popup is not None:
-                self.settings_popup.set_backups(available_backups(DB_FILE))
-                self.settings_popup.set_diagnostics(
-                    self.diagnostics_service.inspect(DB_FILE)
-                )
-                self.settings_popup.set_recognition_state(
-                    self.customer_repository.last_recognition_run(),
-                    self.customer_repository.pending_recognition_count(),
-                )
+                self._refresh_settings_popup_data()
         if status in {"completed", "no_changes"} and self.settings_popup is not None:
-            self.settings_popup.set_recognition_state(
-                self.customer_repository.last_recognition_run(),
-                self.customer_repository.pending_recognition_count(),
-            )
+            if status == "no_changes":
+                self._refresh_settings_popup_data()
         if self.pending_filesystem_sync:
             self.pending_filesystem_sync = False
             QTimer.singleShot(0, self._start_incremental_filesystem_sync)
@@ -868,7 +947,7 @@ class MainWindow(QMainWindow):
                 self.settings_popup.data_path_input.setText(
                     str(self.index_source)
                 )
-                self.settings_popup.set_backups(available_backups(DB_FILE))
+                self._refresh_settings_popup_data()
         except Exception as exc:
             QMessageBox.warning(
                 self,
@@ -888,6 +967,12 @@ class MainWindow(QMainWindow):
         ):
             self.filesystem_monitor.requestInterruption()
             self.filesystem_monitor.wait()
+        if (
+            self.settings_data_worker is not None
+            and self.settings_data_worker.isRunning()
+        ):
+            self.settings_data_worker.requestInterruption()
+            self.settings_data_worker.wait()
         self.folder_page.cleanup()
         self.index_manager.close()
         self.customer_repository.close()
