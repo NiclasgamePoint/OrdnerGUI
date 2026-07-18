@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from app.core.customer_models import Customer
 from app.core.config import CustomerRecognitionOptions
@@ -12,7 +12,7 @@ from app.core.search_models import RecentCustomerHistory
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
-from app.gui.pages import FolderPage, SearchPage
+from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
 
 
@@ -167,6 +167,40 @@ class UiNavigationTests(unittest.TestCase):
             self.assertIn("Energieberatung", assigned.service_types)
 
             dialog.close()
+            repository.close()
+
+    def test_customer_page_lists_services_by_newest_project_first(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_folder = root / "Blower Door" / "2023" / "Muster, Kiel"
+            new_folder = root / "Baubegleitung" / "2025" / "Muster, Hamburg"
+            repository = CustomerRepository(root / "customers.db")
+            customer = repository.save(Customer(display_name="Muster"))
+            repository.add_folder_to_customer(
+                int(customer.id),
+                str(old_folder),
+                "Blower Door",
+            )
+            repository.add_folder_to_customer(
+                int(customer.id),
+                str(new_folder),
+                "Baubegleitung",
+            )
+
+            page = CustomerPage(repository)
+            page.set_customer(repository.get(int(customer.id)))
+
+            row_titles = [
+                row.findChildren(QLabel)[0].text()
+                for row in page._folder_rows
+            ]
+
+            self.assertEqual(row_titles, [
+                "Baubegleitung · 2025 · Muster, Hamburg",
+                "Blower Door · 2023 · Muster, Kiel",
+            ])
+            self.assertFalse(page.folder_message.isVisible())
+            page.close()
             repository.close()
 
     def test_folder_page_populates_only_matching_files(self):
