@@ -243,7 +243,13 @@ class UiNavigationTests(unittest.TestCase):
             pending_recognition_cases=2,
         )
 
-        self.assertEqual(popup.nav_list.count(), 5)
+        self.assertEqual(popup.nav_list.count(), 4)
+        self.assertEqual(
+            [popup.nav_list.item(index).text() for index in range(popup.nav_list.count())],
+            ["Allgemein", "Indexierung", "Kundenerkennung", "Aussehen"],
+        )
+        self.assertIn("Diagnose", popup.diagnostics_text.toPlainText())
+        self.assertTrue(popup.clear_customer_data_button.isEnabled())
         self.assertTrue(popup.recognition_enabled.isChecked())
         self.assertEqual(
             popup.recognition_blacklist_fields["email_blacklist"].toPlainText(),

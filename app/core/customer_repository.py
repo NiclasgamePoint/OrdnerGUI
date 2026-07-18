@@ -1480,6 +1480,33 @@ class CustomerRepository:
         self.connection.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
         self.connection.commit()
 
+    def clear_all_customer_data(self):
+        """Remove all customer-owned data while keeping the database schema."""
+        with self.connection:
+            for table in (
+                "customer_data_suggestions",
+                "recognition_decisions",
+                "recognition_cases",
+                "recognition_runs",
+                "automatic_customer_sources",
+                "customer_merge_log",
+                "customer_tags",
+                "tags",
+                "notes",
+                "contacts",
+                "customer_services",
+                "customer_folders",
+                "customer_projects",
+                "service_types",
+                "customers",
+                "customer_types",
+            ):
+                self.connection.execute(f"DELETE FROM {table}")
+            self.connection.executemany(
+                "INSERT OR IGNORE INTO customer_types (name) VALUES (?)",
+                [("Unternehmen",), ("Privatperson",), ("Organisation",)],
+            )
+
     def _replace_contacts(self, customer_id: int, contacts: list[Contact]):
         self.connection.execute("DELETE FROM contacts WHERE customer_id = ?", (customer_id,))
         self.connection.executemany(
