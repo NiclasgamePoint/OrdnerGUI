@@ -1,15 +1,10 @@
 ## Papa
 
 - integration vom Imap Server
-- Schriftgrößen anpassen
-- Kontrast anpassbar machen
 - Multiwortsuche
-- 
-
-
+ 
 
 ## Nici
-
 
 - verinfachen der Bedienung
   - angepasstem Kontext Menü bei allen möglichen Dingen?
