@@ -679,42 +679,56 @@ class CustomerRepository:
                     continue
 
     def search(self, query: str, limit: int = 25) -> list[Customer]:
-        pattern = f"%{query}%"
+        from app.core.fuzzy_search import SearchField, fuzzy_record_score
+
         rows = self.connection.execute(
             """
-            SELECT DISTINCT customers.* FROM customers
+            SELECT customers.*,
+                   GROUP_CONCAT(DISTINCT contacts.name) AS contact_names,
+                   GROUP_CONCAT(DISTINCT contacts.email) AS contact_emails,
+                   GROUP_CONCAT(DISTINCT notes.body) AS note_values,
+                   GROUP_CONCAT(DISTINCT tags.name) AS tag_values,
+                   GROUP_CONCAT(DISTINCT service_types.name) AS project_services,
+                   GROUP_CONCAT(DISTINCT customer_projects.project_label) AS project_labels,
+                   GROUP_CONCAT(DISTINCT customer_projects.project_city) AS project_cities,
+                   GROUP_CONCAT(DISTINCT customer_projects.folder_path) AS project_paths
+            FROM customers
             LEFT JOIN contacts ON contacts.customer_id = customers.id
             LEFT JOIN notes ON notes.customer_id = customers.id
             LEFT JOIN customer_tags ON customer_tags.customer_id = customers.id
             LEFT JOIN tags ON tags.id = customer_tags.tag_id
             LEFT JOIN customer_projects ON customer_projects.customer_id = customers.id
             LEFT JOIN service_types ON service_types.id = customer_projects.service_type_id
-            WHERE customers.display_name LIKE ?
-               OR customers.company LIKE ?
-               OR contacts.name LIKE ? OR contacts.email LIKE ?
-               OR notes.body LIKE ? OR tags.name LIKE ?
-               OR service_types.name LIKE ?
-               OR customer_projects.project_label LIKE ?
-               OR customer_projects.project_city LIKE ?
-               OR customer_projects.folder_path LIKE ?
-            ORDER BY customers.display_name COLLATE NOCASE
-            LIMIT ?
+            GROUP BY customers.id
             """,
-            (
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                pattern,
-                limit,
-            ),
         ).fetchall()
-        return [self._hydrate(row) for row in rows]
+        ranked: list[tuple[float, str, int]] = []
+        for row in rows:
+            score = fuzzy_record_score(query, [
+                SearchField(row["display_name"], 1.12),
+                SearchField(row["company"], 1.08),
+                SearchField(row["contact_names"], 1.05),
+                SearchField(row["contact_emails"], 0.92),
+                SearchField(row["email"], 0.92),
+                SearchField(row["phone"], 0.86),
+                SearchField(row["city"], 1.08),
+                SearchField(row["street"], 0.92),
+                SearchField(row["postal_code"], 0.90),
+                SearchField(row["project_services"], 1.04),
+                SearchField(row["project_labels"], 1.08),
+                SearchField(row["project_cities"], 1.08),
+                SearchField(row["project_paths"], 0.88),
+                SearchField(row["note_values"], 0.82),
+                SearchField(row["tag_values"], 0.90),
+            ])
+            if score is not None:
+                ranked.append((score, str(row["display_name"]).casefold(), int(row["id"])))
+        ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+        return [
+            customer
+            for _, _, customer_id in ranked[:max(0, limit)]
+            if (customer := self.get(customer_id)) is not None
+        ]
 
     def add_folder_to_customer(
         self,

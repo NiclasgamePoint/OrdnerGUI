@@ -96,6 +96,33 @@ class IndexingTests(unittest.TestCase):
         self.assertIn("Elektroplanung", text_page.items[0]["path"])
         manager.close()
 
+    def test_fuzzy_multiword_folder_search_uses_name_city_and_service(self):
+        target = self.root / "Blower Door" / "2025" / "Wahnhorst, Kaltenkirchen"
+        target.mkdir(parents=True)
+        (target / "messung.txt").write_text("Messdaten", encoding="utf-8")
+        distractor = self.root / "DEKRA" / "2025" / "Horst Beispiel, Hamburg"
+        distractor.mkdir(parents=True)
+        (distractor / "bericht.txt").write_text("Bericht", encoding="utf-8")
+
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        page = manager.search_folders_page(
+            "Horst Kaltenkirchn", SearchFilters(), page=1, page_size=10
+        )
+        filtered = manager.search_folders_page(
+            "Horst Kaltenkirchen",
+            SearchFilters(domain_folder="Blower Door", year="2025", file_type="txt"),
+            page=1,
+            page_size=10,
+        )
+
+        self.assertGreaterEqual(page.total, 1)
+        self.assertEqual(page.items[0]["folder_path"], str(target))
+        self.assertEqual(filtered.total, 1)
+        self.assertEqual(filtered.items[0]["folder_path"], str(target))
+        manager.close()
+
     def test_empty_source_directory_indexes_without_errors(self):
         empty_root = Path(self.temp_dir.name) / "Leer"
         empty_root.mkdir(parents=True, exist_ok=True)
