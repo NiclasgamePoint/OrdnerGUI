@@ -453,6 +453,8 @@ class MainWindow(QMainWindow):
             self.theme_manager.mode,
             self.theme_manager.accent,
             self,
+            contrast=self.theme_manager.contrast,
+            font_size=self.theme_manager.font_size,
             data_path=self.index_source,
             indexing=self.index_controller.is_active(),
             backups=[],
@@ -637,9 +639,13 @@ class MainWindow(QMainWindow):
         if self.settings_popup is not None and self.settings_popup.isVisible():
             QTimer.singleShot(0, self._center_settings_popup)
 
-    def on_settings_appearance_changed(self, mode: str, accent: str):
+    def on_settings_appearance_changed(
+        self, mode: str, accent: str, contrast: int, font_size: int
+    ):
         self.theme_manager.set_mode(mode)
         self.theme_manager.set_accent(accent)
+        self.theme_manager.set_contrast(contrast)
+        self.theme_manager.set_font_size(font_size)
         self.theme_manager.save()
         self.apply_theme()
 

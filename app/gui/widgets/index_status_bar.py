@@ -16,7 +16,7 @@ class IndexStatusBar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("IndexStatusBar")
-        self.setFixedHeight(38)
+        self.setMinimumHeight(38)
         self.setCursor(QCursor(Qt.PointingHandCursor))
         self.setToolTip("Indexdiagnose öffnen")
 

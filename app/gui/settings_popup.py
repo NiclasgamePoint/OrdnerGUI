@@ -27,7 +27,7 @@ from app.core.index_diagnostics import IndexDiagnostics
 class SettingsPopup(QFrame):
     """Centered settings popup with navigation and content panels."""
 
-    appearanceChanged = Signal(str, str)
+    appearanceChanged = Signal(str, str, int, int)
     dataPathChanged = Signal(str)
     reindexRequested = Signal()
     cancelIndexRequested = Signal()
@@ -42,6 +42,8 @@ class SettingsPopup(QFrame):
         mode: str,
         accent: str,
         parent=None,
+        contrast: int = 100,
+        font_size: int = 13,
         data_path=None,
         indexing: bool = False,
         backups=None,
@@ -62,6 +64,8 @@ class SettingsPopup(QFrame):
 
         self.selected_mode = mode if mode in {"light", "dark"} else "light"
         self.selected_accent = QColor(accent).name() if QColor(accent).isValid() else "#2db89d"
+        self.selected_contrast = max(70, min(140, int(contrast)))
+        self.selected_font_size = max(10, min(20, int(font_size)))
         self.data_path = str(data_path or "")
         self.indexing = indexing
         self.backups = list(backups or [])
@@ -89,26 +93,27 @@ class SettingsPopup(QFrame):
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("SettingsNav")
-        self.nav_list.setFixedWidth(184)
+        self.nav_list.setMinimumWidth(max(184, self.selected_font_size * 14))
         self.nav_list.setSpacing(2)
         self.nav_list.setUniformItemSizes(True)
         self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         general_item = QListWidgetItem("Allgemein")
-        general_item.setSizeHint(QSize(164, 42))
+        item_size = QSize(max(164, self.selected_font_size * 12), max(42, self.selected_font_size * 3))
+        general_item.setSizeHint(item_size)
         self.nav_list.addItem(general_item)
 
         index_item = QListWidgetItem("Indexierung")
-        index_item.setSizeHint(QSize(164, 42))
+        index_item.setSizeHint(item_size)
         self.nav_list.addItem(index_item)
 
         recognition_item = QListWidgetItem("Kundenerkennung")
-        recognition_item.setSizeHint(QSize(164, 42))
+        recognition_item.setSizeHint(item_size)
         self.nav_list.addItem(recognition_item)
 
         appearance_item = QListWidgetItem("Aussehen")
-        appearance_item.setSizeHint(QSize(164, 42))
+        appearance_item.setSizeHint(item_size)
         self.nav_list.addItem(appearance_item)
 
         self.nav_list.setCurrentRow(0)
@@ -453,7 +458,7 @@ class SettingsPopup(QFrame):
             label.setObjectName("PopupCaption")
             layout.addWidget(label)
             field = QPlainTextEdit()
-            field.setFixedHeight(58)
+            field.setMinimumHeight(max(58, self.selected_font_size * 4))
             field.setPlaceholderText(placeholder)
             field.setPlainText(str(getattr(self.recognition_options, attribute)))
             self.recognition_blacklist_fields[attribute] = field
@@ -681,10 +686,42 @@ class SettingsPopup(QFrame):
         chooser_row.addStretch()
         layout.addLayout(chooser_row)
 
+        contrast_row = QHBoxLayout()
+        contrast_label = QLabel("Kontrast")
+        contrast_label.setObjectName("PopupCaption")
+        contrast_row.addWidget(contrast_label)
+        self.contrast_spin = QSpinBox()
+        self.contrast_spin.setRange(70, 140)
+        self.contrast_spin.setSuffix(" %")
+        self.contrast_spin.setValue(self.selected_contrast)
+        self.contrast_spin.setToolTip("100 % entspricht dem Standardkontrast")
+        contrast_row.addWidget(self.contrast_spin)
+        layout.addLayout(contrast_row)
+
+        font_row = QHBoxLayout()
+        font_label = QLabel("Schriftgröße")
+        font_label.setObjectName("PopupCaption")
+        font_row.addWidget(font_label)
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(10, 20)
+        self.font_size_spin.setSuffix(" px")
+        self.font_size_spin.setValue(self.selected_font_size)
+        font_row.addWidget(self.font_size_spin)
+        layout.addLayout(font_row)
+
+        size_hint = QLabel(
+            "Bedienelemente und Textbereiche wachsen mit der Schriftgröße mit."
+        )
+        size_hint.setObjectName("PopupCaption")
+        size_hint.setWordWrap(True)
+        layout.addWidget(size_hint)
+
         layout.addStretch()
 
         self.mode_combo.currentIndexChanged.connect(self.on_value_changed)
         self.accent_combo.currentIndexChanged.connect(self.on_value_changed)
+        self.contrast_spin.valueChanged.connect(self.on_value_changed)
+        self.font_size_spin.valueChanged.connect(self.on_value_changed)
 
         self._set_combo_for_accent(self.selected_accent)
         self._update_preview()
@@ -715,8 +752,15 @@ class SettingsPopup(QFrame):
         if accent_value and accent_value != "custom":
             self.selected_accent = accent_value
         self.pick_button.setEnabled(self.accent_combo.currentData() == "custom")
+        self.selected_contrast = self.contrast_spin.value()
+        self.selected_font_size = self.font_size_spin.value()
         self._update_preview()
-        self.appearanceChanged.emit(self.selected_mode, self.selected_accent)
+        self.appearanceChanged.emit(
+            self.selected_mode,
+            self.selected_accent,
+            self.selected_contrast,
+            self.selected_font_size,
+        )
 
     def pick_custom_color(self):
         color = QColorDialog.getColor(QColor(self.selected_accent), self, "Akzentfarbe wählen")
@@ -724,7 +768,12 @@ class SettingsPopup(QFrame):
             self.selected_accent = color.name()
             self.accent_combo.setCurrentIndex(self.accent_combo.count() - 1)
             self._update_preview()
-            self.appearanceChanged.emit(self.selected_mode, self.selected_accent)
+            self.appearanceChanged.emit(
+                self.selected_mode,
+                self.selected_accent,
+                self.selected_contrast,
+                self.selected_font_size,
+            )
 
     def size_for_parent(self) -> QSize:
         """Return a comfortable size that still fits into a smaller main window."""

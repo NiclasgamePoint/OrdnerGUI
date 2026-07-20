@@ -24,7 +24,7 @@ class AppHeader(QFrame):
     def __init__(self, history: list[str] | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("AppHeader")
-        self.setFixedHeight(56)
+        self.setMinimumHeight(56)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 7, 8, 7)
@@ -51,7 +51,7 @@ class AppHeader(QFrame):
 
         self.settings_button = QToolButton()
         self.settings_button.setObjectName("SettingsButton")
-        self.settings_button.setFixedSize(40, 40)
+        self.settings_button.setMinimumSize(40, 40)
         self.settings_button.setIconSize(QSize(20, 20))
         icon = QIcon.fromTheme("preferences-system")
         if icon.isNull():
