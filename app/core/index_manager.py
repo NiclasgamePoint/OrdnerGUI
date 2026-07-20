@@ -881,82 +881,91 @@ class IndexManager:
         page: int = 1,
         page_size: int = 25,
     ) -> SearchPage:
+        from app.core.fuzzy_search import SearchField, fuzzy_record_score
+
         cursor = self.conn.cursor()
         filter_sql, filter_params = self._metadata_filter_clause(filters, "meta")
-        common_cte = f"""
-            WITH canonical_paths AS (
-                SELECT DISTINCT
-                    COALESCE(NULLIF(folder.project_root_path, ''), folder.path) AS path
-                FROM folders folder
-                WHERE (folder.name LIKE ? OR folder.relative_path LIKE ?)
-                  AND (
-                      COALESCE(folder.project_root_path, '') <> ''
-                      OR NOT EXISTS (
-                          SELECT 1 FROM project_roots project
-                          WHERE project.path = folder.path
-                             OR project.path LIKE folder.path || ? || '%'
-                      )
-                  )
-            ), eligible AS (
-                SELECT root.path, root.name, root.relative_path
-                FROM canonical_paths canonical
-                JOIN folders root ON root.path = canonical.path
-                WHERE EXISTS (
-                    SELECT 1 FROM files meta
-                    WHERE (
-                        meta.folder_path = root.path
-                        OR meta.path LIKE root.path || ? || '%'
-                    )
-                    {filter_sql}
+        rows = cursor.execute(
+            f"""
+            SELECT folder.path, folder.name, folder.relative_path,
+                   COALESCE(NULLIF(folder.project_root_path, ''), folder.path) AS canonical_path,
+                   project.customer_label, project.customer_name, project.city,
+                   project.service_type, project.year,
+                   (SELECT GROUP_CONCAT(DISTINCT child.domain_folder)
+                    FROM files child
+                    WHERE child.folder_path = folder.path
+                       OR child.path LIKE folder.path || ? || '%') AS domains,
+                   (SELECT GROUP_CONCAT(DISTINCT child.time_bucket)
+                    FROM files child
+                    WHERE child.folder_path = folder.path
+                       OR child.path LIKE folder.path || ? || '%') AS years
+            FROM folders folder
+            LEFT JOIN project_roots project ON project.path =
+                COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
+            WHERE (
+                COALESCE(folder.project_root_path, '') <> ''
+                OR NOT EXISTS (
+                    SELECT 1 FROM project_roots ancestor
+                    WHERE ancestor.path = folder.path
+                       OR ancestor.path LIKE folder.path || ? || '%'
                 )
             )
-        """
-        common_params = [
-            f"%{query}%",
-            f"%{query}%",
-            os.sep,
-            os.sep,
-            *filter_params,
-        ]
-        total = int(cursor.execute(
-            f"{common_cte} SELECT COUNT(*) FROM eligible", common_params
-        ).fetchone()[0])
+            AND EXISTS (
+                SELECT 1 FROM files meta
+                WHERE (meta.folder_path = folder.path OR meta.path LIKE folder.path || ? || '%')
+                {filter_sql}
+            )
+            """,
+            (os.sep, os.sep, os.sep, os.sep, *filter_params),
+        ).fetchall()
+
+        ranked_by_path: dict[str, tuple[float, str]] = {}
+        for row in rows:
+            score = fuzzy_record_score(query, [
+                SearchField(row["name"], 1.08),
+                SearchField(row["relative_path"], 0.94),
+                SearchField(row["customer_label"], 1.12),
+                SearchField(row["customer_name"], 1.12),
+                SearchField(row["city"], 1.08),
+                SearchField(row["service_type"], 1.04),
+                SearchField(row["domains"], 1.02),
+                SearchField(row["year"], 0.92),
+                SearchField(row["years"], 0.90),
+                SearchField(row["path"], 0.86),
+            ])
+            if score is None:
+                continue
+            canonical_path = str(row["canonical_path"])
+            previous = ranked_by_path.get(canonical_path)
+            if previous is None or score > previous[0]:
+                ranked_by_path[canonical_path] = (score, canonical_path.casefold())
+
+        ranked = sorted(
+            ((score, sort_path, path) for path, (score, sort_path) in ranked_by_path.items()),
+            key=lambda item: (-item[0], item[1]),
+        )
+        total = len(ranked)
         offset = max(0, page - 1) * page_size
-        sql = f"""{common_cte}
-            SELECT eligible.path, eligible.name, eligible.relative_path,
-                (SELECT COUNT(*) FROM files
-                 WHERE files.folder_path = eligible.path
-                    OR files.path LIKE eligible.path || ? || '%') AS file_count
-            FROM eligible
-            ORDER BY
-                CASE
-                    WHEN name = ? COLLATE NOCASE THEN 0
-                    WHEN name LIKE ? THEN 1
-                    WHEN name LIKE ? THEN 2
-                    ELSE 3
-                END,
-                name COLLATE NOCASE, relative_path COLLATE NOCASE
-            LIMIT ? OFFSET ?
-        """
-        params = [
-            *common_params,
-            os.sep,
-            query,
-            f"{query}%",
-            f"%{query}%",
-            page_size,
-            offset,
-        ]
-        cursor.execute(sql, params)
-        items = [
-            {
-                "folder_path": row["path"],
-                "folder_name": row["name"],
-                "relative_path": row["relative_path"],
-                "file_count": row["file_count"],
-            }
-            for row in cursor.fetchall()
-        ]
+        selected_paths = [item[2] for item in ranked[offset:offset + page_size]]
+        items = []
+        for path in selected_paths:
+            row = cursor.execute(
+                """
+                SELECT folders.path, folders.name, folders.relative_path,
+                    (SELECT COUNT(*) FROM files
+                     WHERE files.folder_path = folders.path
+                        OR files.path LIKE folders.path || ? || '%') AS file_count
+                FROM folders WHERE folders.path = ?
+                """,
+                (os.sep, path),
+            ).fetchone()
+            if row is not None:
+                items.append({
+                    "folder_path": row["path"],
+                    "folder_name": row["name"],
+                    "relative_path": row["relative_path"],
+                    "file_count": row["file_count"],
+                })
         return SearchPage(items, total, page, page_size)
 
     def get_folder_search_entry(

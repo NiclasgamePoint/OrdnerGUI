@@ -12,6 +12,34 @@ from app.gui.workers.search_worker import SearchWorker
 
 
 class CustomerRepositoryTests(unittest.TestCase):
+    def test_fuzzy_multiword_search_ranks_matches_across_project_fields(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            target = repository.save(Customer(
+                display_name="Wahnhorst",
+                company="Wahnhorst Energieberatung",
+            ))
+            repository.add_folder_to_customer(
+                int(target.id),
+                str(Path(directory) / "Blower Door" / "2026" / "Wahnhorst, Kaltenkirchen"),
+                "Blower Door",
+            )
+            distractor = repository.save(Customer(
+                display_name="Horst Beispiel",
+                company="Horst Beispiel",
+                city="Hamburg",
+            ))
+
+            results = repository.search("Horst Kaltenkirchen")
+            typo_results = repository.search("wahnhorst kaltenkirchn")
+            tolerant_results = repository.search("Horst völligfalsch")
+
+            self.assertEqual(results[0].id, target.id)
+            self.assertEqual(typo_results[0].id, target.id)
+            self.assertIn(target.id, [customer.id for customer in tolerant_results])
+            self.assertNotEqual(results[0].id, distractor.id)
+            repository.close()
+
     def test_add_folder_to_existing_customer_and_reject_duplicate_assignment(self):
         with TemporaryDirectory() as directory:
             database = Path(directory) / "customers.db"
@@ -97,7 +125,9 @@ class CustomerRepositoryTests(unittest.TestCase):
                 "Muster GmbH",
             )
             self.assertEqual(repository.search("Priorität")[0].id, updated.id)
+            self.assertEqual(repository.search("prioritat")[0].id, updated.id)
             self.assertEqual(repository.search("Erika")[0].id, updated.id)
+            self.assertEqual(repository.search("vollkommenunbekannt"), [])
 
             repository.delete(updated.id)
             self.assertIsNone(repository.get(updated.id))
