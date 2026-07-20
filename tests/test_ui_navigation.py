@@ -310,6 +310,8 @@ class UiNavigationTests(unittest.TestCase):
         )
         self.assertTrue(popup.review_recognition_button.isEnabled())
         self.assertIn("2", popup.review_recognition_button.text())
+        self.assertEqual(popup.contrast_spin.value(), 100)
+        self.assertEqual(popup.font_size_spin.value(), 13)
         popup.close()
 
 

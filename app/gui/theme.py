@@ -25,26 +25,50 @@ class ThemeManager:
     SETTINGS_APP = "UI"
     DEFAULT_MODE = "light"
     DEFAULT_ACCENT = "#2db89d"
+    DEFAULT_CONTRAST = 100
+    DEFAULT_FONT_SIZE = 13
+    MIN_CONTRAST = 70
+    MAX_CONTRAST = 140
+    MIN_FONT_SIZE = 10
+    MAX_FONT_SIZE = 20
 
     def __init__(self):
         self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
         self.mode = self.DEFAULT_MODE
         self.accent = self.DEFAULT_ACCENT
+        self.contrast = self.DEFAULT_CONTRAST
+        self.font_size = self.DEFAULT_FONT_SIZE
         self.load()
 
     def load(self):
         mode = str(self.settings.value("theme_mode", self.DEFAULT_MODE)).strip().lower()
         accent = str(self.settings.value("accent_color", self.DEFAULT_ACCENT)).strip()
+        contrast = _bounded_int(
+            self.settings.value("contrast", self.DEFAULT_CONTRAST),
+            self.DEFAULT_CONTRAST,
+            self.MIN_CONTRAST,
+            self.MAX_CONTRAST,
+        )
+        font_size = _bounded_int(
+            self.settings.value("font_size", self.DEFAULT_FONT_SIZE),
+            self.DEFAULT_FONT_SIZE,
+            self.MIN_FONT_SIZE,
+            self.MAX_FONT_SIZE,
+        )
 
         if mode not in {"light", "dark"}:
             mode = self.DEFAULT_MODE
 
         self.mode = mode
         self.accent = _safe_color(accent, self.DEFAULT_ACCENT)
+        self.contrast = contrast
+        self.font_size = font_size
 
     def save(self):
         self.settings.setValue("theme_mode", self.mode)
         self.settings.setValue("accent_color", self.accent)
+        self.settings.setValue("contrast", self.contrast)
+        self.settings.setValue("font_size", self.font_size)
         self.settings.sync()
 
     def set_mode(self, mode: str):
@@ -55,13 +79,38 @@ class ThemeManager:
     def set_accent(self, color_hex: str):
         self.accent = _safe_color(color_hex, self.DEFAULT_ACCENT)
 
+    def set_contrast(self, contrast: int):
+        self.contrast = max(self.MIN_CONTRAST, min(self.MAX_CONTRAST, int(contrast)))
+
+    def set_font_size(self, font_size: int):
+        self.font_size = max(self.MIN_FONT_SIZE, min(self.MAX_FONT_SIZE, int(font_size)))
+
     def apply(self, app):
         app.setStyleSheet("")
-        app.setPalette(build_palette(self.mode, self.accent))
-        app.setStyleSheet(build_stylesheet(self.mode, self.accent))
+        app.setPalette(build_palette(self.mode, self.accent, self.contrast))
+        app.setStyleSheet(
+            build_stylesheet(self.mode, self.accent, self.contrast, self.font_size)
+        )
 
 
-def build_palette(mode: str, accent: str) -> QPalette:
+def _bounded_int(value, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = fallback
+    return max(minimum, min(maximum, number))
+
+
+def _apply_contrast(color_hex: str, contrast: int) -> str:
+    """Scale RGB distance from neutral gray while retaining valid colors."""
+    color = QColor(color_hex)
+    factor = max(0.0, contrast / 100.0)
+    channels = [color.red(), color.green(), color.blue()]
+    adjusted = [max(0, min(255, round(127.5 + (value - 127.5) * factor))) for value in channels]
+    return QColor(*adjusted).name()
+
+
+def build_palette(mode: str, accent: str, contrast: int = ThemeManager.DEFAULT_CONTRAST) -> QPalette:
     """Keep native and otherwise unstyled Qt controls aligned with the theme."""
     dark = mode.lower() == "dark"
     accent = _safe_color(accent, ThemeManager.DEFAULT_ACCENT)
@@ -73,6 +122,7 @@ def build_palette(mode: str, accent: str) -> QPalette:
         "text": "#e9f1f8" if dark else "#1d2a34",
         "muted": "#9fb3c5" if dark else "#667b88",
     }
+    colors = {name: _apply_contrast(value, contrast) for name, value in colors.items()}
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(colors["window"]))
     palette.setColor(QPalette.ColorRole.WindowText, QColor(colors["text"]))
@@ -101,12 +151,25 @@ def build_palette(mode: str, accent: str) -> QPalette:
     return palette
 
 
-def build_stylesheet(mode: str, accent: str) -> str:
+def build_stylesheet(
+    mode: str,
+    accent: str,
+    contrast: int = ThemeManager.DEFAULT_CONTRAST,
+    font_size: int = ThemeManager.DEFAULT_FONT_SIZE,
+) -> str:
     mode = mode.lower()
     accent = _safe_color(accent, ThemeManager.DEFAULT_ACCENT)
     accent_soft = _tint(accent, lighter=(mode == "dark"), amount=130 if mode == "dark" else 165)
     accent_hover = _tint(accent, lighter=(mode == "dark"), amount=112 if mode == "dark" else 108)
     accent_pressed = _tint(accent, lighter=False, amount=118)
+    contrast = _bounded_int(
+        contrast, ThemeManager.DEFAULT_CONTRAST,
+        ThemeManager.MIN_CONTRAST, ThemeManager.MAX_CONTRAST,
+    )
+    font_size = _bounded_int(
+        font_size, ThemeManager.DEFAULT_FONT_SIZE,
+        ThemeManager.MIN_FONT_SIZE, ThemeManager.MAX_FONT_SIZE,
+    )
 
     if mode == "dark":
         bg = "#11161b"
@@ -131,12 +194,23 @@ def build_stylesheet(mode: str, accent: str) -> str:
         line = "#dce8e6"
         chip = "#f0f6f5"
 
+    bg, surface, card, text, muted, border, item_hover, item_selected, line, chip = (
+        _apply_contrast(color, contrast)
+        for color in (bg, surface, card, text, muted, border, item_hover, item_selected, line, chip)
+    )
+    scaled = lambda size: max(8, round(size * font_size / ThemeManager.DEFAULT_FONT_SIZE))
+
     return f"""
+    QWidget {{
+        font-family: 'Segoe UI', 'Noto Sans', sans-serif;
+        font-size: {font_size}px;
+    }}
+
     QMainWindow, QWidget#RootWidget {{
         background-color: {bg};
         color: {text};
         font-family: 'Segoe UI', 'Noto Sans', sans-serif;
-        font-size: 13px;
+        font-size: {font_size}px;
     }}
 
     QWidget#TopBar,
@@ -175,7 +249,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QLineEdit#GlobalSearchInput {{
         border-radius: 17px;
         padding-left: 13px;
-        font-size: 14px;
+        font-size: {scaled(14)}px;
     }}
 
     QFrame#ResultRow {{
@@ -191,7 +265,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#ResultTitle {{
         color: {text};
-        font-size: 13px;
+        font-size: {scaled(13)}px;
         font-weight: 700;
         border: none;
         background: transparent;
@@ -200,14 +274,14 @@ def build_stylesheet(mode: str, accent: str) -> str:
     QLabel#ResultSubtitle,
     QLabel#SearchSectionMessage {{
         color: {muted};
-        font-size: 12px;
+        font-size: {scaled(12)}px;
         border: none;
         background: transparent;
     }}
 
     QLabel#SearchSectionTitle {{
         color: {text};
-        font-size: 13px;
+        font-size: {scaled(13)}px;
         font-weight: 700;
         padding: 2px 3px;
         border: none;
@@ -223,7 +297,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#IndexStatusText {{
         color: {muted};
-        font-size: 12px;
+        font-size: {scaled(12)}px;
         border: none;
         background: transparent;
     }}
@@ -253,14 +327,14 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#SectionTitle {{
         color: {text};
-        font-size: 14px;
+        font-size: {scaled(14)}px;
         font-weight: 700;
         border: none;
         background: transparent;
     }}
 
     QLabel#PageTitle {{
-        font-size: 15px;
+        font-size: {scaled(15)}px;
         font-weight: 700;
         color: {text};
         border: none;
@@ -268,14 +342,14 @@ def build_stylesheet(mode: str, accent: str) -> str:
     }}
 
     QLabel#PageSubtitle {{
-        font-size: 12px;
+        font-size: {scaled(12)}px;
         color: {muted};
         border: none;
         background: transparent;
     }}
 
     QLabel#StatValue {{
-        font-size: 16px;
+        font-size: {scaled(16)}px;
         font-weight: 700;
         color: {text};
         border: none;
@@ -283,7 +357,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
     }}
 
     QLabel#StatCaption {{
-        font-size: 11px;
+        font-size: {scaled(11)}px;
         color: {muted};
         border: none;
         background: transparent;
@@ -303,7 +377,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
         border-radius: 10px;
         padding: 3px;
         color: {text};
-        font-size: 17px;
+        font-size: {scaled(17)}px;
     }}
     QToolButton#SettingsButton:hover {{
         border-color: {accent};
@@ -523,7 +597,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
         color: {accent};
         background: transparent;
         border: none;
-        font-size: 18px;
+        font-size: {scaled(18)}px;
         font-weight: 700;
     }}
 
@@ -607,7 +681,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#ViewerFileInfo {{
         color: {text};
-        font-size: 16px;
+        font-size: {scaled(16)}px;
         font-weight: 700;
         background: transparent;
         border: none;
@@ -615,7 +689,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#ViewerMeta {{
         color: {muted};
-        font-size: 12px;
+        font-size: {scaled(12)}px;
         background: transparent;
         border: none;
     }}
@@ -628,7 +702,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#ViewerLoadingText {{
         color: {muted};
-        font-size: 13px;
+        font-size: {scaled(13)}px;
         background: transparent;
         border: none;
     }}
@@ -759,7 +833,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
     }}
 
     QLabel#PopupTitle {{
-        font-size: 13px;
+        font-size: {scaled(13)}px;
         font-weight: 700;
         color: {text};
         border: none;
@@ -780,7 +854,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
     }}
 
     QLabel#PopupSectionTitle {{
-        font-size: 14px;
+        font-size: {scaled(14)}px;
         font-weight: 700;
         color: {text};
         border: none;
@@ -789,7 +863,7 @@ def build_stylesheet(mode: str, accent: str) -> str:
 
     QLabel#SearchGroupTitle {{
         color: {text};
-        font-size: 12px;
+        font-size: {scaled(12)}px;
         font-weight: 700;
         padding: 2px 4px;
         border: none;

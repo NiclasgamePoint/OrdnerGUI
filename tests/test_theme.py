@@ -2,7 +2,7 @@ import unittest
 
 from PySide6.QtGui import QPalette
 
-from app.gui.theme import build_palette, build_stylesheet
+from app.gui.theme import ThemeManager, build_palette, build_stylesheet
 
 
 class ThemeTests(unittest.TestCase):
@@ -33,6 +33,22 @@ class ThemeTests(unittest.TestCase):
         )
         self.assertIn("QHeaderView::section", build_stylesheet("light", "#2db89d"))
         self.assertIn("QScrollArea#PageScrollArea", build_stylesheet("dark", "#2db89d"))
+
+    def test_contrast_changes_the_global_palette(self):
+        normal = build_palette("light", "#2db89d", 100)
+        strong = build_palette("light", "#2db89d", 140)
+        self.assertNotEqual(
+            normal.color(QPalette.ColorRole.Window).name(),
+            strong.color(QPalette.ColorRole.Window).name(),
+        )
+
+    def test_font_size_is_applied_globally_and_bounded(self):
+        stylesheet = build_stylesheet("dark", "#2db89d", 100, 18)
+        self.assertIn("font-size: 18px", stylesheet)
+        self.assertIn(
+            f"font-size: {ThemeManager.MAX_FONT_SIZE}px",
+            build_stylesheet("dark", "#2db89d", 100, 99),
+        )
 
 
 if __name__ == "__main__":
