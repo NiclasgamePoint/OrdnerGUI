@@ -1210,6 +1210,39 @@ class IndexManager:
             chunks.append(content[:remaining])
             size += min(len(content), remaining)
         return "\n".join(chunks)
+
+    def indexed_documents_for_folder(
+        self,
+        folder_path: str,
+        max_documents: int = 24,
+        max_characters_per_document: int = 80_000,
+    ) -> list[dict]:
+        """Return extracted text with its source boundary intact."""
+        path = self._canonical_folder_path(folder_path)
+        rows = self.conn.execute(
+            """
+            SELECT files.path, files.filename, files.file_type,
+                   file_content_fts.content
+            FROM file_content_fts
+            JOIN files ON files.path = file_content_fts.path
+            WHERE files.project_root_path = ?
+               OR files.folder_path = ?
+               OR files.path LIKE ?
+            ORDER BY files.modified_date DESC, files.path COLLATE NOCASE
+            LIMIT ?
+            """,
+            (path, path, f"{path}{os.sep}%", max(1, int(max_documents))),
+        ).fetchall()
+        return [
+            {
+                "path": str(row["path"]),
+                "filename": str(row["filename"]),
+                "file_type": str(row["file_type"] or "").casefold(),
+                "content": str(row["content"] or "")[:max_characters_per_document],
+            }
+            for row in rows
+            if str(row["content"] or "").strip()
+        ]
     
     def get_customer_details(self, customer_name: str) -> Dict:
         cursor = self.conn.cursor()

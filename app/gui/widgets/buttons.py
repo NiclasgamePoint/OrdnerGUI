@@ -1,4 +1,4 @@
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 
@@ -37,6 +37,42 @@ class AppButton(QPushButton):
             self.setEnabled(False)
         else:
             self.setEnabled(self._enabled_before_busy)
+
+
+class CountBadgeButton(AppButton):
+    """Button with a themeable count badge aligned to its right edge."""
+
+    def __init__(self, text: str, role: str = AppButton.SECONDARY, parent=None):
+        super().__init__(text, role, parent)
+        self.badge = QLabel("", self)
+        self.badge.setObjectName("ButtonCountBadge")
+        self.badge.setAlignment(Qt.AlignCenter)
+        self.badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge.setFixedSize(24, 24)
+        self.badge.hide()
+
+    def set_count(self, count: int):
+        count = max(0, int(count))
+        self.badge.setText(str(count))
+        self.badge.setVisible(count > 0)
+        self.setProperty("hasBadge", count > 0)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._position_badge()
+
+    def count(self) -> int:
+        return int(self.badge.text() or 0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_badge()
+
+    def _position_badge(self):
+        margin = 8
+        self.badge.move(
+            max(margin, self.width() - self.badge.width() - margin),
+            max(0, (self.height() - self.badge.height()) // 2),
+        )
 
 
 class BusyIndicator(QLabel):

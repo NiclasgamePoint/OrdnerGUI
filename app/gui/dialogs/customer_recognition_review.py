@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -41,8 +42,8 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         self.options = options
         self._cases: dict[str, RecognitionCandidate] = {}
         self._customer_labels: dict[int, str] = {}
-        self.resize(940, 640)
-        self.setMinimumSize(760, 520)
+        self.resize(1100, 680)
+        self.setMinimumSize(980, 520)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -66,6 +67,11 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         splitter = QSplitter(Qt.Horizontal)
         self.case_list = QListWidget()
         self.case_list.setObjectName("RecognitionCaseList")
+        self.case_list.setMinimumWidth(360)
+        self.case_list.setWordWrap(True)
+        self.case_list.setTextElideMode(Qt.ElideNone)
+        self.case_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.case_list.setResizeMode(QListView.Adjust)
         self.case_list.currentItemChanged.connect(self._show_selected_case)
         splitter.addWidget(self.case_list)
 
@@ -101,8 +107,11 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         action_row.addWidget(self.ignore_button)
         details_layout.addLayout(action_row)
         splitter.addWidget(details_panel)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([380, 680])
+        self.splitter = splitter
         layout.addWidget(splitter, 1)
 
         close_row = QHBoxLayout()
@@ -190,6 +199,19 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
             "Projektordner:",
             *(f"  {path}" for path in candidate.folder_paths),
         ]
+        if candidate.evidence:
+            lines.extend(["", "Erkennungsbelege:"])
+            for evidence in sorted(
+                candidate.evidence, key=lambda item: (-item.confidence, item.field_name)
+            ):
+                status = "sicher" if evidence.automatic else "Vorschlag"
+                lines.extend([
+                    f"  {evidence.field_name}: {evidence.value} "
+                    f"({status}, {evidence.confidence:.0%})",
+                    f"    Regel: {evidence.rule}",
+                    f"    Quelle: {evidence.source_path}",
+                    f"    Kontext: {evidence.excerpt}",
+                ])
         if candidate.suggested_customer_ids:
             lines.extend([
                 "",

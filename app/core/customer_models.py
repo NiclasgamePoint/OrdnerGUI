@@ -40,6 +40,9 @@ class CustomerDataSuggestion:
     field_name: str = ""
     suggested_value: str = ""
     source_path: str = ""
+    excerpt: str = ""
+    rule: str = ""
+    confidence: float = 0.0
     status: str = "pending"
 
 

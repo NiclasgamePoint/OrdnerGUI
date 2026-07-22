@@ -57,7 +57,12 @@ from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
 from app.gui.theme import ThemeManager
 from app.gui.widgets import AppHeader, IndexStatusBar, SearchFilterPopup
-from app.gui.workers import IndexJobController, SearchWorker, SettingsDataWorker
+from app.gui.workers import (
+    BlacklistCleanupWorker,
+    IndexJobController,
+    SearchWorker,
+    SettingsDataWorker,
+)
 from app.services import FileSystemMonitor
 from app.services.document_converter import DocumentConverter
 
@@ -86,6 +91,7 @@ class MainWindow(QMainWindow):
         self.diagnostics_service = IndexDiagnosticsService()
         self.settings_popup: SettingsPopup | None = None
         self.settings_data_worker: SettingsDataWorker | None = None
+        self.blacklist_cleanup_worker: BlacklistCleanupWorker | None = None
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
         self.tray_icon: QSystemTrayIcon | None = None
@@ -539,6 +545,7 @@ class MainWindow(QMainWindow):
             recognition_options=self.recognition_options,
             recognition_summary={},
             pending_recognition_cases=0,
+            blacklist_suggestions=[],
         )
         self.settings_popup.set_backups_loading()
         self.settings_popup.set_diagnostics_loading()
@@ -569,6 +576,12 @@ class MainWindow(QMainWindow):
         )
         self.settings_popup.clearCustomerDataRequested.connect(
             self.confirm_clear_customer_data
+        )
+        self.settings_popup.blacklistSuggestionConfirmed.connect(
+            self.confirm_blacklist_suggestion
+        )
+        self.settings_popup.blacklistSuggestionDismissed.connect(
+            self.dismiss_blacklist_suggestion
         )
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
@@ -612,6 +625,9 @@ class MainWindow(QMainWindow):
         self.settings_popup.set_recognition_state(
             payload.get("recognition_summary") or {},
             int(payload.get("pending_recognition_cases") or 0),
+        )
+        self.settings_popup.set_blacklist_suggestions(
+            payload.get("blacklist_suggestions") or []
         )
         error = str(payload.get("error") or "")
         if error:
@@ -669,9 +685,74 @@ class MainWindow(QMainWindow):
     def on_customer_recognition_options_changed(self, options):
         self.recognition_options = options
         save_customer_recognition_options(options)
-        self.status_bar.set_text(
-            "Kundenerkennung gespeichert · wird beim nächsten Indexlauf angewendet"
+        QTimer.singleShot(0, self._cleanup_blacklisted_values)
+
+    def _cleanup_blacklisted_values(self):
+        if (
+            self.blacklist_cleanup_worker is not None
+            and self.blacklist_cleanup_worker.isRunning()
+        ):
+            return
+        self.status_bar.set_text("Blocklisten werden im Hintergrund angewendet …")
+        worker = BlacklistCleanupWorker(
+            CUSTOMER_DB_FILE, self.recognition_options, parent=self
         )
+        worker.completed.connect(self._on_blacklist_cleanup_complete)
+        worker.finished.connect(self._release_blacklist_cleanup_worker)
+        self.blacklist_cleanup_worker = worker
+        worker.start()
+
+    def _on_blacklist_cleanup_complete(self, result: dict, error: str):
+        if error:
+            QMessageBox.warning(self, "Blocklisten-Bereinigung", error)
+            return
+        self.status_bar.set_text(
+            "Kundenerkennung gespeichert · "
+            f"{int(result.get('fields') or 0)} automatische Felder und "
+            f"{int(result.get('contacts') or 0)} Kontakte bereinigt"
+        )
+        self._refresh_customer_results_only()
+
+    def _release_blacklist_cleanup_worker(self):
+        worker = self.sender()
+        if isinstance(worker, BlacklistCleanupWorker):
+            worker.deleteLater()
+            if self.blacklist_cleanup_worker is worker:
+                self.blacklist_cleanup_worker = None
+
+    def confirm_blacklist_suggestion(
+        self, suggestion_id: int, value_type: str, value: str
+    ):
+        attributes = {
+            "email": "email_blacklist",
+            "phone": "phone_blacklist",
+            "name": "name_blacklist",
+            "address": "address_blacklist",
+        }
+        attribute = attributes.get(value_type)
+        if attribute is None:
+            return
+        existing = str(getattr(self.recognition_options, attribute) or "").splitlines()
+        if value.casefold() not in {item.strip().casefold() for item in existing}:
+            existing.append(value)
+            setattr(self.recognition_options, attribute, "\n".join(filter(None, existing)))
+        save_customer_recognition_options(self.recognition_options)
+        self.customer_repository.set_blacklist_suggestion_status(
+            suggestion_id, "confirmed"
+        )
+        self._cleanup_blacklisted_values()
+        if self.settings_popup is not None:
+            field = self.settings_popup.recognition_blacklist_fields.get(attribute)
+            if field is not None:
+                field.setPlainText(str(getattr(self.recognition_options, attribute)))
+            self._refresh_settings_popup_data()
+
+    def dismiss_blacklist_suggestion(self, suggestion_id: int):
+        self.customer_repository.set_blacklist_suggestion_status(
+            suggestion_id, "dismissed"
+        )
+        if self.settings_popup is not None:
+            self._refresh_settings_popup_data()
 
     def open_customer_recognition_review(self):
         if self.settings_popup is not None:
@@ -1076,6 +1157,11 @@ class MainWindow(QMainWindow):
         ):
             self.settings_data_worker.requestInterruption()
             self.settings_data_worker.wait()
+        if (
+            self.blacklist_cleanup_worker is not None
+            and self.blacklist_cleanup_worker.isRunning()
+        ):
+            self.blacklist_cleanup_worker.wait()
         self.folder_page.cleanup()
         try:
             DocumentConverter.clear_word_preview_cache()

@@ -3,15 +3,175 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.core.customer_models import Contact, Customer
-from app.core.customer_recognition_models import RecognitionCandidate, RecognitionStats
+from app.core.customer_recognition_models import (
+    ExtractionEvidence,
+    RecognitionCandidate,
+    RecognitionStats,
+)
 from app.core.customer_repository import CustomerRepository
-from app.core.config import IndexOptions
+from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.index_manager import IndexManager
 from app.core.search_models import SearchFilters
 from app.gui.workers.search_worker import SearchWorker
 
 
 class CustomerRepositoryTests(unittest.TestCase):
+    def test_data_suggestion_keeps_evidence_and_can_be_accepted_or_rejected(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Muster",
+                email="alt@example.de",
+            ))
+            accepted = repository.apply_project_suggestion(
+                int(customer.id), None, "email", "neu@example.de",
+                "/tmp/Anschreiben.pdf", "E-Mail: neu@example.de",
+                "Beschriftetes Kontaktfeld", 0.89,
+            )
+            rejected = repository.apply_project_suggestion(
+                int(customer.id), None, "phone", "+49 30 123456",
+                confidence=0.82,
+            )
+
+            pending = repository.list_data_suggestions(int(customer.id))
+            self.assertEqual(len(pending), 2)
+            self.assertEqual(pending[0].confidence, 0.89)
+            self.assertEqual(pending[0].excerpt, "E-Mail: neu@example.de")
+            repository.resolve_data_suggestion(int(accepted.id), True)
+            repository.resolve_data_suggestion(int(rejected.id), False)
+
+            self.assertEqual(repository.get(int(customer.id)).email, "neu@example.de")
+            self.assertEqual(repository.list_data_suggestions(int(customer.id)), [])
+            self.assertEqual(len(repository.list_data_suggestions(
+                int(customer.id), "accepted"
+            )), 1)
+            self.assertEqual(len(repository.list_data_suggestions(
+                int(customer.id), "rejected"
+            )), 1)
+            repository.close()
+
+    def test_rescan_reopens_rejected_but_not_accepted_suggestions(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Muster"))
+            rejected = repository.apply_project_suggestion(
+                int(customer.id), None, "email", "erneut@example.de",
+                confidence=0.75,
+            )
+            accepted = repository.apply_project_suggestion(
+                int(customer.id), None, "phone", "+49 30 123456",
+                confidence=0.78,
+            )
+            repository.resolve_data_suggestion(int(rejected.id), False)
+            repository.resolve_data_suggestion(int(accepted.id), True)
+
+            reopened = repository.apply_project_suggestion(
+                int(customer.id), None, "email", "erneut@example.de",
+                excerpt="erneuter Fund", confidence=0.80,
+                reopen_rejected=True,
+            )
+            protected = repository.apply_project_suggestion(
+                int(customer.id), None, "phone", "+49 30 123456",
+                confidence=0.82, reopen_rejected=True,
+            )
+
+            self.assertEqual(reopened.id, rejected.id)
+            self.assertEqual(reopened.status, "pending")
+            self.assertEqual(reopened.excerpt, "erneuter Fund")
+            self.assertIsNone(protected)
+            self.assertEqual(len(repository.list_data_suggestions(
+                int(customer.id)
+            )), 1)
+            repository.close()
+
+    def test_blacklist_cleanup_only_removes_automatic_values(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            automatic = repository.apply_recognition_candidate(RecognitionCandidate(
+                recognition_key="auto",
+                display_name="Automatisch",
+                city="Berlin",
+                folder_paths=[str(Path(directory) / "Automatisch, Berlin")],
+                service_types=["DEKRA"],
+                years=[2026],
+                email="team@example.de",
+                evidence=[ExtractionEvidence(
+                    "email", "team@example.de", "team@example.de",
+                    "/tmp/Anschreiben.pdf", "E-Mail: team@example.de", 4,
+                    "E-Mail im Empfängerblock", 0.95, True,
+                )],
+            ))
+            manual = repository.save(Customer(
+                display_name="Manuell",
+                email="team@example.de",
+            ))
+
+            result = repository.cleanup_automatic_blacklisted_values(
+                CustomerRecognitionOptions(email_blacklist="team@example.de")
+            )
+
+            self.assertEqual(result["fields"], 1)
+            self.assertEqual(repository.get(automatic.id).email, "")
+            self.assertEqual(repository.get(manual.id).email, "team@example.de")
+            repository.close()
+
+    def test_manual_edit_removes_automatic_provenance(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            automatic = repository.apply_recognition_candidate(RecognitionCandidate(
+                recognition_key="auto",
+                display_name="Automatisch",
+                city="Berlin",
+                folder_paths=[str(Path(directory) / "Automatisch, Berlin")],
+                service_types=["DEKRA"],
+                years=[2026],
+                email="auto@example.de",
+                evidence=[ExtractionEvidence(
+                    "email", "auto@example.de", "auto@example.de",
+                    "/tmp/Anschreiben.pdf", "E-Mail: auto@example.de", 4,
+                    "E-Mail im Empfängerblock", 0.95, True,
+                )],
+            ))
+            automatic.email = "bestaetigt@example.de"
+            repository.save(automatic)
+
+            result = repository.cleanup_automatic_blacklisted_values(
+                CustomerRecognitionOptions(email_blacklist="bestaetigt@example.de")
+            )
+
+            self.assertEqual(result["fields"], 0)
+            self.assertEqual(
+                repository.get(automatic.id).email, "bestaetigt@example.de"
+            )
+            repository.close()
+
+    def test_frequent_values_create_configurable_blacklist_suggestion(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            candidates = [
+                RecognitionCandidate(
+                    recognition_key=f"kunde-{number}",
+                    display_name=f"Kunde {number}",
+                    city="Berlin",
+                    folder_paths=[str(Path(directory) / f"Kunde {number}, Berlin")],
+                    service_types=["DEKRA"],
+                    years=[2026],
+                    evidence=[ExtractionEvidence(
+                        "email", "intern@example.de", "intern@example.de",
+                        f"/tmp/{number}.pdf", "intern@example.de", 1,
+                        "E-Mail-Fund", 0.72, False,
+                    )],
+                )
+                for number in range(5)
+            ]
+
+            repository.record_extraction_observations(candidates, threshold=5)
+            suggestions = repository.list_blacklist_suggestions()
+
+            self.assertEqual(len(suggestions), 1)
+            self.assertEqual(suggestions[0]["value"], "intern@example.de")
+            self.assertEqual(suggestions[0]["folder_count"], 5)
+            repository.close()
     def test_fuzzy_multiword_search_ranks_matches_across_project_fields(self):
         with TemporaryDirectory() as directory:
             repository = CustomerRepository(Path(directory) / "customers.db")
