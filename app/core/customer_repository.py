@@ -39,7 +39,10 @@ class CustomerRepository:
         value = folder_path.strip()
         if value.startswith("customer://"):
             return value
-        return os.path.abspath(os.path.normpath(value))
+        # Resolve platform aliases as well as relative components. This keeps
+        # macOS (/var vs /private/var) and Windows (8.3 vs long names) from
+        # producing two keys for the same folder.
+        return str(Path(value).expanduser().resolve(strict=False))
 
     @classmethod
     def _folder_lookup_key(cls, folder_path: str) -> str:

@@ -71,7 +71,7 @@ class IndexingTests(unittest.TestCase):
         with patch.object(manager, "_index_file", wraps=manager._index_file) as index_file:
             manager.synchronize_directory(self.root, full_rebuild=False)
             indexed_paths = {call.args[0] for call in index_file.call_args_list}
-        self.assertEqual(indexed_paths, {changed_file, new_file})
+        self.assertEqual(indexed_paths, {changed_file.resolve(), new_file.resolve()})
         manager.close()
 
     def test_ranked_filtered_search_is_paginated(self):
@@ -118,9 +118,9 @@ class IndexingTests(unittest.TestCase):
         )
 
         self.assertGreaterEqual(page.total, 1)
-        self.assertEqual(page.items[0]["folder_path"], str(target))
+        self.assertEqual(page.items[0]["folder_path"], str(target.resolve()))
         self.assertEqual(filtered.total, 1)
-        self.assertEqual(filtered.items[0]["folder_path"], str(target))
+        self.assertEqual(filtered.items[0]["folder_path"], str(target.resolve()))
         manager.close()
 
     def test_empty_source_directory_indexes_without_errors(self):
@@ -164,10 +164,12 @@ class IndexingTests(unittest.TestCase):
         details = manager.get_folder_details(str(pictures))
 
         self.assertEqual(structured.total, 1)
-        self.assertEqual(structured.items[0]["folder_path"], str(current_project))
+        self.assertEqual(
+            structured.items[0]["folder_path"], str(current_project.resolve())
+        )
         self.assertEqual(legacy_result.total, 1)
-        self.assertEqual(legacy_result.items[0]["folder_path"], str(legacy))
-        self.assertEqual(details["folder_path"], str(current_project))
+        self.assertEqual(legacy_result.items[0]["folder_path"], str(legacy.resolve()))
+        self.assertEqual(details["folder_path"], str(current_project.resolve()))
         self.assertEqual(
             {node["name"] for node in details["subfolders"]},
             {"Bilder", "Dokumente"},

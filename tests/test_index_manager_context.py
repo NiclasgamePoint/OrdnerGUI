@@ -6,6 +6,14 @@ from app.core.index_manager import IndexManager
 
 
 class IndexManagerContextTests(unittest.TestCase):
+    def test_initialization_creates_database_parent_directory(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "not-created-yet" / "index.db"
+
+            with IndexManager(database) as manager:
+                self.assertTrue(database.parent.is_dir())
+                self.assertEqual(manager.conn.execute("SELECT 1").fetchone()[0], 1)
+
     def test_context_manager_closes_connection(self):
         with TemporaryDirectory() as directory:
             database = Path(directory) / "index.db"

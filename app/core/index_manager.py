@@ -60,6 +60,7 @@ class IndexManager:
             self.conn.row_factory = sqlite3.Row
     
     def init_db(self):
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         cursor = self.conn.cursor()
