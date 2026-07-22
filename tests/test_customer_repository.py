@@ -16,6 +16,102 @@ from app.gui.workers.search_worker import SearchWorker
 
 
 class CustomerRepositoryTests(unittest.TestCase):
+    @staticmethod
+    def _name_candidate(name: str, automatic: bool = True) -> RecognitionCandidate:
+        return RecognitionCandidate(
+            recognition_key="muller",
+            display_name="Müller",
+            city="Berlin",
+            folder_paths=[],
+            service_types=[],
+            years=[],
+            contacts=[Contact(name=name)],
+            evidence=[ExtractionEvidence(
+                field_name="contact_name",
+                value=name,
+                normalized_value=name.casefold(),
+                source_path="/tmp/Müller, Berlin",
+                excerpt=name,
+                position=0,
+                rule="Testregel",
+                confidence=0.94 if automatic else 0.80,
+                automatic=automatic,
+            )],
+        )
+
+    def test_automatic_surname_contact_is_upgraded_to_full_name(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Müller"))
+
+            repository.apply_contact_scan_candidate(
+                int(customer.id), self._name_candidate("Müller")
+            )
+            repository.apply_contact_scan_candidate(
+                int(customer.id), self._name_candidate("Max Müller")
+            )
+
+            contacts = repository.get(int(customer.id)).contacts
+            self.assertEqual(contacts, [Contact(name="Max Müller")])
+            provenance = repository.connection.execute(
+                """
+                SELECT value FROM automatic_field_sources
+                WHERE owner_type='contact' AND field_name='name'
+                """
+            ).fetchall()
+            self.assertEqual([row[0] for row in provenance], ["Max Müller"])
+            repository.close()
+
+    def test_manual_surname_contact_is_not_renamed_automatically(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Müller",
+                contacts=[Contact(name="Müller")],
+            ))
+
+            repository.apply_contact_scan_candidate(
+                int(customer.id), self._name_candidate("Max Müller")
+            )
+
+            self.assertEqual(
+                [contact.name for contact in repository.get(int(customer.id)).contacts],
+                ["Müller", "Max Müller"],
+            )
+            repository.close()
+
+    def test_accepted_name_suggestion_creates_contact(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Muster GmbH"))
+            suggestion = repository.apply_project_suggestion(
+                int(customer.id), None, "contact_name", "Erika Muster",
+                confidence=0.80,
+            )
+
+            repository.resolve_data_suggestion(int(suggestion.id), True)
+
+            self.assertEqual(
+                repository.get(int(customer.id)).contacts,
+                [Contact(name="Erika Muster")],
+            )
+            repository.close()
+
+    def test_weak_contact_name_is_stored_as_field_suggestion(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Muster GmbH"))
+            candidate = self._name_candidate("Erika Muster", automatic=False)
+            candidate.contacts = []
+
+            repository.apply_recognition_candidate(candidate, int(customer.id))
+
+            suggestions = repository.list_data_suggestions(int(customer.id))
+            self.assertEqual(len(suggestions), 1)
+            self.assertEqual(suggestions[0].field_name, "contact_name")
+            self.assertEqual(suggestions[0].suggested_value, "Erika Muster")
+            repository.close()
+
     def test_data_suggestion_keeps_evidence_and_can_be_accepted_or_rejected(self):
         with TemporaryDirectory() as directory:
             repository = CustomerRepository(Path(directory) / "customers.db")

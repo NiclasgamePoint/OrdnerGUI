@@ -130,7 +130,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             ).rescan_customer_contacts(int(customer.id))
             repository = CustomerRepository(customer_path)
 
-            self.assertEqual(result.applied_fields, 1)
+            self.assertEqual(result.applied_fields, 2)
             self.assertEqual(
                 repository.get(int(customer.id)).email,
                 "bestaetigt@example.de",

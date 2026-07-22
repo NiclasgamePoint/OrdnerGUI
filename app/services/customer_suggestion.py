@@ -24,6 +24,19 @@ STREET_RE = re.compile(
     re.IGNORECASE,
 )
 NAME_HINT_RE = re.compile(r"(?im)^(?:kunde|auftraggeber|angebot an|an:)\s*:?[ \t]*(.+)$")
+SALUTATION_RE = re.compile(
+    r"(?i)^\s*sehr\s+geehrt(?:e|er|en)\s+(?:herrn?|frau)\s+"
+    r"(?:(?:dr\.?|prof\.?)\s+)?"
+    r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+){1,3})"
+)
+CUSTOMER_ROLE_RE = re.compile(
+    r"(?i)^(?:auftraggeber|kunde|besteller|bauherr|"
+    r"vertragspartner\s+auf\s+kundenseite)\s*:?[ \t]*(.*)$"
+)
+EXCLUDED_ROLE_RE = re.compile(
+    r"(?i)\b(?:auftragnehmer|leistungserbringer|dienstleister|"
+    r"geschäftsführer|absender)\b"
+)
 PERSON_HINT_RE = re.compile(
     r"(?i)\b(?:(?:z\.?\s*hd\.?|ansprechpartner(?:in)?|kontakt)\s*:?\s*)?"
     r"(?:(?:herrn?|frau)\s+)(?:(?:dr\.?|prof\.?)\s+)?"
@@ -82,6 +95,10 @@ GENERIC_EMAIL_NAMES = {
     "architekturbuero",
     "architekturbüro",
 }
+
+
+def normalize_name_part(value: str) -> str:
+    return re.sub(r"[^a-zäöüß'-]", "", value.casefold())
 
 
 @dataclass
@@ -167,30 +184,60 @@ class CustomerSuggestionService:
         ]
         evidence: list[ExtractionEvidence] = []
         contacts: list[Contact] = []
-        for document in preferred:
-            found, document_contacts = self._extract_document_evidence(document, True)
+        primary_documents = preferred or eligible
+        for document in primary_documents:
+            found, document_contacts = self._extract_document_evidence(
+                document, bool(preferred), folder_path.name
+            )
             evidence.extend(found)
             contacts.extend(document_contacts)
-        if not self._has_automatic_evidence(evidence):
+        if preferred:
+            preview = self._mark_automatic_evidence(evidence)
+            resolved_fields = {
+                item.field_name for item in preview if item.automatic
+            }
+            fallback_fields = {
+                "contact_name", "email", "phone", "street", "postal_code", "city",
+            } - resolved_fields
             for document in eligible:
                 if document in preferred:
                     continue
-                found, document_contacts = self._extract_document_evidence(document, False)
-                evidence.extend(found)
-                contacts.extend(document_contacts)
+                found, document_contacts = self._extract_document_evidence(
+                    document, False, folder_path.name
+                )
+                evidence.extend(
+                    item for item in found if item.field_name in fallback_fields
+                )
+                if "contact_name" in fallback_fields:
+                    contacts.extend(document_contacts)
         suggestion.evidence = self._mark_automatic_evidence(evidence)
         self._apply_resolved_evidence(suggestion)
-        suggestion.contacts = self._deduplicate_contacts(contacts, suggestion.evidence)
-        if suggestion.contacts:
-            primary = suggestion.contacts[0]
-            suggestion.email = suggestion.email or primary.email
-            suggestion.phone = suggestion.phone or primary.phone
         suggestion.company = suggestion.display_name
         suggestion.entity_type = self._infer_entity_type(
             suggestion.display_name,
             folder_path.name,
             "\n".join(str(item.get("content") or "")[:4_000] for item in eligible),
         )
+        if not any(
+            item.field_name == "contact_name" and item.automatic
+            for item in suggestion.evidence
+        ):
+            fallback_name = self._path_contact_fallback(
+                folder_path, suggestion.display_name, suggestion.entity_type
+            )
+            if fallback_name:
+                fallback = self._evidence(
+                    "contact_name", fallback_name, str(folder_path), folder_path.name,
+                    0, "Personenname aus Projektordner", 0.90,
+                )
+                fallback.automatic = True
+                suggestion.evidence.append(fallback)
+                contacts.append(Contact(name=fallback_name))
+        suggestion.contacts = self._deduplicate_contacts(contacts, suggestion.evidence)
+        if suggestion.contacts:
+            primary = suggestion.contacts[0]
+            suggestion.email = suggestion.email or primary.email
+            suggestion.phone = suggestion.phone or primary.phone
         identity_source = str(
             (preferred or eligible or [{"path": str(folder_path)}])[0].get("path")
         )
@@ -232,7 +279,10 @@ class CustomerSuggestionService:
         return documents
 
     def _extract_document_evidence(
-        self, document: dict, preferred: bool
+        self,
+        document: dict,
+        preferred: bool,
+        expected_folder_name: str = "",
     ) -> tuple[list[ExtractionEvidence], list[Contact]]:
         text = str(document.get("content") or "")
         source_path = str(document.get("path") or "")
@@ -249,18 +299,54 @@ class CustomerSuggestionService:
                 RECIPIENT_CONTEXT_RE.search(context)
                 or PERSON_HINT_RE.search(context)
             )
-            name_match = PERSON_HINT_RE.search(line)
-            name = self._clean_name_candidate(name_match.group(1)) if name_match else ""
+            name_rule = "Anrede/Ansprechpartner"
+            name_confidence = 0.94 if strong_context else (0.80 if preferred else 0.72)
+            salutation = SALUTATION_RE.search(line)
+            name = self._clean_name_candidate(salutation.group(1)) if salutation else ""
+            if name:
+                name_rule = "persönliche Empfängeranrede"
+                name_confidence = 0.96
+            excluded_name_context = bool(
+                EXCLUDED_ROLE_RE.search(" ".join(lines[max(0, index - 2):index + 1]))
+            )
+            if not name and not excluded_name_context:
+                name_match = PERSON_HINT_RE.search(line)
+                name = (
+                    self._clean_name_candidate(name_match.group(1))
+                    if name_match else ""
+                )
             if not name:
                 labeled_name = CONTACT_LABEL_RE.match(line)
                 if labeled_name:
                     name = self._clean_name_candidate(labeled_name.group(1))
+            role_match = CUSTOMER_ROLE_RE.match(line)
+            if not name and role_match:
+                role_value = role_match.group(1).strip()
+                role_person = PERSON_HINT_RE.search(role_value)
+                name = self._clean_name_candidate(
+                    role_person.group(1) if role_person else role_value
+                )
+                if not name:
+                    for candidate_line in lines[index + 1:index + 3]:
+                        if EXCLUDED_ROLE_RE.search(candidate_line):
+                            break
+                        role_person = PERSON_HINT_RE.search(candidate_line)
+                        name = self._clean_name_candidate(
+                            role_person.group(1) if role_person else candidate_line
+                        )
+                        if name:
+                            break
+                if name:
+                    name_rule = "kundenseitige Vertragsrolle"
+                    name_confidence = 0.94
             if not name:
                 hinted = NAME_HINT_RE.match(line)
                 if hinted:
                     name = self._clean_name_candidate(hinted.group(1))
             if not name and RECIPIENT_CONTEXT_RE.search(line) and index + 1 < len(lines):
                 name = self._clean_name_candidate(lines[index + 1])
+            if excluded_name_context and not salutation and not role_match:
+                name = ""
             email_match = EMAIL_RE.search(line)
             phone = ""
             phone_match = PHONE_RE.search(line)
@@ -270,7 +356,7 @@ class CustomerSuggestionService:
             if name:
                 evidence.append(self._evidence(
                     "contact_name", name, source_path, context, index,
-                    "Anrede/Ansprechpartner", confidence,
+                    name_rule, name_confidence,
                 ))
             if email_match:
                 email = email_match.group(0).casefold()
@@ -293,17 +379,16 @@ class CustomerSuggestionService:
                     self._clean_phone_candidate(nearby_phone_match.group(0), nearby)
                     if nearby_phone_match else ""
                 )
-                if nearby_email or nearby_phone:
-                    contacts.append(Contact(
-                        name=name,
-                        email=(
-                            nearby_email.group(0).casefold()
-                            if nearby_email
-                            and not self._is_generic_email(nearby_email.group(0))
-                            else ""
-                        ),
-                        phone=nearby_phone,
-                    ))
+                contacts.append(Contact(
+                    name=name,
+                    email=(
+                        nearby_email.group(0).casefold()
+                        if nearby_email
+                        and not self._is_generic_email(nearby_email.group(0))
+                        else ""
+                    ),
+                    phone=nearby_phone,
+                ))
 
         for index, line in enumerate(lines[:60]):
             street = STREET_RE.search(line)
@@ -321,6 +406,31 @@ class CustomerSuggestionService:
                 or PERSON_HINT_RE.search(context_start)
             )
             confidence = 0.95 if strong else 0.76
+            if index < 40:
+                address_name = self._name_before_address(lines, index)
+                if address_name:
+                    folder_name = expected_folder_name.split(",", 1)[0].strip()
+                    folder_surname = normalize_name_part(folder_name)
+                    detected_surname = normalize_name_part(
+                        address_name.split()[-1]
+                    )
+                    name_confidence = (
+                        0.94
+                        if strong or (
+                            folder_surname
+                            and detected_surname
+                            and folder_surname == detected_surname
+                        )
+                        else 0.88
+                    )
+                    name_evidence = self._evidence(
+                        "contact_name", address_name, source_path,
+                        " ".join(lines[max(0, index - 3):index + 4]),
+                        index, "Name im frühen Empfängeradressblock",
+                        name_confidence,
+                    )
+                    evidence.append(name_evidence)
+                    contacts.append(Contact(name=address_name))
             for field_name, value in (
                 ("street", street.group(1).strip()),
                 ("postal_code", postal_city.group(1)),
@@ -405,7 +515,55 @@ class CustomerSuggestionService:
             existing = unique.setdefault(key, Contact(name=contact.name))
             existing.email = existing.email or contact.email
             existing.phone = existing.phone or contact.phone
-        return [item for item in unique.values() if item.email or item.phone]
+        return list(unique.values())
+
+    def _path_contact_fallback(
+        self,
+        folder_path: Path,
+        display_name: str,
+        entity_type: str,
+    ) -> str:
+        label = folder_path.name.split(",", 1)[0].strip()
+        candidate = display_name.strip() if entity_type == "Privatperson" else label
+        if not candidate or len(candidate) > 60:
+            return ""
+        lowered = candidate.casefold()
+        has_company_form = self._contains_company_form(lowered)
+        if has_company_form or any(marker in lowered for marker in ORGANIZATION_MARKERS):
+            return ""
+        if any(character.isdigit() for character in candidate):
+            return ""
+        words = candidate.split()
+        if entity_type != "Privatperson":
+            if "," not in folder_path.name or len(words) != 1:
+                return ""
+        if not 1 <= len(words) <= 4:
+            return ""
+        if not all(re.fullmatch(r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+", word) for word in words):
+            return ""
+        return candidate
+
+    def _name_before_address(self, lines: list[str], street_index: int) -> str:
+        preceding = lines[max(0, street_index - 3):street_index]
+        if EXCLUDED_ROLE_RE.search(" ".join(preceding)):
+            return ""
+        for candidate_line in reversed(preceding):
+            if (
+                STREET_RE.search(candidate_line)
+                or POSTAL_CITY_RE.search(candidate_line)
+                or EMAIL_RE.search(candidate_line)
+                or PHONE_RE.search(candidate_line)
+                or EXCLUDED_ROLE_RE.search(candidate_line)
+                or NOISE_LINE_RE.search(candidate_line)
+            ):
+                continue
+            person = PERSON_HINT_RE.search(candidate_line)
+            candidate = self._clean_name_candidate(
+                person.group(1) if person else candidate_line
+            )
+            if candidate:
+                return candidate
+        return ""
 
     def _extract_from_path(
         self,
@@ -465,7 +623,7 @@ class CustomerSuggestionService:
         label_name = project_label.split(",", 1)[0].strip() if project_label else ""
         name_scope = label_name or display_name
         lowered = name_scope.casefold()
-        if any(marker in lowered for marker in COMPANY_MARKERS):
+        if self._contains_company_form(lowered):
             return "Unternehmen"
         if any(marker in lowered for marker in ORGANIZATION_MARKERS):
             return "Organisation"
@@ -526,12 +684,22 @@ class CustomerSuggestionService:
         if len(words) < 2:
             return ""
         lowered = candidate.casefold()
-        if any(marker in lowered for marker in (*COMPANY_MARKERS, *ORGANIZATION_MARKERS)):
+        if self._contains_company_form(lowered) or any(
+            marker in lowered for marker in ORGANIZATION_MARKERS
+        ):
             return ""
         alpha_count = sum(character.isalpha() for character in candidate)
         if alpha_count < 5:
             return ""
         return candidate
+
+    @staticmethod
+    def _contains_company_form(value: str) -> bool:
+        lowered = value.casefold()
+        return any(
+            re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", lowered)
+            for marker in COMPANY_MARKERS
+        )
 
     @staticmethod
     def _is_generic_email(email: str) -> bool:

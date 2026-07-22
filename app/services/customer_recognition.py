@@ -83,13 +83,16 @@ class RecognitionBlacklist:
                 continue
             email = "" if self.email_blocked(contact.email) else contact.email
             phone = "" if self.phone_blocked(contact.phone) else contact.phone
-            if email or phone:
-                filtered_contacts.append(Contact(
-                    name=contact.name,
-                    role=contact.role,
-                    email=email,
-                    phone=phone,
-                ))
+            if not email and not phone and normalize_identity(contact.name) in {
+                "kunde", "kontakt", "ansprechpartner", "ansprechpartnerin",
+            }:
+                continue
+            filtered_contacts.append(Contact(
+                name=contact.name,
+                role=contact.role,
+                email=email,
+                phone=phone,
+            ))
         suggestion.contacts = filtered_contacts
         suggestion.evidence = [
             item for item in suggestion.evidence

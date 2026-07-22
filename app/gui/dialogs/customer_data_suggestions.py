@@ -23,6 +23,7 @@ from app.gui.workers import ContactScanWorker
 
 FIELD_LABELS = {
     "company": "Unternehmen",
+    "contact_name": "Kontaktname",
     "email": "E-Mail-Adresse",
     "phone": "Telefonnummer",
     "street": "Straße und Hausnummer",
@@ -89,12 +90,14 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
 
         action_row = QHBoxLayout()
         action_row.addStretch(1)
-        self.close_button = AppButton("Schließen", AppButton.SECONDARY)
+        self.close_button = AppButton("Schließen")
         self.close_button.clicked.connect(self.accept)
-        self.scan_button = AppButton("Kontaktdaten neu suchen")
+        self.scan_button = AppButton(
+            "Kontaktdaten neu suchen", AppButton.SECONDARY
+        )
         self.scan_button.clicked.connect(self._start_scan)
-        action_row.addWidget(self.close_button)
         action_row.addWidget(self.scan_button)
+        action_row.addWidget(self.close_button)
         layout.addLayout(action_row)
         root.addWidget(body)
         self._reload()
@@ -182,6 +185,8 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         self._reload()
 
     def _would_overwrite(self, suggestion: CustomerDataSuggestion) -> bool:
+        if suggestion.field_name == "contact_name":
+            return False
         customer = self.repository.get(self.customer_id)
         if customer is None:
             return False
