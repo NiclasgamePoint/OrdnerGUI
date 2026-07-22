@@ -12,6 +12,8 @@ class IndexStatusBar(QFrame):
 
     cancelRequested = Signal()
     detailsRequested = Signal()
+    textChanged = Signal(str)
+    busyChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +45,7 @@ class IndexStatusBar(QFrame):
 
     def set_text(self, text: str):
         self.status_label.setText(text)
+        self.textChanged.emit(text)
 
     def set_busy(self, busy: bool):
         self.progress_bar.setVisible(busy)
@@ -51,6 +54,7 @@ class IndexStatusBar(QFrame):
             self.progress_bar.setRange(0, 0)
         else:
             self.progress_bar.setRange(0, 100)
+        self.busyChanged.emit(busy)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:

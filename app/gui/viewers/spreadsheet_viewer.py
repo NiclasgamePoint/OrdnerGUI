@@ -5,7 +5,6 @@ from pathlib import Path
 import openpyxl
 import xlrd
 from openpyxl.utils import get_column_letter
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from app.gui.widgets.buttons import AppButton

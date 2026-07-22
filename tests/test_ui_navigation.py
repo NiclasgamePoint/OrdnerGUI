@@ -35,6 +35,17 @@ class UiNavigationTests(unittest.TestCase):
         self.assertEqual(navigator.current.page, "search")
         self.assertFalse(navigator.can_go_back)
 
+    def test_navigation_controller_supports_forward(self):
+        navigator = NavigationController()
+        navigator.navigate("customer", 7)
+        navigator.navigate("folder", "/tmp/example")
+        navigator.back()
+        self.assertTrue(navigator.can_go_forward)
+
+        navigator.forward()
+        self.assertEqual(navigator.current.page, "folder")
+        self.assertEqual(navigator.current.payload, "/tmp/example")
+
     def test_centered_popup_is_modal_and_centered_over_owner(self):
         owner = QWidget()
         owner.setGeometry(40, 30, 700, 500)

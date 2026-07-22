@@ -1,138 +1,98 @@
+# Mögliche Verbesserungen als Checkliste
 
 ## 1. Offene Punkte aus den Vorschlägen
 
-- E-Mails aus einem konfigurierten IMAP-Postfach abrufen und Anhänge automatisch in die Ordnerstruktur einordnen
-- IMAP-Verbindung (Server, Port, TLS, Anmeldedaten) im Einstellungs-Dialog konfigurierbar machen
-- E-Mails und Anhänge wie reguläre Dokumente indizieren und durchsuchbar machen
-- Anmeldedaten **nicht** im Klartext in `QSettings` ablegen – stattdessen `keyring` (plattformübergreifend: macOS Keychain, Windows Credential Manager, Linux Secret Service) nutzen
-- Überlegung: Eingehende E-Mails via Kundenerkennung automatisch zuordnen
-
-- **Kontextmenüs**: Rechtsklick auf Ergebnis-Zeilen (`ResultRow`), Datei-Einträge im `FolderPage`-Baum und Kunden-Einträge sollte situationsgerechte Aktionen anbieten (Ordner öffnen, Datei öffnen, Datei kopieren, Kunden bearbeiten, …)
-- **Maus-Hover konsequent**: `ResultRow`-Widgets haben bereits Hover-Highlighting; das fehlt noch bei den Datei-Einträgen in `FolderPage` und den Kontaktzeilen in `CustomerPage`
-- **Installer / Deployment**:
-  - Windows: Inno Setup oder NSIS Installer, der Python-Venv und alle Abhängigkeiten einbettet; optionales `start.bat` / `start.ps1`
-  - macOS: `.app`-Bundle via PyInstaller oder `py2app`, optional als `.dmg` verteilen
-  - Linux: AppImage oder Flatpak für distributions-unabhängige Verteilung
-- **Auto-Updates**: Eingebauter Update-Checker, der GitHub-Releases per API abfragt und den Nutzer auf neue Versionen hinweist; optional automatischen Download + Neustart anbieten
-
-
----
+- [ ] E-Mails aus einem konfigurierten IMAP-Postfach abrufen und Anhänge automatisch in die Ordnerstruktur einordnen
+- [ ] IMAP-Verbindung (Server, Port, TLS, Anmeldedaten) im Einstellungs-Dialog konfigurierbar machen
+- [ ] E-Mails und Anhänge wie reguläre Dokumente indizieren und durchsuchbar machen
+- [ ] Anmeldedaten nicht im Klartext in QSettings ablegen, stattdessen keyring nutzen
+- [ ] Eingehende E-Mails via Kundenerkennung automatisch zuordnen
+- [ ] Kontextmenüs: Rechtsklick auf Ergebnis-Zeilen (ResultRow), Datei-Einträge im FolderPage-Baum und Kunden-Einträge mit passenden Aktionen
+- [ ] Maus-Hover konsistent: Hover-Highlighting auch für Datei-Einträge in FolderPage und Kontaktzeilen in CustomerPage
+- [ ] Installer/Deployment: Windows Installer (Inno Setup oder NSIS) mit eingebetteter Venv und Abhängigkeiten
+- [ ] Installer/Deployment: macOS .app-Bundle (PyInstaller oder py2app), optional als .dmg
+- [ ] Installer/Deployment: Linux AppImage oder Flatpak
+- [ ] Auto-Updates: GitHub Releases per API prüfen und Nutzer über neue Versionen informieren
+- [ ] Auto-Updates: optional automatischer Download und Neustart
 
 ## 2. Fehlende oder unvollständige Features
 
-### Startup-Skript für Windows & macOS fehlt
-- `start.sh` ist reines Bash/Linux-Skript
-- **Windows**: `start.bat` oder `start.ps1` analog anlegen (Venv aktivieren, `python main.py` starten)
-- **macOS**: `start.command` oder Shell-Skript, das korrekt mit `.venv/bin/activate` umgeht
+### Startup-Skripte für Windows und macOS
+- [x] Windows: start.bat oder start.ps1 analog anlegen (Venv aktivieren, python main.py starten)
+- [x] macOS: start.command oder Shell-Skript mit .venv/bin/activate
 
-### Ripgrep-Unterstützung nie fertiggestellt
-- `RIPGREP_AVAILABLE = True` in `config.py` ist ein toter Platzhalter – der Flag wird nirgends ausgelesen
-- Entweder den Schnell-Pfad via `rg` implementieren (besonders nützlich bei sehr großen Verzeichnissen) oder den Flag entfernen, um Verwirrung zu vermeiden
+### Ripgrep-Unterstützung
+- [ ] RIPGREP_AVAILABLE in config.py ist aktuell als Platzhalter zu prüfen (entweder vollständig nutzen oder entfernen)
 
 ### Stille Trunkierung im Tabellenviewer
-- `SpreadsheetViewerWidget` zeigt nur die ersten 500 Zeilen / 50 Spalten an, ohne den Nutzer darauf hinzuweisen
-- Mindestens einen Hinweistext einblenden: „Anzeige begrenzt auf 500 Zeilen – Datei extern öffnen für vollständige Ansicht"
+- [ ] Hinweistext einblenden: Anzeige ist auf 500 Zeilen/50 Spalten begrenzt
 
-### Kein Onboarding / erster Start
-- Beim allerersten Start ist `BAUVORHABEN_DIR` eine relative Annahme (Projektordner); gibt es dort keinen `Bauvorhaben/`-Ordner, passiert stillschweigend nichts
-- Ein einfacher Einrichtungs-Dialog beim ersten Start (oder wenn kein gültiger Pfad konfiguriert ist) würde die Einstiegshürde deutlich senken
+### Onboarding / erster Start
+- [ ] Einrichtungs-Dialog beim ersten Start, wenn kein gültiger Datenpfad konfiguriert ist
 
-### Leerer `app/gui/panels/`-Ordner
-- Namespace-Package ohne Inhalt; entweder für eine geplante geteilte Panel-Ansicht nutzen oder aufräumen
+### Leerer app/gui/panels/-Ordner
+- [ ] Ordner inhaltlich nutzen oder bereinigen
 
----
+## 3. Technische Verbesserungen und Code-Qualität
 
-## 3. Technische Verbesserungen & Code-Qualität
+### Logging
+- [ ] StreamHandler für Konsole im Entwicklungs-/Debug-Betrieb ergänzen (z. B. über PAPAGUI_DEBUG=1)
 
-### Logging: kein Konsolen-Handler
-- Alle Log-Ausgaben landen nur in der Rotationsdatei `data/logs/papagui.log`
-- Im Entwicklungs- und Debug-Betrieb fehlen Ausgaben im Terminal
-- Lösung: In `logging_config.py` einen `StreamHandler` hinzufügen, der bei Debug-Level greift (z. B. via `--debug`-Flag oder Umgebungsvariable `PAPAGUI_DEBUG=1`)
+### SETTINGS_ORG / SETTINGS_APP
+- [x] Doppelte Definition entfernen, theme.py importiert Konstanten aus app.core.config
 
-### `SETTINGS_ORG`/`SETTINGS_APP` doppelt definiert
-- In `config.py` **und** `theme.py` als Konstanten hinterlegt – keine Single Source of Truth
-- `theme.py` sollte `from app.core.config import SETTINGS_ORG, SETTINGS_APP` importieren
+### Context-Manager für IndexManager
+- [x] __enter__/__exit__ implementieren und Verbindungen zuverlässig schließen
 
-### Kein Context-Manager für `IndexManager`
-- `IndexManager` öffnet `self.conn` in `__init__`, erwartet aber manuelles `close()` durch den Aufrufer
-- `__enter__`/`__exit__` implementieren, damit `with IndexManager(...) as mgr:` möglich wird und Verbindungen zuverlässig geschlossen werden
+### SQL-Injection-Risiko in _ensure_column
+- [x] Tabellen- und Spaltennamen validieren und sicher quoten
 
-### SQL-Injection-Risiko in `_ensure_column`
-- `ALTER TABLE {table} ADD COLUMN {column} {col_type}` wird mit f-Strings gebaut
-- Alle heutigen Aufrufer nutzen Hardcoded-Strings, aber das Muster ist gefährlich
-- Tabellenname und Spaltenname gegen eine Whitelist valider Bezeichner prüfen oder durch den SQLite-Identifier-Quoting-Mechanismus absichern
-
-### `index_directory()`-Wrapper aufräumen
-- `index_directory()` ist eine dünne Hülle um `synchronize_directory()` und als veraltet kommentiert, aber nicht offiziell markiert
-- Mit `@deprecated` dekorieren oder komplett entfernen, um die API-Oberfläche zu vereinfachen
+### index_directory()-Wrapper
+- [x] Wrapper offiziell als veraltet markieren (DeprecationWarning)
 
 ### Konfigurierbares Arbeitsverzeichnis
-- `BAUVORHABEN_DIR = BASE_DIR / "Bauvorhaben"` ist relativ zum Skript-Startverzeichnis
-- Wenn die Anwendung per Doppelklick gestartet wird (z. B. unter Windows), kann `BASE_DIR` falsch sein
-- Lösung: Pfad immer relativ zur `main.py`-Datei ableiten (z. B. `Path(__file__).parent`), nicht relativ zu `os.getcwd()`
-
----
+- [x] Pfadauflösung robust machen und nicht von os.getcwd() abhängig
 
 ## 4. Cross-Platform-Verbesserungen
 
-| Bereich | Problem | Empfehlung |
-|---|---|---|
-| Start-Skript | `start.sh` ist Linux/macOS-only | `start.bat` / `start.ps1` für Windows ergänzen |
-| Pfad-Trennzeichen | Meistens `os.sep` verwendet, aber vereinzelt Strings mit `/` | Konsequent `pathlib.Path` verwenden |
-| Prozess-Signale | `SIGTERM` wird unter Windows nicht gesendet | Bereits beachtet; `os.kill(..., signal.CTRL_BREAK_EVENT)` als Alternative für Windows prüfen |
-| Tray-Icon | Nicht vorhanden | Optional: System-Tray-Icon damit der laufende Index-Job sichtbar bleibt, auch wenn das Fenster minimiert ist – funktioniert unter Qt auf allen drei Plattformen |
-| Datei extern öffnen | `os.startfile` (Windows), `xdg-open` (Linux), `open` (macOS) | Bereits unterschieden im Code; sicherstellen, dass Fehler (Programm nicht gefunden) dem Nutzer gemeldet werden |
-| Schriftarten | System-Schriftarten variieren | Mindestgröße und -lesbarkeit auf allen Plattformen mit Qt-Standardfonts testen |
-| HiDPI / Retina | `QApplication.setHighDpiScaleFactorRoundingPolicy` | Explizit setzen, um verschwommene Icons auf Retina-Displays (macOS) und HiDPI-Monitoren (Windows) zu vermeiden |
+- [x] Start-Skript: start.bat / start.ps1 für Windows ergänzen
+- [x] Tray-Icon: optionales System-Tray-Icon für Status bei minimierter App
+- [x] Datei extern öffnen: Fehlerfälle sichtbar dem Nutzer melden
+- [x] HiDPI / Retina: QApplication.setHighDpiScaleFactorRoundingPolicy explizit setzen
+- [ ] Pfad-Trennzeichen: verbliebene String-Pfade konsequent auf pathlib.Path umstellen
+- [ ] Prozess-Signale: optional os.kill(..., signal.CTRL_BREAK_EVENT) unter Windows prüfen
+- [ ] Schriftarten: Mindestgröße und Lesbarkeit auf Windows/macOS/Linux gezielt testen
 
----
+## 5. Tests und Qualitätssicherung
 
-## 5. Tests & Qualitätssicherung
+### Integrationstests / Smoke-Tests
+- [x] MainWindow Smoke-Test
+- [x] CustomerRecognitionReviewDialog Smoke-Test
+- [x] SearchWorker Test
+- [x] SettingsPopup Smoke-Test
+- [ ] IndexJobController dedizierten GUI-nahen Testfall für Controller-Lebenszyklus weiter ausbauen
 
-### Fehlende Integrationstests
-- `MainWindow` komplett ohne Tests
-- `CustomerEditorDialog` und `CustomerRecognitionReviewDialog` ohne Tests
-- `SearchWorker`, `IndexJobController`, `SettingsPopup` ohne Tests
-- Ziel: Mindestens „Smoke Tests", die Widgets instanziieren und grundlegende Abläufe durchlaufen (mit `QT_QPA_PLATFORM=offscreen`)
+### Kontrollfluss SearchWorker.run()
+- [x] Kontrollfluss mit klarer elif-Struktur ohne schwer lesbares Fall-Through
 
-### Kontrollfluss in `SearchWorker.run()` klären
-- Die `if self.category == ...`-Kette fällt durch ohne `return`; das ist korrekt, aber schwer lesbar
-- Umstrukturieren mit `elif` oder Dispatch-Dictionary, um versehentliches Fall-Through zu verhindern
-
-### CI-Pipeline fehlt
-- Keine GitHub Actions / CI-Konfiguration vorhanden
-- Empfehlung: Einfache Pipeline mit `python -m unittest discover -s tests`, läuft auf Ubuntu + Windows + macOS
-- Zusätzlich `flake8` oder `ruff` für Lint-Prüfungen
-
----
+### CI-Pipeline
+- [x] GitHub Actions Pipeline vorhanden
+- [x] Tests laufen auf Ubuntu + Windows + macOS
+- [x] Lint-Prüfung mit ruff ergänzt
 
 ## 6. UX-Verbesserungen
 
-### Statusmeldungen & Feedback
-- Beim ersten Indexlauf gibt es keinen erklärenden Hinweis, warum die Suche noch keine Ergebnisse liefert
-- Kurztext „Index wird erstellt, bitte warten…" in der Suche anzeigen, solange kein Index vorhanden ist
-
-### Tastatur-Navigation
-- `Alt+Left` für Zurück ist implementiert; `Alt+Right` für Vorwärts fehlt
-- Fokus-Reihenfolge (`Tab`-Reihenfolge) in Dialogen prüfen – insbesondere `CustomerEditorDialog`
-
-### Barrierefreiheit
-- `accessibleName()` / `setAccessibleDescription()` auf zentralen Widgets setzen, damit Screen-Reader und Automatisierungstools funktionieren
-
-### Sortierung der Suchergebnisse konfigurierbar
-- Aktuell nur Relevanz-Ranking; Option zum Sortieren nach Datum (zuletzt geändert) oder alphabetisch wäre nützlich
-
-### Vorschau im Suchergebnis
-- Hover-Tooltip oder ausgeklappte Vorschau-Zeile mit dem passenden Text-Snippet (bereits im FTS5-Index als `snippet()` verfügbar) würde die Ergebnisliste informativer machen
-
-### Drag & Drop
-- Dateien aus dem Dateibaum per Drag & Drop in externe Anwendungen ziehen
-- Dokumente per Drop in einen Ordner importieren (mit optionalem Kopier-Dialog)
-
----
+- [ ] Statusmeldung während erstem Indexlauf: "Index wird erstellt, bitte warten..."
+- [x] Tastatur-Navigation: Alt+Right für Vorwärts ergänzt
+- [ ] Fokus-Reihenfolge (Tab-Reihenfolge), insbesondere im CustomerEditorDialog, prüfen
+- [ ] Barrierefreiheit: accessibleName()/setAccessibleDescription() für zentrale Widgets setzen
+- [ ] Sortierung der Suchergebnisse konfigurierbar machen (Relevanz/Datum/Alphabet)
+- [ ] Vorschau im Suchergebnis mit Snippet (FTS5 snippet()) anzeigen
+- [ ] Drag & Drop: Dateien aus Dateibaum in externe Apps ziehen
+- [ ] Drag & Drop: Dokumente per Drop in Ordner importieren
 
 ## 7. Sonstige Hinweise
 
-- **Dokumentation**: `README.md` ist gut strukturiert, aber die Architektur-Beschreibung ist leicht veraltet (z. B. fehlt `panels/` in der Auflistung). Beim nächsten Release synchronisieren.
-- **Versionsnummer**: Keine `__version__` oder `pyproject.toml` vorhanden. Für Auto-Updates und Installer ist eine definierte Versionsnummer Pflicht.
-- **`requirements.txt` pinnen**: Aktuell viele `>=`-Abhängigkeiten. Eine `requirements-lock.txt` mit exakten Versionen würde reproduzierbare Builds sicherstellen.
+- [x] Dokumentation: README Architekturabschnitt aktualisieren (inkl. panels)
+- [x] Versionsnummer: __version__ und pyproject.toml ergänzen
+- [x] requirements-lock.txt mit exakten Versionen ergänzen

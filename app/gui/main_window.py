@@ -13,9 +13,12 @@ from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QMenu,
     QMainWindow,
     QMessageBox,
+    QStyle,
     QStackedWidget,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -38,7 +41,6 @@ from app.core.index_diagnostics import IndexDiagnosticsService
 from app.core.index_manager import IndexManager
 from app.core.index_store import (
     activate_index,
-    available_backups,
     create_restore_build,
     validate_index,
 )
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
         self.settings_data_worker: SettingsDataWorker | None = None
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
+        self.tray_icon: QSystemTrayIcon | None = None
 
         self.search_generation = 0
         self.search_workers: set[SearchWorker] = set()
@@ -97,6 +100,7 @@ class MainWindow(QMainWindow):
         self.navigator = NavigationController(parent=self)
         self._reconcile_source_from_completed_job()
         self._build_ui()
+        self._init_system_tray()
         self._connect_signals()
         self._refresh_search_facets()
         self.apply_theme()
@@ -148,6 +152,8 @@ class MainWindow(QMainWindow):
 
         back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
         back_shortcut.activated.connect(self.navigator.back)
+        forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
+        forward_shortcut.activated.connect(self.navigator.forward)
 
     def _connect_signals(self):
         self.header.queryChanged.connect(self.on_search_text_changed)
@@ -170,6 +176,8 @@ class MainWindow(QMainWindow):
 
         self.status_bar.cancelRequested.connect(self.cancel_background_indexing)
         self.status_bar.detailsRequested.connect(self.open_index_diagnostics)
+        self.status_bar.textChanged.connect(self._update_system_tray)
+        self.status_bar.busyChanged.connect(lambda _busy: self._update_system_tray())
         self.navigator.routeChanged.connect(self._show_route)
 
         self.index_controller.progress.connect(self.on_indexing_progress)
@@ -209,6 +217,40 @@ class MainWindow(QMainWindow):
                 f"Ordner: {details['folder_name']} · {details['file_count']} Dateien"
             )
 
+    def _init_system_tray(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        tray_menu = QMenu(self)
+        open_action = tray_menu.addAction("PapaGUI öffnen")
+        open_action.triggered.connect(self._show_from_tray)
+        close_action = tray_menu.addAction("Beenden")
+        close_action.triggered.connect(self.close)
+
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self._update_system_tray()
+        self.tray_icon.show()
+
+    def _update_system_tray(self):
+        if self.tray_icon is None:
+            return
+        status_text = self.status_bar.status_label.text().strip() or "Bereit"
+        self.tray_icon.setToolTip(f"PapaGUI\n{status_text}")
+
+    def _show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.isVisible() and not self.isMinimized():
+                self.hide()
+            else:
+                self._show_from_tray()
+
     def open_customer_page(self, customer_id: int):
         self.navigator.navigate("customer", customer_id)
 
@@ -230,7 +272,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Ordner konnte nicht geöffnet werden",
-                str(target),
+                f"Kein Standardprogramm für den Pfad gefunden oder Start fehlgeschlagen:\n{target}",
             )
 
     def manage_folder_customer(self, folder_path: str, folder_name: str):
@@ -1003,6 +1045,8 @@ class MainWindow(QMainWindow):
         self.index_manager.close()
         self.customer_repository.close()
         self.index_controller.release_owner()
+        if self.tray_icon is not None:
+            self.tray_icon.hide()
         event.accept()
 
 
