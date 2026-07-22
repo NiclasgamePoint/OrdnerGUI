@@ -124,9 +124,9 @@ class CustomerRepositoryTests(unittest.TestCase):
                 repository.get_by_folder("/data/DEKRA/2026/Muster GmbH").display_name,
                 "Muster GmbH",
             )
-            self.assertEqual(repository.search("Priorität")[0].id, updated.id)
-            self.assertEqual(repository.search("prioritat")[0].id, updated.id)
-            self.assertEqual(repository.search("Erika")[0].id, updated.id)
+            self.assertEqual(repository.search("Muster")[0].id, updated.id)
+            self.assertEqual(repository.search("Priorität"), [])
+            self.assertEqual(repository.search("Erika"), [])
             self.assertEqual(repository.search("vollkommenunbekannt"), [])
 
             repository.delete(updated.id)
@@ -199,7 +199,7 @@ class CustomerRepositoryTests(unittest.TestCase):
             )
             repository.close()
 
-    def test_customer_tag_is_returned_as_separate_customer_search_result(self):
+    def test_customer_name_outside_folder_path_does_not_create_search_result(self):
         with TemporaryDirectory() as directory:
             root = Path(directory) / "source"
             project = root / "DEKRA" / "2026" / "Ordnername"
@@ -218,14 +218,14 @@ class CustomerRepositoryTests(unittest.TestCase):
 
             captured = []
             worker = SearchWorker(
-                index_path, 1, "customers", "VIP", 100, SearchFilters(), 1, 25,
+                index_path, 1, "customers", "Abweichender", 100, SearchFilters(), 1, 25,
                 customer_path,
             )
             worker.completed.connect(lambda *args: captured.append(args))
             worker.run()
             page = captured[0][2]
-            self.assertEqual(page.total, 1)
-            self.assertEqual(page.items[0].display_name, "Abweichender Name")
+            self.assertEqual(page.total, 0)
+            self.assertEqual(page.items, [])
 
 
 if __name__ == "__main__":

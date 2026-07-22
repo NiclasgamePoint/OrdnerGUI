@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.core.config import IndexOptions
 from app.core.index_diagnostics import IndexDiagnosticsService
+from app.core import fuzzy_search
 from app.core.index_manager import IndexManager
 from app.core.search_models import SearchFilters
 
@@ -121,6 +122,27 @@ class IndexingTests(unittest.TestCase):
         self.assertEqual(page.items[0]["folder_path"], str(target.resolve()))
         self.assertEqual(filtered.total, 1)
         self.assertEqual(filtered.items[0]["folder_path"], str(target.resolve()))
+        manager.close()
+
+    def test_fuzzy_folder_search_scores_at_most_five_candidates(self):
+        for number in range(10):
+            candidate = self.root / "DEKRA" / "2025" / f"Kandidat {number}, Berlin"
+            candidate.mkdir(parents=True)
+            (candidate / "bericht.txt").write_text("Bericht", encoding="utf-8")
+
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        with patch.object(
+            fuzzy_search,
+            "fuzzy_record_score",
+            wraps=fuzzy_search.fuzzy_record_score,
+        ) as scorer:
+            manager.search_folders_page(
+                "Kanddat Berln", SearchFilters(), page=1, page_size=10
+            )
+
+        self.assertLessEqual(scorer.call_count, 5)
         manager.close()
 
     def test_empty_source_directory_indexes_without_errors(self):
