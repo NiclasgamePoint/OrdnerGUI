@@ -4,7 +4,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor, QMouseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QVBoxLayout
 
 from app.gui.widgets.buttons import AppButton
 
@@ -58,6 +58,14 @@ class ResultRow(QFrame):
         self.open_button.clicked.connect(self._open_path)
         layout.addWidget(self.open_button)
 
+    @property
+    def payload(self) -> Any:
+        return self._payload
+
+    @property
+    def path(self) -> str:
+        return self._path
+
     def _open_path(self):
         if self._path:
             self.openPathRequested.emit(self._path)
@@ -68,3 +76,21 @@ class ResultRow(QFrame):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        open_action = menu.addAction("Oeffnen/Anzeigen")
+        open_path_action = menu.addAction("Ordner im System oeffnen")
+        copy_action = menu.addAction("Pfad kopieren")
+        open_path_action.setEnabled(bool(self._path))
+        copy_action.setEnabled(bool(self._path))
+
+        selected = menu.exec(event.globalPos())
+        if selected == open_action:
+            self.activated.emit(self._payload)
+            return
+        if selected == open_path_action and self._path:
+            self.openPathRequested.emit(self._path)
+            return
+        if selected == copy_action and self._path:
+            QApplication.clipboard().setText(self._path)

@@ -1176,14 +1176,34 @@ class CustomerRepository:
             return {}
 
         merged_ids: dict[int, int] = {}
+
+        def split_into_merge_clusters(group: list[Customer]) -> list[list[Customer]]:
+            remaining = list(group)
+            clusters: list[list[Customer]] = []
+            while remaining:
+                cluster = [remaining.pop(0)]
+                changed = True
+                while changed:
+                    changed = False
+                    for customer in list(remaining):
+                        if any(self._is_auto_merge_match(customer, item) for item in cluster):
+                            cluster.append(customer)
+                            remaining.remove(customer)
+                            changed = True
+                clusters.append(cluster)
+            return clusters
+
         with self.connection:
             for group in duplicate_groups:
-                survivor = self._merge_customer_group(group)
-                if survivor.id is None:
-                    continue
-                for customer in group:
-                    if customer.id is not None and customer.id != survivor.id:
-                        merged_ids[int(customer.id)] = int(survivor.id)
+                for cluster in split_into_merge_clusters(group):
+                    if len(cluster) < 2:
+                        continue
+                    survivor = self._merge_customer_group(cluster)
+                    if survivor.id is None:
+                        continue
+                    for customer in cluster:
+                        if customer.id is not None and customer.id != survivor.id:
+                            merged_ids[int(customer.id)] = int(survivor.id)
         return merged_ids
 
     def _merge_customer_group(
@@ -1329,6 +1349,39 @@ class CustomerRepository:
         return populated_fields + related_data, -(customer.id or 0)
 
     @classmethod
+    def _is_auto_merge_match(cls, left: Customer, right: Customer) -> bool:
+        """Return True only for high-confidence automatic merge candidates."""
+        if normalize_identity(left.display_name) != normalize_identity(right.display_name):
+            return False
+
+        left_city = normalize_identity(left.city)
+        right_city = normalize_identity(right.city)
+        if left_city and right_city and left_city != right_city:
+            return False
+
+        signals = 0
+        left_company = normalize_identity(left.company)
+        right_company = normalize_identity(right.company)
+        if left_company and left_company == right_company:
+            signals += 1
+        if left.email.strip() and left.email.strip().casefold() == right.email.strip().casefold():
+            signals += 1
+        left_phone = cls._normalize_phone(left.phone)
+        right_phone = cls._normalize_phone(right.phone)
+        if left_phone and left_phone == right_phone:
+            signals += 1
+        left_address = normalize_identity(f"{left.street} {left.postal_code}")
+        right_address = normalize_identity(f"{right.street} {right.postal_code}")
+        if left_address and left_address == right_address:
+            signals += 1
+
+        if left_city and right_city:
+            return True
+        if left_city or right_city:
+            return signals >= 1
+        return signals >= 2
+
+    @classmethod
     def _combine_customer_data(
         cls,
         primary: Customer,
@@ -1411,8 +1464,17 @@ class CustomerRepository:
     def save(self, customer: Customer, commit: bool = True) -> Customer:
         same_name = self.find_by_name(customer.display_name)
         if customer.id is None and same_name:
-            customer = self._combine_customer_data(same_name[0], [customer])
-            customer.id = same_name[0].id
+            merge_target = next(
+                (
+                    existing
+                    for existing in same_name
+                    if self._is_auto_merge_match(existing, customer)
+                ),
+                None,
+            )
+            if merge_target is not None:
+                customer = self._combine_customer_data(merge_target, [customer])
+                customer.id = merge_target.id
 
         folder_paths = customer.folder_paths or ([customer.folder_path] if customer.folder_path else [])
         normalized_paths = []
@@ -1482,10 +1544,20 @@ class CustomerRepository:
         self._replace_notes(customer_id, customer.notes)
         self._replace_tags(customer_id, customer.tags)
         same_name = self.find_by_name(customer.display_name)
-        if len(same_name) > 1:
-            customer_id = int(
-                self._merge_customer_group(same_name, preferred_id=customer_id).id
-            )
+        current = self.get(customer_id)
+        if len(same_name) > 1 and current is not None:
+            merge_candidates = [
+                existing
+                for existing in same_name
+                if self._is_auto_merge_match(existing, current)
+            ]
+            if len(merge_candidates) > 1:
+                customer_id = int(
+                    self._merge_customer_group(
+                        merge_candidates,
+                        preferred_id=customer_id,
+                    ).id
+                )
         if commit:
             self.connection.commit()
         return self.get(customer_id)

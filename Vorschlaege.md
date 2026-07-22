@@ -12,13 +12,11 @@
   - Maus Hoover konsequent machen 
 - Installer für das Deplyment
 - Auto Updates wenn neue Versionen raus kommen? 
-- Kundenerkennung vor 2016 Ausschließen
+- Kundenerkennung vor 2016 auch bei den Prüffällen ausschöießenAusschließen
 - unterordner unter Dienstleistung/Jahr/Name, Ort/`Unterordner` von der globalen suche Standartgemäß ausschließen aber via Filteroption hinzufügen.
-- Problem beim Kundenerstellen bezüglich Kunden Blendinger auswindig machen & lösen 
 - Auf der Startseite beim neu öffnen der App unten gesammtanzahl der Kunden & Ordner anzeigen
 - in den Einstellungen Statistiken Tab mit Statistiken ergänzen 
-- Programm Security Konzept erstellen & Anwenden
-- `qt.core.qobject.connect: QObject::connect(QPdfDocument, QPdfSearchModel): invalid nullptr parameter`-Fehler aus der Konsole auswindig machen und beheben 
+
 
 ## Patrick
 

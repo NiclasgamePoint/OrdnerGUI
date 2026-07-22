@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from datetime import datetime
 
 from PySide6.QtCore import QFileInfo, QSettings, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileIconProvider,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QSplitter,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -18,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import SETTINGS_APP, SETTINGS_ORG
+from app.gui.panels import MailPanel
 from app.gui.viewer import FileViewer
 from app.gui.widgets.buttons import AppButton
 
@@ -112,8 +117,15 @@ class FolderPage(QWidget):
         self.file_list.setHeaderLabels(["Ordner und Dateien", "Details"])
         self.file_list.setColumnWidth(0, 330)
         self.file_list.setAlternatingRowColors(True)
+        self.file_list.setMouseTracking(True)
+        self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(self._open_tree_context_menu)
         self.file_list.itemClicked.connect(self._open_selected_file)
-        layout.addWidget(self.file_list, 1)
+        self.file_tabs = QTabWidget()
+        self.file_tabs.addTab(self.file_list, "Ordner")
+        self.mail_panel = MailPanel()
+        self.file_tabs.addTab(self.mail_panel, "Mails")
+        layout.addWidget(self.file_tabs, 1)
         return card
 
     def _build_viewer_card(self) -> QWidget:
@@ -176,7 +188,7 @@ class FolderPage(QWidget):
                 self.file_list.addTopLevelItem(item)
             else:
                 parent.addChild(item)
-            folder_items[path] = item
+            folder_items[self._path_key(path)] = item
             for child in node.get("children") or []:
                 append_folder(child, item)
 
@@ -209,7 +221,7 @@ class FolderPage(QWidget):
             item.setToolTip(0, path)
             if path:
                 item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
-            parent = folder_items.get(str(Path(path).parent))
+            parent = folder_items.get(self._path_key(str(Path(path).parent)))
             if parent is None:
                 self.file_list.addTopLevelItem(item)
             else:
@@ -251,6 +263,33 @@ class FolderPage(QWidget):
         if path and item.data(0, Qt.UserRole + 1) == "file":
             self.file_viewer.open_file(Path(path))
 
+    def _open_tree_context_menu(self, position):
+        item = self.file_list.itemAt(position)
+        if item is None:
+            return
+        item_type = str(item.data(0, Qt.UserRole + 1) or "")
+        path = str(item.data(0, Qt.UserRole) or "")
+
+        menu = QMenu(self.file_list)
+        open_action = menu.addAction("Oeffnen/Anzeigen")
+        open_folder_action = menu.addAction("Ordner im System oeffnen")
+        copy_action = menu.addAction("Pfad kopieren")
+        open_folder_action.setEnabled(bool(path))
+        copy_action.setEnabled(bool(path))
+
+        selected = menu.exec(self.file_list.viewport().mapToGlobal(position))
+        if selected == open_action:
+            if item_type == "file":
+                self._open_selected_file(item)
+            elif path:
+                self.openPathRequested.emit(path)
+            return
+        if selected == open_folder_action and path:
+            self.openPathRequested.emit(path)
+            return
+        if selected == copy_action and path:
+            QApplication.clipboard().setText(path)
+
     def _open_folder(self):
         if self.folder_path:
             self.openPathRequested.emit(self.folder_path)
@@ -265,6 +304,12 @@ class FolderPage(QWidget):
     def _save_splitter_sizes(self):
         if self.splitter.orientation() == Qt.Horizontal:
             self._settings.setValue("ui/folder_splitter_sizes", self.splitter.sizes())
+
+    @staticmethod
+    def _path_key(path: str) -> str:
+        if not path:
+            return ""
+        return os.path.normcase(os.path.normpath(path))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

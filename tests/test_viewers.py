@@ -6,6 +6,7 @@ import unittest
 import openpyxl
 from docx import Document
 from PyPDF2 import PdfWriter
+from PySide6.QtCore import QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication
 from unittest.mock import patch
 
@@ -55,6 +56,58 @@ class ViewerTests(unittest.TestCase):
             viewer.text_viewer.find_next()
             self.assertTrue(viewer.text_viewer.editor.textCursor().hasSelection())
             viewer.close()
+
+    def test_spreadsheet_viewer_displays_explicit_truncation_hint(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            excel_path = root / "big.xlsx"
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "Daten"
+            for row in range(1, 505):
+                for column in range(1, 52):
+                    sheet.cell(row=row, column=column, value=f"{row}-{column}")
+            workbook.save(excel_path)
+
+            viewer = FileViewer()
+            viewer.open_file(excel_path)
+
+            self.assertIn("angezeigt bis 500 × 50", viewer.spreadsheet_viewer.info_label.text())
+            self.assertIn("Hinweis: Anzeige ist auf 500 Zeilen und 50 Spalten begrenzt", viewer.spreadsheet_viewer.info_label.text())
+            viewer.close()
+
+    def test_pdf_close_document_does_not_emit_nullptr_warning(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf_path = root / "warncheck.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=300, height=400)
+            with pdf_path.open("wb") as handle:
+                writer.write(handle)
+
+            messages: list[str] = []
+
+            def collector(message_type, _context, message):
+                if message_type in {QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg}:
+                    messages.append(str(message))
+
+            previous_handler = qInstallMessageHandler(collector)
+            try:
+                viewer = FileViewer()
+                viewer.open_file(pdf_path)
+                baseline = sum(
+                    "invalid nullptr parameter" in message for message in messages
+                )
+                viewer.pdf_viewer.close_document()
+                self.app.processEvents()
+                viewer.close()
+            finally:
+                qInstallMessageHandler(previous_handler)
+
+            after_close = sum(
+                "invalid nullptr parameter" in message for message in messages
+            )
+            self.assertEqual(after_close, baseline)
 
     def test_docx_preview_converts_to_pdf_asynchronously(self):
         with TemporaryDirectory() as directory:

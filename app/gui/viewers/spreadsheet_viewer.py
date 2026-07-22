@@ -73,10 +73,15 @@ class SpreadsheetViewerWidget(QWidget):
                 sheet = workbook[sheet_name]
                 rows = min(self.MAX_ROWS, sheet.max_row or 0)
                 columns = min(self.MAX_COLUMNS, sheet.max_column or 0)
-                values = [
-                    [sheet.cell(row, column).value for column in range(1, columns + 1)]
-                    for row in range(1, rows + 1)
-                ]
+                values: list[list[object]] = []
+                for row in sheet.iter_rows(
+                    min_row=1,
+                    max_row=rows,
+                    min_col=1,
+                    max_col=columns,
+                    values_only=True,
+                ):
+                    values.append(list(row))
                 total_rows, total_columns = sheet.max_row or 0, sheet.max_column or 0
             finally:
                 workbook.close()
@@ -102,6 +107,11 @@ class SpreadsheetViewerWidget(QWidget):
         self.info_label.setText(
             f"{total_rows} Zeilen · {total_columns} Spalten · angezeigt bis {rows} × {columns}"
         )
+        if total_rows > self.MAX_ROWS or total_columns > self.MAX_COLUMNS:
+            self.info_label.setText(
+                self.info_label.text()
+                + " · Hinweis: Anzeige ist auf 500 Zeilen und 50 Spalten begrenzt."
+            )
 
     def find_next(self):
         query = self.search_input.text().strip().casefold()

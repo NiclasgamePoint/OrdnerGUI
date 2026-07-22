@@ -3,13 +3,13 @@
 ## 1. Offene Punkte aus den Vorschlägen
 
 - [ ] E-Mails aus einem konfigurierten IMAP-Postfach abrufen und Anhänge automatisch in die Ordnerstruktur einordnen
-- [ ] Mail-Ansicht ergänzen: In der Ordneransicht Tabs für "Ordner" und "Mails" bereitstellen
+- [x] Mail-Ansicht ergänzen: In der Ordneransicht Tabs für "Ordner" und "Mails" bereitstellen
 - [ ] IMAP-Verbindung (Server, Port, TLS, Anmeldedaten) im Einstellungs-Dialog konfigurierbar machen
 - [ ] E-Mails und Anhänge wie reguläre Dokumente indizieren und durchsuchbar machen
 - [ ] Anmeldedaten nicht im Klartext in QSettings ablegen, stattdessen keyring nutzen
 - [ ] Eingehende E-Mails via Kundenerkennung automatisch zuordnen (Vorbereitung, nicht final)
-- [ ] Kontextmenüs: Rechtsklick auf Ergebnis-Zeilen (ResultRow), Datei-Einträge im FolderPage-Baum und Kunden-Einträge mit passenden Aktionen
-- [ ] Maus-Hover konsistent: Hover-Highlighting auch für Datei-Einträge in FolderPage und Kontaktzeilen in CustomerPage
+- [x] Kontextmenüs: Rechtsklick auf Ergebnis-Zeilen (ResultRow), Datei-Einträge im FolderPage-Baum und Kunden-Einträge mit passenden Aktionen
+- [x] Maus-Hover konsistent: Hover-Highlighting auch für Datei-Einträge in FolderPage und Kontaktzeilen in CustomerPage
 - [ ] Installer/Deployment: Windows Installer (Inno Setup oder NSIS) mit eingebetteter Venv und Abhängigkeiten
 - [ ] Installer/Deployment: macOS .app-Bundle (PyInstaller oder py2app), optional als .dmg
 - [ ] Installer/Deployment: Linux AppImage oder Flatpak
@@ -23,17 +23,17 @@
 - [x] macOS: start.command oder Shell-Skript mit .venv/bin/activate
 
 ### Ripgrep-Unterstützung
-- [ ] RIPGREP_AVAILABLE in config.py ist aktuell als Platzhalter zu prüfen (entweder vollständig nutzen oder entfernen)
+- [x] RIPGREP_AVAILABLE in config.py ist aktuell als Platzhalter zu prüfen (entweder vollständig nutzen oder entfernen)
 
 ### Stille Trunkierung im Tabellenviewer
-- [ ] Hinweistext einblenden: Anzeige ist auf 500 Zeilen/50 Spalten begrenzt
+- [x] Hinweistext einblenden: Anzeige ist auf 500 Zeilen/50 Spalten begrenzt
 
 ### Onboarding / erster Start
 - [ ] Einrichtungs-Dialog beim ersten Start, wenn kein gültiger Datenpfad konfiguriert ist
-- [ ] NAS-Server als primäre Datenquelle sauber unterstützten (Pfadwahl, Erreichbarkeit, Reconnect)
+- [ ] NAS-Server als primäre Datenquelle sauber unterstützen (Pfadwahl, Erreichbarkeit, Reconnect)
 
 ### Leerer app/gui/panels/-Ordner
-- [ ] Ordner inhaltlich nutzen oder bereinigen
+- [x] Ordner inhaltlich nutzen oder bereinigen
 
 ## 3. Technische Verbesserungen und Code-Qualität
 
@@ -41,7 +41,7 @@
 - [ ] StreamHandler für Konsole im Entwicklungs-/Debug-Betrieb ergänzen (z. B. über PAPAGUI_DEBUG=1)
 
 ### Security
-- [ ] Security-Konzept dokumentieren und Mindestmaßnahmen ableiten (Secrets, Rechte, Dateizugriff, Update-Vertrauen)
+- [x] Security-Konzept dokumentieren und Mindestmaßnahmen ableiten (Secrets, Rechte, Dateizugriff, Update-Vertrauen)
 
 ### SETTINGS_ORG / SETTINGS_APP
 - [x] Doppelte Definition entfernen, theme.py importiert Konstanten aus app.core.config
@@ -59,7 +59,7 @@
 - [x] Pfadauflösung robust machen und nicht von os.getcwd() abhängig
 
 ### Kundenerstellung
-- [ ] Fehlerfall bei Kundenerstellung/-zuordnung ("Kunden-Blending") reproduzieren, Ursache dokumentieren und in Task unterteilen
+- [x] Fehlerfall bei Kundenerstellung/-zuordnung ("Kunden-Blending") reproduzieren, Ursache dokumentieren und in Task unterteilen
 
 ## 4. Cross-Platform-Verbesserungen
 
@@ -68,9 +68,10 @@
 - [x] Datei extern öffnen: Fehlerfälle sichtbar dem Nutzer melden
 - [x] HiDPI / Retina: QApplication.setHighDpiScaleFactorRoundingPolicy explizit setzen
 - [ ] Pfad-Trennzeichen: verbliebene String-Pfade konsequent auf pathlib.Path umstellen
-- [ ] Prozess-Signale: optional os.kill(..., signal.CTRL_BREAK_EVENT) unter Windows prüfen
+- [x] Prozess-Signale: optional os.kill(..., signal.CTRL_BREAK_EVENT) unter Windows prüfen
 - [ ] Schriftarten: Mindestgröße und Lesbarkeit auf Windows/macOS/Linux gezielt testen
-- [ ] Kundenerkennung vor 2016 explizit per Regel und Tests absichern (Verifikationspunkt)
+- [x] Kundenerkennung vor 2016 explizit per Regel und Tests absichern (Verifikationspunkt)
+- [ ] Kundenerkennung vor 2016 auch in Prüffällen vollständig ausschließen (keine Pending-Cases für < 2016)
 
 ## 5. Tests und Qualitätssicherung
 
@@ -79,8 +80,8 @@
 - [x] CustomerRecognitionReviewDialog Smoke-Test
 - [x] SearchWorker Test
 - [x] SettingsPopup Smoke-Test
-- [ ] IndexJobController dedizierten GUI-nahen Testfall für Controller-Lebenszyklus weiter ausbauen
-- [ ] Regressionstest für QPdf-Connect-Warnung (invalid nullptr parameter) erstellen und Behebung absichern
+- [x] IndexJobController dedizierten GUI-nahen Testfall für Controller-Lebenszyklus weiter ausbauen
+- [x] Regressionstest für QPdf-Connect-Warnung (invalid nullptr parameter) erstellen und Behebung absichern
 
 ### Kontrollfluss SearchWorker.run()
 - [x] Kontrollfluss mit klarer elif-Struktur ohne schwer lesbares Fall-Through

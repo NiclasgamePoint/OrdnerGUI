@@ -242,6 +242,10 @@ class UiNavigationTests(unittest.TestCase):
                     },
                 ],
             })
+            self.assertEqual(page.file_tabs.count(), 2)
+            self.assertEqual(page.file_tabs.tabText(0), "Ordner")
+            self.assertEqual(page.file_tabs.tabText(1), "Mails")
+            self.assertTrue(page.file_list.hasMouseTracking())
             self.assertEqual(page.file_list.count(), 2)
             page.file_filter.setText("zwei")
             self.assertEqual(page.file_list.count(), 1)
@@ -324,6 +328,37 @@ class UiNavigationTests(unittest.TestCase):
         self.assertEqual(popup.contrast_spin.value(), 100)
         self.assertEqual(popup.font_size_spin.value(), 13)
         popup.close()
+
+    def test_customer_page_enables_hover_tracking_for_contact_rows(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Muster", company="Muster"))
+            page = CustomerPage(repository)
+            page.set_customer(customer)
+
+            self.assertTrue(page.contacts_table.hasMouseTracking())
+
+            page.close()
+            repository.close()
+
+    def test_customer_editor_excludes_pre_2016_folder_from_selection(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy_folder = root / "Blower Door" / "2015" / "Legacy Kunde"
+            legacy_folder.mkdir(parents=True)
+            repository = CustomerRepository(root / "customers.db")
+
+            dialog = CustomerEditorDialog(
+                repository,
+                folder_path=str(legacy_folder),
+                suggested_name="Legacy Kunde",
+            )
+
+            self.assertEqual(dialog.selected_folders_table.rowCount(), 0)
+            self.assertEqual(dialog._selected_folder_values(), [])
+
+            dialog.close()
+            repository.close()
 
 
 if __name__ == "__main__":

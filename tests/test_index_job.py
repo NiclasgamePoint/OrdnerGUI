@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import os
 import time
 import unittest
 from unittest.mock import patch
@@ -114,6 +115,50 @@ class DetachedIndexJobTests(unittest.TestCase):
             self.assertTrue(active.exists())
             self.assertEqual(state.get("status"), "completed")
             self.assertIn("Kundentestfehler", state.get("customer_sync_error", ""))
+
+    def test_controller_can_adopt_and_finish_existing_job_state(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir(parents=True)
+            active = root / "index.db"
+            state_dir = root / "state"
+            controller = IndexJobController(active, state_dir)
+
+            finished_states = []
+            controller.finished.connect(lambda state: finished_states.append(state))
+
+            state_dir.mkdir(parents=True, exist_ok=True)
+            (state_dir / "index_job.json").write_text(
+                """
+{
+  "job_id": "adopt-job",
+  "pid": %d,
+  "status": "running",
+  "source": "%s",
+  "active_path": "%s"
+}
+                """ % (os.getpid(), source, active),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(controller.adopt_running_job())
+
+            (state_dir / "index_job.json").write_text(
+                """
+{
+  "job_id": "adopt-job",
+  "pid": %d,
+  "status": "completed",
+  "source": "%s",
+  "active_path": "%s"
+}
+                """ % (os.getpid(), source, active),
+                encoding="utf-8",
+            )
+            controller.poll()
+            self.assertEqual(len(finished_states), 1)
+            self.assertEqual(finished_states[0].get("status"), "completed")
 
 
 if __name__ == "__main__":
