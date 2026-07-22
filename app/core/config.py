@@ -121,6 +121,12 @@ def get_configured_index_source() -> Path:
     return Path(stored_path).expanduser()
 
 
+def has_configured_index_source() -> bool:
+    """Return whether the user explicitly selected a data source before."""
+    settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+    return bool(str(settings.value(INDEX_SOURCE_KEY, "")).strip())
+
+
 def save_index_source(path: Path):
     """Persist the selected data source in a platform-native settings store."""
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)

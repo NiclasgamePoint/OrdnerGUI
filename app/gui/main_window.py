@@ -13,6 +13,7 @@ from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMenu,
     QMainWindow,
     QMessageBox,
@@ -30,6 +31,7 @@ from app.core.config import (
     WINDOW_TITLE,
     WINDOW_WIDTH,
     get_configured_index_source,
+    has_configured_index_source,
     load_customer_recognition_options,
     load_index_options,
     save_customer_recognition_options,
@@ -45,7 +47,11 @@ from app.core.index_store import (
     validate_index,
 )
 from app.core.search_models import RecentCustomerHistory, SearchFilters, SearchHistory
-from app.gui.dialogs import CustomerEditorDialog, CustomerRecognitionReviewDialog
+from app.gui.dialogs import (
+    CustomerEditorDialog,
+    CustomerRecognitionReviewDialog,
+    OnboardingDialog,
+)
 from app.gui.navigation import NavigationController, NavigationEntry
 from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
@@ -83,6 +89,9 @@ class MainWindow(QMainWindow):
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
         self.tray_icon: QSystemTrayIcon | None = None
+        self.source_reconnect_timer = QTimer(self)
+        self.source_reconnect_timer.setInterval(10_000)
+        self.source_reconnect_timer.timeout.connect(self._try_reconnect_source)
 
         self.search_generation = 0
         self.search_workers: set[SearchWorker] = set()
@@ -106,6 +115,28 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         self.navigator.reset("search")
         self._show_initial_customers()
+        QTimer.singleShot(0, self._initialize_data_source)
+
+    def _initialize_data_source(self):
+        if not has_configured_index_source():
+            dialog = OnboardingDialog(parent=self)
+            if dialog.exec() != QDialog.Accepted or dialog.selected_path is None:
+                self.status_bar.set_text(
+                    "Noch keine Datenquelle eingerichtet · über Einstellungen fortfahren"
+                )
+                return
+            self.index_source = dialog.selected_path
+            save_index_source(self.index_source)
+        self.check_and_index()
+        self._start_filesystem_monitor()
+
+    def _try_reconnect_source(self):
+        if not self.index_source.exists() or not self.index_source.is_dir():
+            return
+        self.source_reconnect_timer.stop()
+        self.status_bar.set_text(
+            f"Datenquelle wieder erreichbar ✓ · prüfe {self.index_source.name} …"
+        )
         self.check_and_index()
         self._start_filesystem_monitor()
 
@@ -700,6 +731,7 @@ class MainWindow(QMainWindow):
                 "Der ausgewählte Datenordner ist ungültig.",
             )
             return
+        self.source_reconnect_timer.stop()
         if self.index_controller.is_active():
             QMessageBox.information(
                 self,
@@ -796,17 +828,20 @@ class MainWindow(QMainWindow):
             )
             self.index_controller.poll()
             return
-        if not self.index_source.exists():
+        if not self.index_source.exists() or not self.index_source.is_dir():
             self.status_bar.set_text(
-                f"Indexquelle nicht gefunden: {self.index_source}"
+                f"Datenquelle nicht erreichbar · verbinde erneut: {self.index_source}"
             )
+            self.source_reconnect_timer.start()
             QMessageBox.warning(
                 self,
-                "Indexquelle fehlt",
-                f"Der Datenordner wurde nicht gefunden:\n{self.index_source}\n\n"
-                "Bitte den Pfad in den Einstellungen auswählen.",
+                "Datenquelle nicht erreichbar",
+                f"Der Datenordner ist momentan nicht erreichbar:\n{self.index_source}\n\n"
+                "PapaGUI versucht die Verbindung automatisch wiederherzustellen. "
+                "Sie können in den Einstellungen auch eine andere Quelle auswählen.",
             )
             return
+        self.source_reconnect_timer.stop()
         full_rebuild = not self.index_manager.index_is_current(self.index_source)
         self._start_background_indexing(
             self.index_source,

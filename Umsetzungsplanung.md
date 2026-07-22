@@ -29,8 +29,8 @@
 - [x] Hinweistext einblenden: Anzeige ist auf 500 Zeilen/50 Spalten begrenzt
 
 ### Onboarding / erster Start
-- [ ] Einrichtungs-Dialog beim ersten Start, wenn kein gültiger Datenpfad konfiguriert ist
-- [ ] NAS-Server als primäre Datenquelle sauber unterstützen (Pfadwahl, Erreichbarkeit, Reconnect)
+- [x] Einrichtungs-Dialog beim ersten Start, wenn kein gültiger Datenpfad konfiguriert ist
+- [x] NAS-Server als primäre Datenquelle sauber unterstützen (Pfadwahl, Erreichbarkeit, Reconnect)
 
 ### Leerer app/gui/panels/-Ordner
 - [x] Ordner inhaltlich nutzen oder bereinigen
