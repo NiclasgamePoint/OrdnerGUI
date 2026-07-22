@@ -1,7 +1,6 @@
 ## Papa
 
 - integration vom Imap Server
-- Multiwortsuche
  
 
 ## Nici
