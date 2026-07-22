@@ -105,6 +105,9 @@ class MainWindow(QMainWindow):
         self.search_debounce.setSingleShot(True)
         self.search_debounce.setInterval(250)
         self.search_debounce.timeout.connect(self._start_live_search)
+        self.initialization_timer = QTimer(self)
+        self.initialization_timer.setSingleShot(True)
+        self.initialization_timer.timeout.connect(self._initialize_data_source)
 
         self.navigator = NavigationController(parent=self)
         self._reconcile_source_from_completed_job()
@@ -115,7 +118,7 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         self.navigator.reset("search")
         self._show_initial_customers()
-        QTimer.singleShot(0, self._initialize_data_source)
+        self.initialization_timer.start(0)
 
     def _initialize_data_source(self):
         if not has_configured_index_source():
@@ -1055,6 +1058,7 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event):
+        self.initialization_timer.stop()
         self.search_debounce.stop()
         for worker in tuple(self.search_workers):
             worker.requestInterruption()

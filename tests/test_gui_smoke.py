@@ -19,10 +19,9 @@ class GuiSmokeTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_main_window_smoke_without_auto_index(self):
-        with patch.object(MainWindow, "check_and_index", lambda self: None), patch.object(
-            MainWindow, "_start_filesystem_monitor", lambda self: None
-        ):
+        with patch.object(MainWindow, "_initialize_data_source", lambda self: None):
             window = MainWindow()
+            self.app.processEvents()
             self.assertIsNotNone(window.search_page)
             self.assertIsNotNone(window.customer_page)
             self.assertIsNotNone(window.folder_page)
