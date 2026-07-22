@@ -31,6 +31,7 @@ htmlcov/
 data/index.db
 data/index_job.*
 Bauvorhaben/
+data/preview_cache
 
 # Logs
 *.log
