@@ -278,7 +278,7 @@ class CustomerRecognitionTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             database_path = Path(directory) / "customers.db"
             repository = CustomerRepository(database_path)
-            first = repository.save(Customer(
+            repository.save(Customer(
                 display_name="AB S+E",
                 company="AB S+E",
                 email="kontakt@example.de",
