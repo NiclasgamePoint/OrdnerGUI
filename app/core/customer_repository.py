@@ -682,47 +682,38 @@ class CustomerRepository:
                     continue
 
     def search(self, query: str, limit: int = 25) -> list[Customer]:
-        from app.core.fuzzy_search import SearchField, fuzzy_record_score
+        from app.core.fuzzy_search import (
+            SearchField,
+            fuzzy_record_score,
+            normalize_search_text,
+        )
 
         rows = self.connection.execute(
             """
             SELECT customers.*,
-                   GROUP_CONCAT(DISTINCT contacts.name) AS contact_names,
-                   GROUP_CONCAT(DISTINCT contacts.email) AS contact_emails,
-                   GROUP_CONCAT(DISTINCT notes.body) AS note_values,
-                   GROUP_CONCAT(DISTINCT tags.name) AS tag_values,
-                   GROUP_CONCAT(DISTINCT service_types.name) AS project_services,
                    GROUP_CONCAT(DISTINCT customer_projects.project_label) AS project_labels,
                    GROUP_CONCAT(DISTINCT customer_projects.project_city) AS project_cities,
                    GROUP_CONCAT(DISTINCT customer_projects.folder_path) AS project_paths
             FROM customers
-            LEFT JOIN contacts ON contacts.customer_id = customers.id
-            LEFT JOIN notes ON notes.customer_id = customers.id
-            LEFT JOIN customer_tags ON customer_tags.customer_id = customers.id
-            LEFT JOIN tags ON tags.id = customer_tags.tag_id
             LEFT JOIN customer_projects ON customer_projects.customer_id = customers.id
-            LEFT JOIN service_types ON service_types.id = customer_projects.service_type_id
             GROUP BY customers.id
             """,
         ).fetchall()
         ranked: list[tuple[float, str, int]] = []
         for row in rows:
+            path_text = normalize_search_text(row["project_paths"])
+            identity_values = [
+                normalize_search_text(value)
+                for value in (row["display_name"], row["city"])
+                if str(value or "").strip()
+            ]
+            if not path_text or not any(value in path_text for value in identity_values):
+                continue
             score = fuzzy_record_score(query, [
                 SearchField(row["display_name"], 1.12),
-                SearchField(row["company"], 1.08),
-                SearchField(row["contact_names"], 1.05),
-                SearchField(row["contact_emails"], 0.92),
-                SearchField(row["email"], 0.92),
-                SearchField(row["phone"], 0.86),
                 SearchField(row["city"], 1.08),
-                SearchField(row["street"], 0.92),
-                SearchField(row["postal_code"], 0.90),
-                SearchField(row["project_services"], 1.04),
-                SearchField(row["project_labels"], 1.08),
+                SearchField(row["project_labels"], 1.12),
                 SearchField(row["project_cities"], 1.08),
-                SearchField(row["project_paths"], 0.88),
-                SearchField(row["note_values"], 0.82),
-                SearchField(row["tag_values"], 0.90),
             ])
             if score is not None:
                 ranked.append((score, str(row["display_name"]).casefold(), int(row["id"])))

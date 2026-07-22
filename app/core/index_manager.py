@@ -902,24 +902,47 @@ class IndexManager:
         page: int = 1,
         page_size: int = 25,
     ) -> SearchPage:
-        from app.core.fuzzy_search import SearchField, fuzzy_record_score
+        from app.core.fuzzy_search import (
+            SearchField,
+            fuzzy_record_score,
+            search_tokens,
+        )
 
         cursor = self.conn.cursor()
+        tokens = search_tokens(query)
+        if not tokens:
+            return SearchPage([], 0, page, page_size)
+
         filter_sql, filter_params = self._metadata_filter_clause(filters, "meta")
-        rows = cursor.execute(
-            f"""
+        eligibility_sql = ""
+        eligibility_params: list[str] = []
+        if filter_sql:
+            eligibility_sql = f"""
+                AND EXISTS (
+                    SELECT 1 FROM files meta
+                    WHERE (
+                        meta.folder_path = folder.path
+                        OR meta.project_root_path = folder.project_root_path
+                    )
+                    {filter_sql}
+                )
+            """
+            eligibility_params = [*filter_params]
+        searchable = (
+            "folder.name",
+            "folder.relative_path",
+            "folder.path",
+            "project.customer_label",
+            "project.customer_name",
+            "project.city",
+            "project.service_type",
+            "project.year",
+        )
+        base_sql = f"""
             SELECT folder.path, folder.name, folder.relative_path,
                    COALESCE(NULLIF(folder.project_root_path, ''), folder.path) AS canonical_path,
                    project.customer_label, project.customer_name, project.city,
-                   project.service_type, project.year,
-                   (SELECT GROUP_CONCAT(DISTINCT child.domain_folder)
-                    FROM files child
-                    WHERE child.folder_path = folder.path
-                       OR child.path LIKE folder.path || ? || '%') AS domains,
-                   (SELECT GROUP_CONCAT(DISTINCT child.time_bucket)
-                    FROM files child
-                    WHERE child.folder_path = folder.path
-                       OR child.path LIKE folder.path || ? || '%') AS years
+                   project.service_type, project.year
             FROM folders folder
             LEFT JOIN project_roots project ON project.path =
                 COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
@@ -931,35 +954,67 @@ class IndexManager:
                        OR ancestor.path LIKE folder.path || ? || '%'
                 )
             )
-            AND EXISTS (
-                SELECT 1 FROM files meta
-                WHERE (meta.folder_path = folder.path OR meta.path LIKE folder.path || ? || '%')
-                {filter_sql}
+            {eligibility_sql}
+        """
+        base_params: list[str] = [os.sep, *eligibility_params]
+
+        # Fast path: every query word must occur as an exact substring in at
+        # least one indexed name/path field. SQLite reduces the candidate set
+        # before Python performs any scoring.
+        token_clauses = []
+        exact_params: list[str] = []
+        for token in tokens:
+            token_clauses.append(
+                "("
+                + " OR ".join(
+                    f"COALESCE({field}, '') LIKE ?" for field in searchable
+                )
+                + ")"
             )
-            """,
-            (os.sep, os.sep, os.sep, os.sep, *filter_params),
+            exact_params.extend([f"%{token}%"] * len(searchable))
+        rows = cursor.execute(
+            f"{base_sql} AND {' AND '.join(token_clauses)}",
+            (*base_params, *exact_params),
         ).fetchall()
 
         ranked_by_path: dict[str, tuple[float, str]] = {}
-        for row in rows:
-            score = fuzzy_record_score(query, [
-                SearchField(row["name"], 1.08),
-                SearchField(row["relative_path"], 0.94),
-                SearchField(row["customer_label"], 1.12),
-                SearchField(row["customer_name"], 1.12),
-                SearchField(row["city"], 1.08),
-                SearchField(row["service_type"], 1.04),
-                SearchField(row["domains"], 1.02),
-                SearchField(row["year"], 0.92),
-                SearchField(row["years"], 0.90),
-                SearchField(row["path"], 0.86),
-            ])
-            if score is None:
-                continue
-            canonical_path = str(row["canonical_path"])
-            previous = ranked_by_path.get(canonical_path)
-            if previous is None or score > previous[0]:
-                ranked_by_path[canonical_path] = (score, canonical_path.casefold())
+        if rows:
+            for row in rows:
+                canonical_path = str(row["canonical_path"])
+                ranked_by_path[canonical_path] = (1.0, canonical_path.casefold())
+        else:
+            # Typo fallback: ask SQLite for at most five plausible prefix
+            # matches. Only this bounded set receives the costlier fuzzy score.
+            prefix_clauses = []
+            fuzzy_params: list[str] = []
+            for token in tokens:
+                prefix = token[: min(3, len(token))]
+                prefix_clauses.append(
+                    "("
+                    + " OR ".join(
+                        f"COALESCE({field}, '') LIKE ?" for field in searchable
+                    )
+                    + ")"
+                )
+                fuzzy_params.extend([f"%{prefix}%"] * len(searchable))
+            candidates = cursor.execute(
+                f"{base_sql} AND ({' OR '.join(prefix_clauses)}) LIMIT 5",
+                (*base_params, *fuzzy_params),
+            ).fetchall()
+            for row in candidates:
+                score = fuzzy_record_score(query, [
+                    SearchField(row["name"], 1.08),
+                    SearchField(row["relative_path"], 0.94),
+                    SearchField(row["customer_label"], 1.12),
+                    SearchField(row["customer_name"], 1.12),
+                    SearchField(row["city"], 1.08),
+                    SearchField(row["service_type"], 1.04),
+                    SearchField(row["year"], 0.92),
+                    SearchField(row["path"], 0.86),
+                ])
+                if score is not None:
+                    canonical_path = str(row["canonical_path"])
+                    ranked_by_path[canonical_path] = (score, canonical_path.casefold())
 
         ranked = sorted(
             ((score, sort_path, path) for path, (score, sort_path) in ranked_by_path.items()),
