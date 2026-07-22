@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 from dataclasses import asdict, dataclass
 import hashlib
@@ -32,7 +33,7 @@ WINDOW_TITLE = "PapaGUI - Kundenmanagement System"
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
-RIPGREP_AVAILABLE = True
+RIPGREP_AVAILABLE = shutil.which("rg") is not None
 
 SETTINGS_ORG = "PapaGUI"
 SETTINGS_APP = "UI"

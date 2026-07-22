@@ -17,6 +17,7 @@ from app.core.config import DB_FILE
 from app.core.customer_models import Contact, Customer
 from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
+from app.core.folder_structure import MINIMUM_CUSTOMER_YEAR
 from app.core.search_models import SearchFilters
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.widgets.buttons import AppButton
@@ -72,7 +73,11 @@ class CustomerEditorDialog(CenteredPopupDialog):
         self.resize(820, 640)
 
         # Legacy saved data may have split folder names at commas.
-        self.customer.folder_paths = self._normalize_folder_values(self.customer.folder_paths)
+        self.customer.folder_paths = [
+            value
+            for value in self._normalize_folder_values(self.customer.folder_paths)
+            if self._is_supported_customer_folder(value)
+        ]
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -201,6 +206,13 @@ class CustomerEditorDialog(CenteredPopupDialog):
                 self,
                 "Ordner zuordnen",
                 "Bitte einen vorhandenen Kunden aus der Liste auswählen.",
+            )
+            return
+        if not self._is_supported_customer_folder(self.context_folder_path):
+            QMessageBox.warning(
+                self,
+                "Ordner zuordnen",
+                f"Ordner vor {MINIMUM_CUSTOMER_YEAR} werden nicht automatisch als Kundenordner berücksichtigt.",
             )
             return
 
@@ -355,8 +367,13 @@ class CustomerEditorDialog(CenteredPopupDialog):
             selected = self._normalize_folder_values(
                 self.customer.folder_paths or ([self.customer.folder_path] if self.customer.folder_path else [])
             )
+        selected = [path for path in selected if self._is_supported_customer_folder(path)]
 
-        discovered = self._discover_related_folders(self.customer.display_name)
+        discovered = [
+            path
+            for path in self._discover_related_folders(self.customer.display_name)
+            if self._is_supported_customer_folder(path)
+        ]
         discovered_set = set(discovered)
         selected_set = set(selected)
         self._suggested_folder_paths = {path for path in discovered_set if path not in selected_set}
@@ -435,9 +452,19 @@ class CustomerEditorDialog(CenteredPopupDialog):
         for row in range(self.selected_folders_table.rowCount()):
             item = self.selected_folders_table.item(row, 0)
             path = str(item.data(Qt.UserRole) or "").strip() if item else ""
-            if path:
+            if path and self._is_supported_customer_folder(path):
                 values.append(path)
         return self._normalize_folder_values(values)
+
+    def _extract_year_from_folder(self, path_value: str) -> int | None:
+        for part in Path(path_value).parts:
+            if re.fullmatch(r"(?:19|20)\d{2}", part):
+                return int(part)
+        return None
+
+    def _is_supported_customer_folder(self, path_value: str) -> bool:
+        year = self._extract_year_from_folder(path_value)
+        return year is None or year >= MINIMUM_CUSTOMER_YEAR
 
     def _sync_folder_line_edit_from_selection(self):
         paths = self._selected_folder_values()
@@ -635,6 +662,13 @@ class CustomerEditorDialog(CenteredPopupDialog):
             value.strip() for value in self.service_types.text().split(",") if value.strip()
         ]
         folders = self._selected_folder_values()
+        if self.context_folder_path and not folders:
+            QMessageBox.warning(
+                self,
+                "Kundendaten",
+                f"Bitte mindestens einen gueltigen Ordner ab {MINIMUM_CUSTOMER_YEAR} auswaehlen.",
+            )
+            return
         self.customer.folder_paths = folders
         if folders:
             self.customer.folder_path = folders[0]

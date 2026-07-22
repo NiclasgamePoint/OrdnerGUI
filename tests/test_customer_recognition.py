@@ -274,7 +274,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(set(customers[0].service_types), {"Blower Door", "DEKRA"})
             repository.close()
 
-    def test_existing_duplicates_are_merged_without_losing_related_data(self):
+    def test_existing_duplicates_with_different_city_are_not_merged_automatically(self):
         with TemporaryDirectory() as directory:
             database_path = Path(directory) / "customers.db"
             repository = CustomerRepository(database_path)
@@ -335,31 +335,11 @@ class CustomerRecognitionTests(unittest.TestCase):
             merged_ids = repository.merge_duplicate_customers_by_name()
             customers = repository.list_customers()
 
-            self.assertEqual(len(customers), 1)
-            merged = customers[0]
-            absorbed_id = duplicate_id if merged.id != duplicate_id else int(first.id)
-            self.assertEqual(merged_ids[absorbed_id], int(merged.id))
-            self.assertEqual(set(merged.folder_paths), {
-                str((Path(directory) / "Projekt A").resolve()), second_folder
-            })
-            self.assertEqual(set(merged.service_types), {"Blower Door", "DEKRA"})
-            self.assertEqual({item.name for item in merged.contacts}, {
-                "Erster Kontakt", "Zweiter Kontakt"
-            })
-            self.assertEqual(set(merged.notes), {"Erste Notiz", "Zweite Notiz"})
-            self.assertEqual(set(merged.tags), {"Bestand", "Import"})
-            self.assertEqual(merged.email, "kontakt@example.de")
-            self.assertEqual(merged.phone, "040 12345")
-            self.assertEqual(
-                repository.connection.execute(
-                    "SELECT COUNT(*) FROM customer_merge_log WHERE absorbed_id=?",
-                    (absorbed_id,),
-                ).fetchone()[0],
-                1,
-            )
+            self.assertEqual(len(customers), 2)
+            self.assertEqual(merged_ids, {})
             repository.close()
 
-    def test_saving_same_name_reuses_existing_customer(self):
+    def test_saving_same_name_without_matching_metadata_keeps_separate_customers(self):
         with TemporaryDirectory() as directory:
             repository = CustomerRepository(Path(directory) / "customers.db")
             first = repository.save(Customer(
@@ -369,6 +349,26 @@ class CustomerRecognitionTests(unittest.TestCase):
             ))
             repeated = repository.save(Customer(
                 display_name=" müller ",
+                folder_paths=[str(Path(directory) / "B")],
+                service_types=["Blower Door"],
+            ))
+
+            self.assertNotEqual(repeated.id, first.id)
+            self.assertEqual(len(repository.list_customers()), 2)
+            repository.close()
+
+    def test_saving_same_name_and_city_reuses_existing_customer(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            first = repository.save(Customer(
+                display_name="Müller",
+                city="Berlin",
+                folder_paths=[str(Path(directory) / "A")],
+                service_types=["DEKRA"],
+            ))
+            repeated = repository.save(Customer(
+                display_name=" müller ",
+                city="Berlin",
                 folder_paths=[str(Path(directory) / "B")],
                 service_types=["Blower Door"],
             ))

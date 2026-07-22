@@ -20,7 +20,7 @@ import openpyxl
 import xlrd
 from docx import Document
 from PyPDF2 import PdfReader
-from app.core.config import IndexOptions
+from app.core.config import IndexOptions, RIPGREP_AVAILABLE
 from app.core.folder_structure import FolderStructureClassifier
 from app.core.search_models import SearchFilters, SearchPage
 from app.services.document_converter import DocumentConverter
@@ -1378,6 +1378,8 @@ class IndexManager:
             if filters is not None and filters.active:
                 return results
 
+            if not RIPGREP_AVAILABLE:
+                return results
             rg_path = shutil.which("rg")
             if rg_path is None:
                 return results

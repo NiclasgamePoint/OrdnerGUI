@@ -101,6 +101,7 @@ class CustomerPage(QWidget):
         self.contacts_table = QTableWidget(0, 3)
         self.contacts_table.setHorizontalHeaderLabels(["Name", "E-Mail", "Telefon"])
         self.contacts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.contacts_table.setMouseTracking(True)
         self.contacts_table.horizontalHeader().setStretchLastSection(True)
         self.contacts_table.setMinimumHeight(150)
         form_layout.addWidget(self.contacts_table)

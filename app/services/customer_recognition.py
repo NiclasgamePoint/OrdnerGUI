@@ -358,21 +358,28 @@ class CustomerRecognitionService:
             stats.assigned += len(candidate.folder_paths)
             return True
 
-        exact = repository.find_by_name(candidate.display_name)
-        if len(exact) == 1 and exact[0].id is not None:
-            repository.apply_recognition_candidate(candidate, exact[0].id)
+        exact_by_identity = repository.find_by_identity(
+            candidate.display_name,
+            candidate.city,
+        )
+        if len(exact_by_identity) == 1 and exact_by_identity[0].id is not None:
+            repository.apply_recognition_candidate(candidate, exact_by_identity[0].id)
             stats.assigned += len(candidate.folder_paths)
             return True
-        if len(exact) > 1:
-            # Writable repositories consolidate these during initialization.  The
-            # fallback keeps synchronization safe if legacy data is injected while
-            # this process is already running.
-            repository.merge_duplicate_customers_by_name()
-            exact = repository.find_by_name(candidate.display_name)
-            if len(exact) == 1 and exact[0].id is not None:
-                repository.apply_recognition_candidate(candidate, exact[0].id)
-                stats.assigned += len(candidate.folder_paths)
-                return True
+
+        exact_by_name = repository.find_by_name(candidate.display_name)
+        if len(exact_by_name) > 1:
+            candidate.reason = (
+                "Mehrere Bestandskunden mit gleichem Namen wurden gefunden. "
+                "Bitte manuell pruefen."
+            )
+            candidate.suggested_customer_ids = [
+                int(customer.id)
+                for customer in exact_by_name
+                if customer.id is not None
+            ]
+            pending.append(candidate)
+            return False
 
         similar = self._similar_customers(repository, candidate)
         if similar:

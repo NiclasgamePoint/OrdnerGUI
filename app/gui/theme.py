@@ -533,6 +533,9 @@ def build_stylesheet(
     QListWidget::item:hover, QTreeWidget::item:hover {{
         background-color: {item_hover};
     }}
+    QTableWidget::item:hover {{
+        background-color: {item_hover};
+    }}
     QListWidget::item:selected, QTreeWidget::item:selected {{
         background-color: {item_selected};
         color: #ffffff;
