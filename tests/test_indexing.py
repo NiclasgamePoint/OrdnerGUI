@@ -13,6 +13,26 @@ from app.core.search_models import SearchFilters
 
 
 class IndexingTests(unittest.TestCase):
+    def test_index_exposes_document_text_with_source_boundaries(self):
+        project = self.root / "DEKRA" / "2026" / "Dokumentgrenzen, Berlin"
+        project.mkdir(parents=True)
+        (project / "Anschreiben.txt").write_text("Erster Text", encoding="utf-8")
+        (project / "Vertrag.txt").write_text("Zweiter Text", encoding="utf-8")
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        documents = manager.indexed_documents_for_folder(str(project.resolve()))
+
+        self.assertEqual(
+            {item["filename"] for item in documents},
+            {"Anschreiben.txt", "Vertrag.txt"},
+        )
+        self.assertEqual(
+            {item["content"] for item in documents},
+            {"Erster Text", "Zweiter Text"},
+        )
+        manager.close()
+
     def setUp(self):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "Bauvorhaben"

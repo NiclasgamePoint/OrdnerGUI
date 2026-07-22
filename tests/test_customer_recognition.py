@@ -56,6 +56,88 @@ class CustomerRecognitionTests(unittest.TestCase):
             )
             repository.close()
 
+    def test_contact_rescan_is_customer_scoped_and_reopens_rejected_value(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            target_folder = root / "Beratung" / "2026" / "Muster, Berlin"
+            other_folder = root / "Beratung" / "2026" / "Andere, Hamburg"
+            target_folder.mkdir(parents=True)
+            other_folder.mkdir(parents=True)
+            (target_folder / "bericht.txt").write_text(
+                "muster@example.de", encoding="utf-8"
+            )
+            (other_folder / "bericht.txt").write_text(
+                "andere@example.de", encoding="utf-8"
+            )
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+            repository = CustomerRepository(customer_path)
+            target = repository.save(Customer(display_name="Muster"))
+            other = repository.save(Customer(display_name="Andere"))
+            repository.add_folder_to_customer(
+                int(target.id), str(target_folder), "Beratung"
+            )
+            repository.add_folder_to_customer(
+                int(other.id), str(other_folder), "Beratung"
+            )
+            repository.close()
+            service = CustomerRecognitionService(
+                index_path, customer_path, CustomerRecognitionOptions(enabled=True)
+            )
+
+            first = service.rescan_customer_contacts(int(target.id))
+            repository = CustomerRepository(customer_path)
+            pending = repository.list_data_suggestions(int(target.id))
+            self.assertEqual(first.scanned_projects, 1)
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0].suggested_value, "muster@example.de")
+            self.assertEqual(repository.list_data_suggestions(int(other.id)), [])
+            repository.resolve_data_suggestion(int(pending[0].id), False)
+            repository.close()
+
+            second = service.rescan_customer_contacts(int(target.id))
+            repository = CustomerRepository(customer_path)
+            reopened = repository.list_data_suggestions(int(target.id))
+            self.assertEqual(second.pending_fields, 1)
+            self.assertEqual(len(reopened), 1)
+            self.assertEqual(reopened[0].id, pending[0].id)
+            repository.close()
+
+    def test_contact_rescan_applies_two_document_confirmation(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            folder = root / "Beratung" / "2026" / "Muster, Berlin"
+            folder.mkdir(parents=True)
+            for number in (1, 2):
+                (folder / f"bericht-{number}.txt").write_text(
+                    "bestaetigt@example.de", encoding="utf-8"
+                )
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+            repository = CustomerRepository(customer_path)
+            customer = repository.save(Customer(display_name="Muster"))
+            repository.add_folder_to_customer(
+                int(customer.id), str(folder), "Beratung"
+            )
+            repository.close()
+
+            result = CustomerRecognitionService(
+                index_path, customer_path, CustomerRecognitionOptions(enabled=True)
+            ).rescan_customer_contacts(int(customer.id))
+            repository = CustomerRepository(customer_path)
+
+            self.assertEqual(result.applied_fields, 1)
+            self.assertEqual(
+                repository.get(int(customer.id)).email,
+                "bestaetigt@example.de",
+            )
+            self.assertEqual(repository.list_data_suggestions(int(customer.id)), [])
+            repository.close()
+
     def test_blacklist_filters_all_supported_extracted_value_types(self):
         options = CustomerRecognitionOptions(
             enabled=True,
@@ -116,10 +198,11 @@ class CustomerRecognitionTests(unittest.TestCase):
                 customer_path,
                 CustomerRecognitionOptions(enabled=True),
             ).synchronize()
+            self.assertEqual(stats.pending, 0)
+            self.assertEqual(stats.assigned, 1)
             repository = CustomerRepository(customer_path)
             updated = repository.get(existing.id)
 
-            self.assertEqual(stats.assigned, 1)
             self.assertEqual(updated.company, "Manuell gepflegt")
             self.assertEqual(updated.email, "manuell@example.de")
             self.assertEqual(updated.phone, "030 111111")
@@ -238,7 +321,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             (project / "a.txt").write_text("neu@example.de", encoding="utf-8")
             self._build_index(root, index_path)
             changed = service.synchronize()
-            self.assertEqual(changed.pending, 1)
+            self.assertEqual(changed.pending, 0)
 
     def test_project_roots_with_same_name_are_automatically_combined(self):
         with TemporaryDirectory() as directory:

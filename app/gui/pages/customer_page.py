@@ -19,9 +19,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.customer_models import Customer, CustomerProject
+from app.core.config import DB_FILE, load_customer_recognition_options
 from app.core.customer_repository import CustomerRepository
-from app.gui.dialogs import CustomerEditorDialog
-from app.gui.widgets.buttons import AppButton
+from app.gui.dialogs import CustomerDataSuggestionsDialog, CustomerEditorDialog
+from app.gui.widgets.buttons import AppButton, CountBadgeButton
 from app.gui.widgets.result_row import ResultRow
 
 
@@ -33,10 +34,16 @@ class CustomerPage(QWidget):
     folderActivated = Signal(str)
     openPathRequested = Signal(str)
 
-    def __init__(self, repository: CustomerRepository, parent=None):
+    def __init__(
+        self,
+        repository: CustomerRepository,
+        parent=None,
+        index_path: Path = DB_FILE,
+    ):
         super().__init__(parent)
         self.setObjectName("CustomerPage")
         self.repository = repository
+        self.index_path = index_path
         self.customer: Customer | None = None
 
         layout = QVBoxLayout(self)
@@ -118,9 +125,16 @@ class CustomerPage(QWidget):
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
-        self.edit_button = AppButton("Kunde bearbeiten", AppButton.SECONDARY)
+        button_row = QHBoxLayout()
+        self.edit_button = AppButton("Kundendaten bearbeiten", AppButton.SECONDARY)
         self.edit_button.clicked.connect(self._edit_customer)
-        layout.addWidget(self.edit_button)
+        self.review_button = CountBadgeButton(
+            "Kontaktdaten prüfen", AppButton.SECONDARY
+        )
+        self.review_button.clicked.connect(self._review_suggestions)
+        button_row.addWidget(self.edit_button, 1)
+        button_row.addWidget(self.review_button, 1)
+        layout.addLayout(button_row)
         return card
 
     def _build_folder_card(self) -> QWidget:
@@ -189,6 +203,7 @@ class CustomerPage(QWidget):
             self.contacts_table.setItem(row, 1, QTableWidgetItem(contact.email))
             self.contacts_table.setItem(row, 2, QTableWidgetItem(contact.phone))
         self.notes.setPlainText("\n\n".join(customer.notes))
+        self._refresh_suggestion_count()
         self._set_projects(customer, folder_summaries or {})
 
     def _set_projects(self, customer: Customer, summaries: dict[str, dict]):
@@ -295,6 +310,38 @@ class CustomerPage(QWidget):
             if updated is not None:
                 self.set_customer(updated)
                 self.customerChanged.emit(updated.id)
+
+    def _review_suggestions(self):
+        if self.customer is None or self.customer.id is None:
+            return
+        dialog = CustomerDataSuggestionsDialog(
+            self.repository,
+            int(self.customer.id),
+            self.index_path,
+            load_customer_recognition_options(),
+            parent=self,
+        )
+        dialog.suggestionsChanged.connect(self.review_button.set_count)
+        dialog.customerChanged.connect(self._reload_customer)
+        dialog.exec()
+        self._reload_customer(int(self.customer.id))
+
+    def _reload_customer(self, customer_id: int):
+        updated = self.repository.get(customer_id)
+        if updated is not None:
+            self.set_customer(updated)
+            self.customerChanged.emit(customer_id)
+
+    def _refresh_suggestion_count(self):
+        count = 0
+        if self.customer is not None and self.customer.id is not None:
+            count = len(self.repository.list_data_suggestions(int(self.customer.id)))
+        self.review_button.set_count(count)
+        self.review_button.setToolTip(
+            f"{count} Kontaktdaten zu prüfen"
+            if count
+            else "Keine Kontaktdaten zu prüfen"
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -36,6 +36,8 @@ class SettingsPopup(QFrame):
     customerRecognitionOptionsChanged = Signal(object)
     reviewRecognitionRequested = Signal()
     clearCustomerDataRequested = Signal()
+    blacklistSuggestionConfirmed = Signal(int, str, str)
+    blacklistSuggestionDismissed = Signal(int)
 
     def __init__(
         self,
@@ -52,6 +54,7 @@ class SettingsPopup(QFrame):
         recognition_options: CustomerRecognitionOptions | None = None,
         recognition_summary: dict | None = None,
         pending_recognition_cases: int = 0,
+        blacklist_suggestions=None,
     ):
         super().__init__(
             parent,
@@ -74,6 +77,7 @@ class SettingsPopup(QFrame):
         self.recognition_options = recognition_options or CustomerRecognitionOptions()
         self.recognition_summary = dict(recognition_summary or {})
         self.pending_recognition_cases = int(pending_recognition_cases)
+        self.blacklist_suggestions = list(blacklist_suggestions or [])
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -437,6 +441,30 @@ class SettingsPopup(QFrame):
         self.recognition_enabled.setChecked(self.recognition_options.enabled)
         layout.addWidget(self.recognition_enabled)
 
+        patterns_label = QLabel("Priorisierte Dokumentnamen")
+        patterns_label.setObjectName("PopupCaption")
+        layout.addWidget(patterns_label)
+        self.preferred_document_patterns = QLineEdit(
+            self.recognition_options.preferred_document_patterns
+        )
+        self.preferred_document_patterns.setPlaceholderText(
+            "anschreiben, angebot, auftrag, brief, vertrag"
+        )
+        layout.addWidget(self.preferred_document_patterns)
+
+        threshold_row = QHBoxLayout()
+        threshold_label = QLabel("Blocklistenvorschlag ab Kundenordnern")
+        threshold_label.setObjectName("PopupCaption")
+        threshold_row.addWidget(threshold_label)
+        self.frequent_value_threshold = QSpinBox()
+        self.frequent_value_threshold.setRange(2, 100)
+        self.frequent_value_threshold.setValue(
+            self.recognition_options.frequent_value_threshold
+        )
+        threshold_row.addWidget(self.frequent_value_threshold)
+        threshold_row.addStretch()
+        layout.addLayout(threshold_row)
+
         note = QLabel(
             "Manuell gepflegte Daten werden nicht überschrieben. Die folgenden Werte "
             "werden nur aus automatisch erkannten Kontaktdaten entfernt."
@@ -471,6 +499,23 @@ class SettingsPopup(QFrame):
         save_row.addWidget(save_button)
         layout.addLayout(save_row)
 
+        suggestion_title = QLabel("Vorgeschlagene Blocklisteneinträge")
+        suggestion_title.setObjectName("PopupCaption")
+        layout.addWidget(suggestion_title)
+        self.blacklist_suggestion_list = QListWidget()
+        self.blacklist_suggestion_list.setMinimumHeight(100)
+        layout.addWidget(self.blacklist_suggestion_list)
+        suggestion_actions = QHBoxLayout()
+        confirm_suggestion = AppButton("Übernehmen", AppButton.SECONDARY)
+        confirm_suggestion.clicked.connect(self._confirm_blacklist_suggestion)
+        dismiss_suggestion = AppButton("Verwerfen", AppButton.SECONDARY)
+        dismiss_suggestion.clicked.connect(self._dismiss_blacklist_suggestion)
+        suggestion_actions.addWidget(confirm_suggestion)
+        suggestion_actions.addWidget(dismiss_suggestion)
+        suggestion_actions.addStretch()
+        layout.addLayout(suggestion_actions)
+        self.set_blacklist_suggestions(self.blacklist_suggestions)
+
         status_title = QLabel("Letzter Erkennungslauf")
         status_title.setObjectName("PopupCaption")
         layout.addWidget(status_title)
@@ -496,12 +541,50 @@ class SettingsPopup(QFrame):
         self.recognition_options = CustomerRecognitionOptions(
             enabled=self.recognition_enabled.isChecked(),
             minimum_year=2016,
+            preferred_document_patterns=self.preferred_document_patterns.text().strip(),
+            frequent_value_threshold=self.frequent_value_threshold.value(),
             **{
                 attribute: field.toPlainText().strip()
                 for attribute, field in self.recognition_blacklist_fields.items()
             },
         )
         self.customerRecognitionOptionsChanged.emit(self.recognition_options)
+
+    def set_blacklist_suggestions(self, suggestions):
+        self.blacklist_suggestions = list(suggestions or [])
+        if not hasattr(self, "blacklist_suggestion_list"):
+            return
+        self.blacklist_suggestion_list.clear()
+        type_labels = {
+            "email": "E-Mail", "phone": "Telefon",
+            "name": "Name", "address": "Adresse",
+        }
+        for suggestion in self.blacklist_suggestions:
+            item = QListWidgetItem(
+                f"{type_labels.get(suggestion['value_type'], suggestion['value_type'])}: "
+                f"{suggestion['value']} · {suggestion['folder_count']} Ordner"
+            )
+            item.setData(Qt.UserRole, suggestion)
+            item.setToolTip("\n".join(suggestion.get("example_sources") or []))
+            self.blacklist_suggestion_list.addItem(item)
+
+    def _selected_blacklist_suggestion(self):
+        item = self.blacklist_suggestion_list.currentItem()
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def _confirm_blacklist_suggestion(self):
+        suggestion = self._selected_blacklist_suggestion()
+        if suggestion:
+            self.blacklistSuggestionConfirmed.emit(
+                int(suggestion["id"]),
+                str(suggestion["value_type"]),
+                str(suggestion["value"]),
+            )
+
+    def _dismiss_blacklist_suggestion(self):
+        suggestion = self._selected_blacklist_suggestion()
+        if suggestion:
+            self.blacklistSuggestionDismissed.emit(int(suggestion["id"]))
 
     def set_recognition_state(self, summary: dict | None, pending: int):
         self.recognition_summary = dict(summary or {})

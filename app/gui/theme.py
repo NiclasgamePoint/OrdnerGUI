@@ -592,6 +592,18 @@ def build_stylesheet(
         border-color: {border};
     }}
 
+    QPushButton[hasBadge="true"] {{
+        padding-right: 42px;
+    }}
+
+    QLabel#ButtonCountBadge {{
+        background-color: {item_selected};
+        color: #ffffff;
+        border: none;
+        border-radius: 12px;
+        font-weight: 700;
+    }}
+
     QPushButton[buttonRole="danger"] {{
         background-color: #c84d4d;
         color: #ffffff;

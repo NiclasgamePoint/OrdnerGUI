@@ -341,6 +341,29 @@ class UiNavigationTests(unittest.TestCase):
             page.close()
             repository.close()
 
+    def test_customer_page_counts_pending_fields_in_review_button(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(display_name="Muster"))
+            repository.apply_project_suggestion(
+                int(customer.id), None, "email", "mail@example.de",
+                confidence=0.88,
+            )
+            repository.apply_project_suggestion(
+                int(customer.id), None, "phone", "+49 30 123456",
+                confidence=0.84,
+            )
+            page = CustomerPage(repository)
+            page.set_customer(customer)
+
+            self.assertEqual(page.review_button.count(), 2)
+            self.assertTrue(page.review_button.badge.isVisibleTo(page))
+            self.assertEqual(page.edit_button.text(), "Kundendaten bearbeiten")
+            self.assertEqual(page.review_button.text(), "Kontaktdaten prüfen")
+
+            page.close()
+            repository.close()
+
     def test_customer_editor_excludes_pre_2016_folder_from_selection(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

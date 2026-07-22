@@ -7,7 +7,11 @@ import re
 
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_models import Contact, Customer
-from app.core.customer_recognition_models import RecognitionCandidate, RecognitionStats
+from app.core.customer_recognition_models import (
+    ContactScanStats,
+    RecognitionCandidate,
+    RecognitionStats,
+)
 from app.core.customer_repository import CustomerRepository
 from app.core.folder_structure import normalize_identity
 from app.core.index_manager import IndexManager
@@ -87,6 +91,18 @@ class RecognitionBlacklist:
                     phone=phone,
                 ))
         suggestion.contacts = filtered_contacts
+        suggestion.evidence = [
+            item for item in suggestion.evidence
+            if not (
+                (item.field_name == "email" and self.email_blocked(item.value))
+                or (item.field_name == "phone" and self.phone_blocked(item.value))
+                or (item.field_name == "contact_name" and self.name_blocked(item.value))
+                or (
+                    item.field_name in {"street", "postal_code", "city"}
+                    and self.address_blocked(item.value)
+                )
+            )
+        ]
         return suggestion
 
 
@@ -105,6 +121,82 @@ class CustomerRecognitionService:
         self._suggestions = CustomerSuggestionService()
         self._blacklist = RecognitionBlacklist(options)
 
+    def rescan_customer_contacts(self, customer_id: int) -> ContactScanStats:
+        """Re-evaluate indexed documents for exactly one existing customer."""
+        if not self.index_path.exists():
+            raise ValueError(
+                "Der Suchindex ist noch nicht vorhanden. Bitte zuerst indexieren."
+            )
+        manager = IndexManager(self.index_path, initialize=False)
+        repository = CustomerRepository(self.customer_database_path)
+        try:
+            customer = repository.get(customer_id)
+            if customer is None:
+                raise ValueError("Der ausgewählte Kunde existiert nicht mehr.")
+            projects = repository.list_projects_for_customer(customer_id)
+            if not projects:
+                raise ValueError(
+                    "Diesem Kunden sind keine indexierten Projektordner zugeordnet."
+                )
+
+            evidence = []
+            contacts: list[Contact] = []
+            scanned_paths: list[str] = []
+            services: list[str] = []
+            years: list[int] = []
+            for project in projects:
+                documents = manager.indexed_documents_for_folder(project.folder_path)
+                if not documents:
+                    continue
+                suggestion = self._suggestions.suggest_from_documents(
+                    Path(project.folder_path),
+                    customer.display_name,
+                    documents,
+                    self.options.preferred_patterns,
+                )
+                suggestion = self._blacklist.filter_suggestion(suggestion)
+                evidence.extend(suggestion.evidence)
+                contacts.extend(suggestion.contacts)
+                scanned_paths.append(project.folder_path)
+                services.append(project.service_type)
+                if project.year is not None:
+                    years.append(project.year)
+            if not scanned_paths:
+                raise ValueError(
+                    "Für diesen Kunden wurden im aktuellen Suchindex keine "
+                    "durchsuchbaren Dokumente gefunden."
+                )
+
+            evidence = self._suggestions._mark_automatic_evidence(evidence)
+            values = {}
+            for field_name in ("email", "phone", "street", "postal_code", "city"):
+                matches = [
+                    item for item in evidence
+                    if item.field_name == field_name and item.automatic
+                ]
+                if matches:
+                    values[field_name] = max(
+                        matches, key=lambda item: item.confidence
+                    ).value
+            candidate = RecognitionCandidate(
+                recognition_key=normalize_identity(customer.display_name),
+                display_name=customer.display_name,
+                city=values.get("city", ""),
+                folder_paths=scanned_paths,
+                service_types=services,
+                years=years,
+                email=values.get("email", ""),
+                phone=values.get("phone", ""),
+                street=values.get("street", ""),
+                postal_code=values.get("postal_code", ""),
+                contacts=self._suggestions._deduplicate_contacts(contacts, evidence),
+                evidence=evidence,
+            )
+            return repository.apply_contact_scan_candidate(customer_id, candidate)
+        finally:
+            manager.close()
+            repository.close()
+
     def synchronize(self) -> RecognitionStats:
         stats = RecognitionStats()
         if not self.options.enabled:
@@ -114,6 +206,9 @@ class CustomerRecognitionService:
         repository = CustomerRepository(self.customer_database_path)
         try:
             candidates = self._load_candidates(manager)
+            repository.record_extraction_observations(
+                candidates, self.options.frequent_value_threshold
+            )
             stats.detected = sum(len(item.folder_paths) for item in candidates)
             pending: list[RecognitionCandidate] = []
             for candidate in candidates:
@@ -215,14 +310,15 @@ class CustomerRecognitionService:
     def _load_candidates(self, manager: IndexManager) -> list[RecognitionCandidate]:
         individual: list[RecognitionCandidate] = []
         for root in manager.list_project_roots():
-            indexed_text = manager.indexed_text_for_folder(str(root["path"]))
-            suggestion = self._suggestions.suggest_from_text(
+            documents = manager.indexed_documents_for_folder(str(root["path"]))
+            suggestion = self._suggestions.suggest_from_documents(
                 Path(str(root["path"])),
                 str(root["customer_name"]),
-                indexed_text,
+                documents,
+                self.options.preferred_patterns,
             )
             suggestion = self._blacklist.filter_suggestion(suggestion)
-            individual.append(RecognitionCandidate(
+            candidate = RecognitionCandidate(
                 # Recompute the key so an existing index built with the former
                 # name-and-city identity is migrated without another rebuild.
                 recognition_key=normalize_identity(str(root["customer_name"])),
@@ -237,7 +333,9 @@ class CustomerRecognitionService:
                 street=suggestion.street,
                 postal_code=suggestion.postal_code,
                 contacts=suggestion.contacts,
-            ))
+                evidence=suggestion.evidence,
+            )
+            individual.append(candidate)
 
         individual.extend(self._load_legacy_review_candidates(manager))
 
@@ -331,6 +429,11 @@ class CustomerRecognitionService:
             street=next((item.street for item in candidates if item.street), ""),
             postal_code=next((item.postal_code for item in candidates if item.postal_code), ""),
             contacts=list(contacts.values()),
+            evidence=[
+                evidence
+                for candidate in candidates
+                for evidence in candidate.evidence
+            ],
         )
 
     def _process_candidate(

@@ -6,6 +6,128 @@ from app.services.customer_suggestion import CustomerSuggestionService
 
 
 class CustomerSuggestionTests(unittest.TestCase):
+    def test_phone_validation_accepts_real_numbers_and_rejects_noise(self):
+        service = CustomerSuggestionService()
+
+        self.assertEqual(
+            service._clean_phone_candidate(
+                "+44 20 7946 0958", "Telefon: +44 20 7946 0958"
+            ),
+            "+44 20 7946 0958",
+        )
+        self.assertEqual(
+            service._clean_phone_candidate(
+                "+49 40 1234567", "Telefon: +49 40 1234567"
+            ),
+            "+49 40 1234567",
+        )
+        self.assertEqual(
+            service._clean_phone_candidate(
+                "+49 40 1234567", "Fax: +49 40 1234567"
+            ),
+            "",
+        )
+        self.assertEqual(
+            service._clean_phone_candidate("05.03.2024", "Datum 05.03.2024"),
+            "",
+        )
+
+    def test_labeled_and_salutation_names_are_linked_to_nearby_contact_data(self):
+        service = CustomerSuggestionService()
+        documents = [{
+            "path": "/tmp/Anschreiben.pdf",
+            "filename": "Anschreiben.pdf",
+            "file_type": "pdf",
+            "content": (
+                "Ansprechpartnerin: Erika Muster\n"
+                "erika.muster@example.de\n"
+                "Mobil: 0176 12345678"
+            ),
+        }]
+
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Muster, Berlin"), "Muster", documents
+        )
+
+        self.assertTrue(any(
+            contact.name == "Erika Muster"
+            and contact.email == "erika.muster@example.de"
+            and contact.phone == "0176 12345678"
+            for contact in suggestion.contacts
+        ))
+
+    def test_two_independent_documents_confirm_weak_email(self):
+        service = CustomerSuggestionService()
+        documents = [
+            {
+                "path": f"/tmp/bericht-{number}.pdf",
+                "filename": f"bericht-{number}.pdf",
+                "file_type": "pdf",
+                "content": "max.mustermann@example.de",
+            }
+            for number in (1, 2)
+        ]
+
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Mustermann, Berlin"), "Mustermann", documents
+        )
+
+        self.assertEqual(suggestion.email, "max.mustermann@example.de")
+        self.assertTrue(any(
+            item.field_name == "email" and item.automatic
+            for item in suggestion.evidence
+        ))
+
+    def test_conflicting_weak_emails_are_not_applied(self):
+        service = CustomerSuggestionService()
+        documents = [
+            {
+                "path": f"/tmp/{name}.pdf",
+                "filename": f"{name}.pdf",
+                "file_type": "pdf",
+                "content": email,
+            }
+            for name, email in (
+                ("bericht", "eins@example.de"),
+                ("protokoll", "zwei@example.de"),
+            )
+        ]
+
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Mustermann, Berlin"), "Mustermann", documents
+        )
+
+        self.assertEqual(suggestion.email, "")
+        self.assertTrue(suggestion.evidence)
+        self.assertFalse(any(
+            item.field_name == "email" and item.automatic
+            for item in suggestion.evidence
+        ))
+
+    def test_spreadsheet_and_signature_contacts_are_ignored(self):
+        service = CustomerSuggestionService()
+        documents = [
+            {
+                "path": "/tmp/kontakte.xlsx",
+                "filename": "kontakte.xlsx",
+                "file_type": "xlsx",
+                "content": "Frau Falsche Person falsch@example.de +49 40 1234567",
+            },
+            {
+                "path": "/tmp/Angebot.pdf",
+                "filename": "Angebot.pdf",
+                "file_type": "pdf",
+                "content": "Mit freundlichen Grüßen\nFrau Eigene Person\neigen@example.de",
+            },
+        ]
+
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Mustermann, Berlin"), "Mustermann", documents
+        )
+
+        self.assertEqual(suggestion.email, "")
+        self.assertEqual(suggestion.contacts, [])
+
     def test_suggests_customer_data_from_path_and_text_document(self):
         with TemporaryDirectory() as directory:
             folder = Path(directory) / "Blower Door" / "2016" / "Müller, Beispielstadt"
@@ -58,7 +180,7 @@ class CustomerSuggestionTests(unittest.TestCase):
             suggestion = service.suggest_for_folder(folder)
 
             self.assertEqual(suggestion.entity_type, "Organisation")
-            self.assertEqual(suggestion.phone, "08268 171 91193")
+            self.assertEqual(suggestion.phone, "08268 17191193")
             self.assertTrue(all("Brh" not in contact.name for contact in suggestion.contacts))
             self.assertTrue(all("0053107" not in contact.phone for contact in suggestion.contacts))
             self.assertTrue(any(

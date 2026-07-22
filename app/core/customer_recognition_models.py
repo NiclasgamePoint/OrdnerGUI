@@ -8,6 +8,19 @@ from app.core.customer_models import Contact
 
 
 @dataclass
+class ExtractionEvidence:
+    field_name: str
+    value: str
+    normalized_value: str
+    source_path: str
+    excerpt: str
+    position: int
+    rule: str
+    confidence: float
+    automatic: bool = False
+
+
+@dataclass
 class RecognitionCandidate:
     recognition_key: str
     display_name: str
@@ -23,12 +36,14 @@ class RecognitionCandidate:
     contacts: list[Contact] = field(default_factory=list)
     reason: str = ""
     suggested_customer_ids: list[int] = field(default_factory=list)
+    evidence: list[ExtractionEvidence] = field(default_factory=list)
 
     @property
     def signature(self) -> str:
         payload = self.to_dict()
         payload.pop("reason", None)
         payload.pop("suggested_customer_ids", None)
+        payload.pop("evidence", None)
         encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -48,6 +63,7 @@ class RecognitionCandidate:
             "contacts": [asdict(contact) for contact in self.contacts],
             "reason": self.reason,
             "suggested_customer_ids": list(self.suggested_customer_ids),
+            "evidence": [asdict(item) for item in self.evidence],
         }
 
     @classmethod
@@ -69,6 +85,9 @@ class RecognitionCandidate:
             suggested_customer_ids=[
                 int(value) for value in values.get("suggested_customer_ids") or []
             ],
+            evidence=[
+                ExtractionEvidence(**item) for item in values.get("evidence") or []
+            ],
         )
 
 
@@ -80,6 +99,17 @@ class RecognitionStats:
     skipped: int = 0
     pending: int = 0
     error: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class ContactScanStats:
+    scanned_projects: int = 0
+    found_fields: int = 0
+    applied_fields: int = 0
+    pending_fields: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)

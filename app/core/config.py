@@ -81,6 +81,10 @@ class CustomerRecognitionOptions:
     name_blacklist: str = ""
     address_blacklist: str = ""
     text_blacklist: str = ""
+    preferred_document_patterns: str = (
+        "anschreiben,angebot,auftrag,auftragsbestätigung,brief,vertrag"
+    )
+    frequent_value_threshold: int = 5
 
     @staticmethod
     def _lines(value: str) -> list[str]:
@@ -105,6 +109,14 @@ class CustomerRecognitionOptions:
     @property
     def text_values(self) -> list[str]:
         return self._lines(self.text_blacklist)
+
+    @property
+    def preferred_patterns(self) -> list[str]:
+        return [
+            value.strip().casefold()
+            for value in self.preferred_document_patterns.split(",")
+            if value.strip()
+        ]
 
 
 def get_default_index_source() -> Path:
@@ -187,6 +199,14 @@ def load_customer_recognition_options() -> CustomerRecognitionOptions:
         name_blacklist=str(settings.value("customer_recognition/name_blacklist", "")),
         address_blacklist=str(settings.value("customer_recognition/address_blacklist", "")),
         text_blacklist=str(settings.value("customer_recognition/text_blacklist", "")),
+        preferred_document_patterns=str(settings.value(
+            "customer_recognition/preferred_document_patterns",
+            defaults.preferred_document_patterns,
+        )),
+        frequent_value_threshold=max(2, int(settings.value(
+            "customer_recognition/frequent_value_threshold",
+            defaults.frequent_value_threshold,
+        ))),
     )
 
 
@@ -198,4 +218,12 @@ def save_customer_recognition_options(options: CustomerRecognitionOptions):
     settings.setValue("customer_recognition/name_blacklist", options.name_blacklist)
     settings.setValue("customer_recognition/address_blacklist", options.address_blacklist)
     settings.setValue("customer_recognition/text_blacklist", options.text_blacklist)
+    settings.setValue(
+        "customer_recognition/preferred_document_patterns",
+        options.preferred_document_patterns,
+    )
+    settings.setValue(
+        "customer_recognition/frequent_value_threshold",
+        options.frequent_value_threshold,
+    )
     settings.sync()
