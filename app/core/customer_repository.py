@@ -574,7 +574,9 @@ class CustomerRepository:
         if customer is None:
             raise ValueError("Der ausgewählte Kunde existiert nicht mehr.")
         stats = ContactScanStats(scanned_projects=len(candidate.folder_paths))
-        supported = {"email", "phone", "street", "postal_code", "city"}
+        supported = {
+            "contact_name", "email", "phone", "street", "postal_code", "city",
+        }
         found = {
             (item.field_name, item.normalized_value)
             for item in candidate.evidence
@@ -592,6 +594,8 @@ class CustomerRepository:
 
         with self.connection:
             for field_name, evidence in automatic_by_field.items():
+                if field_name == "contact_name":
+                    continue
                 current_value = str(getattr(customer, field_name) or "").strip()
                 if not current_value:
                     self.connection.execute(
@@ -615,43 +619,10 @@ class CustomerRepository:
                     setattr(customer, field_name, evidence.value)
                     stats.applied_fields += 1
 
-            existing_contacts = self.connection.execute(
-                "SELECT name, email, phone FROM contacts WHERE customer_id=?",
-                (customer_id,),
-            ).fetchall()
-            contact_keys = {
-                (
-                    normalize_identity(row["name"]),
-                    str(row["email"] or "").casefold(),
-                    self._normalize_phone(str(row["phone"] or "")),
-                )
-                for row in existing_contacts
-            }
             for contact in candidate.contacts:
-                key = (
-                    normalize_identity(contact.name),
-                    contact.email.casefold(),
-                    self._normalize_phone(contact.phone),
+                stats.applied_fields += self._upsert_automatic_contact(
+                    customer_id, contact, candidate
                 )
-                if not contact.name.strip() or key in contact_keys:
-                    continue
-                cursor = self.connection.execute(
-                    """
-                    INSERT INTO contacts (customer_id, name, role, email, phone)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        customer_id, contact.name.strip(), contact.role.strip(),
-                        contact.email.strip(), contact.phone.strip(),
-                    ),
-                )
-                self._record_contact_provenance(
-                    int(cursor.lastrowid), contact, candidate
-                )
-                contact_keys.add(key)
-                stats.applied_fields += sum(bool(value.strip()) for value in (
-                    contact.name, contact.email, contact.phone,
-                ))
 
         project_ids = {
             project.folder_path: project.id
@@ -667,9 +638,17 @@ class CustomerRepository:
             if suggestion_key in suggested_keys:
                 continue
             suggested_keys.add(suggestion_key)
-            current_value = str(getattr(customer, evidence.field_name) or "").strip()
-            if normalize_identity(current_value) == normalize_identity(evidence.value):
-                continue
+            if evidence.field_name == "contact_name":
+                existing_name = self.connection.execute(
+                    "SELECT 1 FROM contacts WHERE customer_id=? AND name=? COLLATE NOCASE",
+                    (customer_id, evidence.value),
+                ).fetchone()
+                if existing_name is not None:
+                    continue
+            else:
+                current_value = str(getattr(customer, evidence.field_name) or "").strip()
+                if normalize_identity(current_value) == normalize_identity(evidence.value):
+                    continue
             project_id = next((
                 project_id for folder, project_id in project_ids.items()
                 if evidence.source_path == folder
@@ -709,22 +688,29 @@ class CustomerRepository:
         suggestion = self.get_data_suggestion(suggestion_id)
         if suggestion is None or suggestion.status != "pending":
             raise ValueError("Der Vorschlag ist nicht mehr offen.")
-        allowed = {"company", "email", "phone", "street", "postal_code", "city"}
+        allowed = {
+            "company", "contact_name", "email", "phone", "street", "postal_code", "city",
+        }
         if suggestion.field_name not in allowed:
             raise ValueError("Dieses vorgeschlagene Feld wird nicht unterstützt.")
         status = "accepted" if accept else "rejected"
         with self.connection:
             if accept:
-                self.connection.execute(
-                    f"UPDATE customers SET {suggestion.field_name} = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (suggestion.suggested_value, suggestion.customer_id),
-                )
-                self.connection.execute(
-                    "DELETE FROM automatic_field_sources "
-                    "WHERE owner_type='customer' AND owner_id=? AND field_name=?",
-                    (suggestion.customer_id, suggestion.field_name),
-                )
+                if suggestion.field_name == "contact_name":
+                    self._accept_contact_name(
+                        int(suggestion.customer_id), suggestion.suggested_value
+                    )
+                else:
+                    self.connection.execute(
+                        f"UPDATE customers SET {suggestion.field_name} = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (suggestion.suggested_value, suggestion.customer_id),
+                    )
+                    self.connection.execute(
+                        "DELETE FROM automatic_field_sources "
+                        "WHERE owner_type='customer' AND owner_id=? AND field_name=?",
+                        (suggestion.customer_id, suggestion.field_name),
+                    )
             self.connection.execute(
                 "UPDATE customer_data_suggestions SET status=? WHERE id=?",
                 (status, suggestion_id),
@@ -1229,42 +1215,8 @@ class CustomerRepository:
                             (customer_id, service.strip()),
                         )
 
-                existing_contacts = self.connection.execute(
-                    "SELECT name, email, phone FROM contacts WHERE customer_id=?",
-                    (customer_id,),
-                ).fetchall()
-                contact_keys = {
-                    (
-                        normalize_identity(item["name"]),
-                        str(item["email"] or "").casefold(),
-                        self._normalize_phone(str(item["phone"] or "")),
-                    )
-                    for item in existing_contacts
-                }
                 for contact in candidate.contacts:
-                    key = (
-                        normalize_identity(contact.name),
-                        contact.email.casefold(),
-                        self._normalize_phone(contact.phone),
-                    )
-                    if contact.name.strip() and key not in contact_keys:
-                        cursor = self.connection.execute(
-                            """
-                            INSERT INTO contacts (customer_id, name, role, email, phone)
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (
-                                customer_id,
-                                contact.name.strip(),
-                                contact.role.strip(),
-                                contact.email.strip(),
-                                contact.phone.strip(),
-                            ),
-                        )
-                        self._record_contact_provenance(
-                            int(cursor.lastrowid), contact, candidate
-                        )
-                        contact_keys.add(key)
+                    self._upsert_automatic_contact(customer_id, contact, candidate)
         except sqlite3.IntegrityError as error:
             raise ValueError("Die automatische Zuordnung ist nicht eindeutig.") from error
 
@@ -1294,6 +1246,143 @@ class CustomerRepository:
         if updated is None:
             raise RuntimeError("Der automatisch aktualisierte Kunde konnte nicht geladen werden.")
         return updated
+
+    def _upsert_automatic_contact(
+        self,
+        customer_id: int,
+        contact: Contact,
+        candidate: RecognitionCandidate,
+    ) -> int:
+        name = contact.name.strip()
+        if not name:
+            return 0
+        rows = self.connection.execute(
+            "SELECT id, name, role, email, phone FROM contacts WHERE customer_id=?",
+            (customer_id,),
+        ).fetchall()
+        automatic_ids = {
+            int(row[0])
+            for row in self.connection.execute(
+                """
+                SELECT owner_id FROM automatic_field_sources
+                WHERE owner_type='contact' AND field_name='name'
+                  AND owner_id IN (SELECT id FROM contacts WHERE customer_id=?)
+                """,
+                (customer_id,),
+            ).fetchall()
+        }
+        normalized_name = normalize_identity(name)
+        exact = next((
+            row for row in rows
+            if normalize_identity(str(row["name"])) == normalized_name
+        ), None)
+        if exact is not None:
+            contact_id = int(exact["id"])
+            if contact_id not in automatic_ids:
+                return 0
+            email = str(exact["email"] or "") or contact.email.strip()
+            phone = str(exact["phone"] or "") or contact.phone.strip()
+            changed = int(email != str(exact["email"] or "")) + int(
+                phone != str(exact["phone"] or "")
+            )
+            if changed:
+                self.connection.execute(
+                    "UPDATE contacts SET email=?, phone=? WHERE id=?",
+                    (email, phone, contact_id),
+                )
+            self._record_contact_provenance(
+                contact_id,
+                Contact(name, str(exact["role"] or ""), email, phone),
+                candidate,
+            )
+            return changed
+
+        words = normalized_name.split()
+        fallback = next((
+            row for row in rows
+            if int(row["id"]) in automatic_ids
+            and len(normalize_identity(str(row["name"])).split()) == 1
+            and len(words) >= 2
+            and normalize_identity(str(row["name"])) == words[-1]
+        ), None)
+        if fallback is not None:
+            contact_id = int(fallback["id"])
+            email = str(fallback["email"] or "") or contact.email.strip()
+            phone = str(fallback["phone"] or "") or contact.phone.strip()
+            self.connection.execute(
+                "UPDATE contacts SET name=?, email=?, phone=? WHERE id=?",
+                (name, email, phone, contact_id),
+            )
+            self.connection.execute(
+                "DELETE FROM automatic_field_sources "
+                "WHERE owner_type='contact' AND owner_id=? AND field_name='name'",
+                (contact_id,),
+            )
+            self._record_contact_provenance(
+                contact_id,
+                Contact(name, str(fallback["role"] or ""), email, phone),
+                candidate,
+            )
+            return 1 + int(bool(contact.email.strip())) + int(bool(contact.phone.strip()))
+
+        cursor = self.connection.execute(
+            """
+            INSERT INTO contacts (customer_id, name, role, email, phone)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                customer_id, name, contact.role.strip(),
+                contact.email.strip(), contact.phone.strip(),
+            ),
+        )
+        self._record_contact_provenance(int(cursor.lastrowid), contact, candidate)
+        return sum(bool(value.strip()) for value in (
+            contact.name, contact.email, contact.phone,
+        ))
+
+    def _accept_contact_name(self, customer_id: int, value: str):
+        name = value.strip()
+        normalized_name = normalize_identity(name)
+        rows = self.connection.execute(
+            "SELECT id, name FROM contacts WHERE customer_id=? ORDER BY id",
+            (customer_id,),
+        ).fetchall()
+        if any(normalize_identity(str(row["name"])) == normalized_name for row in rows):
+            return
+        words = normalized_name.split()
+        automatic_ids = {
+            int(row[0])
+            for row in self.connection.execute(
+                """
+                SELECT owner_id FROM automatic_field_sources
+                WHERE owner_type='contact' AND field_name='name'
+                  AND owner_id IN (SELECT id FROM contacts WHERE customer_id=?)
+                """,
+                (customer_id,),
+            ).fetchall()
+        }
+        fallback = next((
+            row for row in rows
+            if int(row["id"]) in automatic_ids
+            and len(normalize_identity(str(row["name"])).split()) == 1
+            and len(words) >= 2
+            and normalize_identity(str(row["name"])) == words[-1]
+        ), None)
+        if fallback is None:
+            self.connection.execute(
+                "INSERT INTO contacts (customer_id, name) VALUES (?, ?)",
+                (customer_id, name),
+            )
+            return
+        contact_id = int(fallback["id"])
+        self.connection.execute(
+            "UPDATE contacts SET name=? WHERE id=?", (name, contact_id)
+        )
+        self.connection.execute(
+            "DELETE FROM automatic_field_sources "
+            "WHERE owner_type='contact' AND owner_id=?",
+            (contact_id,),
+        )
 
     def _record_candidate_provenance(
         self, customer_id: int, candidate: RecognitionCandidate
@@ -1374,7 +1463,9 @@ class CustomerRepository:
         project_id: int | None,
         candidate: RecognitionCandidate,
     ):
-        allowed = {"email", "phone", "street", "postal_code", "city"}
+        allowed = {
+            "contact_name", "email", "phone", "street", "postal_code", "city",
+        }
         seen: set[tuple[str, str]] = set()
         for evidence in candidate.evidence:
             key = (evidence.field_name, evidence.normalized_value)

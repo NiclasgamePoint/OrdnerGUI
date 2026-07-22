@@ -2,10 +2,206 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from app.core.customer_models import Contact
+from app.core.customer_recognition_models import ExtractionEvidence
 from app.services.customer_suggestion import CustomerSuggestionService
 
 
 class CustomerSuggestionTests(unittest.TestCase):
+    def test_formal_salutations_are_strong_name_evidence(self):
+        service = CustomerSuggestionService()
+        for line, expected in (
+            ("Sehr geehrter Herr Max Müller,", "Max Müller"),
+            ("Sehr geehrte Frau Dr. Erika Muster,", "Erika Muster"),
+        ):
+            with self.subTest(line=line):
+                suggestion = service.suggest_from_documents(
+                    Path("/tmp/Muster GmbH, Berlin"),
+                    "Muster GmbH",
+                    [{
+                        "path": "/tmp/Anschreiben.pdf",
+                        "filename": "Anschreiben.pdf",
+                        "file_type": "pdf",
+                        "content": line,
+                    }],
+                )
+                match = next(
+                    item for item in suggestion.evidence
+                    if item.field_name == "contact_name" and item.value == expected
+                )
+                self.assertTrue(match.automatic)
+                self.assertGreaterEqual(match.confidence, 0.90)
+                self.assertIn(Contact(name=expected), suggestion.contacts)
+
+    def test_contract_customer_roles_exclude_contractor(self):
+        service = CustomerSuggestionService()
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Muster GmbH, Berlin"),
+            "Muster GmbH",
+            [{
+                "path": "/tmp/Vertrag.pdf",
+                "filename": "Vertrag.pdf",
+                "file_type": "pdf",
+                "content": (
+                    "Auftraggeber:\nHerr Max Müller\n"
+                    "Auftragnehmer:\nHerr Falscher Absender"
+                ),
+            }],
+        )
+
+        self.assertIn(Contact(name="Max Müller"), suggestion.contacts)
+        self.assertFalse(any(
+            contact.name == "Falscher Absender" for contact in suggestion.contacts
+        ))
+
+    def test_early_address_name_is_weak_until_folder_surname_matches(self):
+        service = CustomerSuggestionService()
+        document = {
+            "path": "/tmp/Brief.pdf",
+            "filename": "Brief.pdf",
+            "file_type": "pdf",
+            "content": "Max Müller\nMusterstraße 12\n12345 Berlin",
+        }
+
+        weak = service.suggest_from_documents(
+            Path("/tmp/Projekt GmbH, Berlin"), "Projekt GmbH", [document]
+        )
+        matched = service.suggest_from_documents(
+            Path("/tmp/Müller, Berlin"), "Müller", [document]
+        )
+
+        weak_name = next(
+            item for item in weak.evidence
+            if item.field_name == "contact_name" and item.value == "Max Müller"
+        )
+        matched_name = next(
+            item for item in matched.evidence
+            if item.field_name == "contact_name" and item.value == "Max Müller"
+        )
+        self.assertEqual(weak_name.confidence, 0.88)
+        self.assertFalse(weak_name.automatic)
+        self.assertEqual(matched_name.confidence, 0.94)
+        self.assertTrue(matched_name.automatic)
+
+    def test_two_address_blocks_confirm_name_and_sender_block_is_ignored(self):
+        service = CustomerSuggestionService()
+        documents = [
+            {
+                "path": f"/tmp/Brief-{number}.pdf",
+                "filename": f"Brief-{number}.pdf",
+                "file_type": "pdf",
+                "content": "Max Müller\nMusterstraße 12\n12345 Berlin",
+            }
+            for number in (1, 2)
+        ]
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Projekt GmbH, Berlin"), "Projekt GmbH", documents
+        )
+        sender = service.suggest_from_documents(
+            Path("/tmp/Projekt GmbH, Berlin"),
+            "Projekt GmbH",
+            [{
+                "path": "/tmp/Briefkopf.pdf",
+                "filename": "Briefkopf.pdf",
+                "file_type": "pdf",
+                "content": (
+                    "Absender: Max Absender\nEigenweg 1\n12345 Berlin"
+                ),
+            }],
+        )
+
+        self.assertIn(Contact(name="Max Müller"), suggestion.contacts)
+        self.assertFalse(any(
+            item.field_name == "contact_name" and item.value == "Max Absender"
+            for item in sender.evidence
+        ))
+
+    def test_safe_preferred_address_does_not_stop_name_fallback(self):
+        service = CustomerSuggestionService()
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Muster GmbH, Berlin"),
+            "Muster GmbH",
+            [
+                {
+                    "path": "/tmp/Angebot.pdf",
+                    "filename": "Angebot.pdf",
+                    "file_type": "pdf",
+                    "content": (
+                        "Kunde: Muster GmbH\nMusterstraße 12\n12345 Berlin"
+                    ),
+                },
+                {
+                    "path": "/tmp/Notiz.pdf",
+                    "filename": "Notiz.pdf",
+                    "file_type": "pdf",
+                    "content": "Ansprechpartnerin: Erika Muster",
+                },
+            ],
+        )
+
+        self.assertIn(Contact(name="Erika Muster"), suggestion.contacts)
+
+    def test_strong_contact_name_is_kept_without_email_or_phone(self):
+        service = CustomerSuggestionService()
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Muster GmbH, Berlin"),
+            "Muster GmbH",
+            [{
+                "path": "/tmp/Anschreiben.pdf",
+                "filename": "Anschreiben.pdf",
+                "file_type": "pdf",
+                "content": "Ansprechpartnerin: Erika Muster",
+            }],
+        )
+
+        self.assertEqual(suggestion.contacts, [Contact(name="Erika Muster")])
+        self.assertTrue(any(
+            item.field_name == "contact_name"
+            and item.value == "Erika Muster"
+            and item.automatic
+            for item in suggestion.evidence
+        ))
+
+    def test_person_folder_gets_name_only_fallback_but_company_does_not(self):
+        service = CustomerSuggestionService()
+
+        person = service.suggest_from_documents(
+            Path("/tmp/Müller, Berlin"), "Müller", []
+        )
+        company = service.suggest_from_documents(
+            Path("/tmp/Muster GmbH, Berlin"), "Muster GmbH", []
+        )
+        surname_with_legal_form_letters = service.suggest_from_documents(
+            Path("/tmp/Wagner, Berlin"), "Wagner", []
+        )
+
+        self.assertEqual(person.contacts, [Contact(name="Müller")])
+        self.assertEqual(company.contacts, [])
+        self.assertEqual(
+            surname_with_legal_form_letters.contacts,
+            [Contact(name="Wagner")],
+        )
+        self.assertEqual(person.entity_type, "Unternehmen")
+
+    def test_two_documents_confirm_a_weaker_contact_name(self):
+        evidence = [
+            ExtractionEvidence(
+                field_name="contact_name",
+                value="Max Müller",
+                normalized_value="max müller",
+                source_path=f"/tmp/bericht-{number}.pdf",
+                excerpt="Max Müller",
+                position=1,
+                rule="plausibler Name",
+                confidence=0.80,
+            )
+            for number in (1, 2)
+        ]
+
+        CustomerSuggestionService._mark_automatic_evidence(evidence)
+
+        self.assertTrue(all(item.automatic for item in evidence))
+
     def test_phone_validation_accepts_real_numbers_and_rejects_noise(self):
         service = CustomerSuggestionService()
 
@@ -126,7 +322,10 @@ class CustomerSuggestionTests(unittest.TestCase):
         )
 
         self.assertEqual(suggestion.email, "")
-        self.assertEqual(suggestion.contacts, [])
+        self.assertEqual(
+            suggestion.contacts,
+            [Contact(name="Mustermann")],
+        )
 
     def test_suggests_customer_data_from_path_and_text_document(self):
         with TemporaryDirectory() as directory:

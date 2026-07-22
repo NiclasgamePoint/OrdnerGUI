@@ -96,7 +96,8 @@ class GuiSmokeTests(unittest.TestCase):
             )
 
             self.assertEqual(dialog.scan_button.text(), "Kontaktdaten neu suchen")
-            self.assertEqual(dialog.scan_button.property("buttonRole"), "primary")
+            self.assertEqual(dialog.scan_button.property("buttonRole"), "secondary")
+            self.assertEqual(dialog.close_button.property("buttonRole"), "primary")
             dialog._scan_finished(ContactScanStats(
                 scanned_projects=1,
                 found_fields=3,
