@@ -1,6 +1,8 @@
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QPalette
 
+from app.core.config import SETTINGS_APP, SETTINGS_ORG
+
 
 def _safe_color(value: str, fallback: str) -> str:
     color = QColor(value)
@@ -21,8 +23,6 @@ def _tint(color_hex: str, lighter: bool, amount: int) -> str:
 class ThemeManager:
     """Centralized theme handling with persisted mode/accent settings."""
 
-    SETTINGS_ORG = "PapaGUI"
-    SETTINGS_APP = "UI"
     DEFAULT_MODE = "light"
     DEFAULT_ACCENT = "#2db89d"
     DEFAULT_CONTRAST = 100
@@ -33,7 +33,7 @@ class ThemeManager:
     MAX_FONT_SIZE = 20
 
     def __init__(self):
-        self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
+        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self.mode = self.DEFAULT_MODE
         self.accent = self.DEFAULT_ACCENT
         self.contrast = self.DEFAULT_CONTRAST
@@ -198,7 +198,8 @@ def build_stylesheet(
         _apply_contrast(color, contrast)
         for color in (bg, surface, card, text, muted, border, item_hover, item_selected, line, chip)
     )
-    scaled = lambda size: max(8, round(size * font_size / ThemeManager.DEFAULT_FONT_SIZE))
+    def scaled(size: int) -> int:
+        return max(8, round(size * font_size / ThemeManager.DEFAULT_FONT_SIZE))
 
     return f"""
     QWidget {{

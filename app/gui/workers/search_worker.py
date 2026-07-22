@@ -36,37 +36,33 @@ class SearchWorker(QThread):
         self.customer_db_path = customer_db_path
 
     def run(self):
-        manager = None
         try:
             if self.category == "customers":
                 results = self._search_customers()
             else:
-                manager = IndexManager(self.db_path, initialize=False)
-            if self.category == "folders":
-                results = manager.search_folders_page(
-                    self.query, self.filters, self.page, self.page_size
-                )
-            elif self.category == "files":
-                results = manager.search_files_page(
-                    self.query, self.filters, self.page, self.page_size
-                )
-            elif self.category == "text":
-                results = manager.search_text_page(
-                    self.query,
-                    self.filters,
-                    self.page,
-                    self.page_size,
-                    maximum=self.result_limit,
-                    should_cancel=self.isInterruptionRequested,
-                )
-            elif self.category != "customers":
-                raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
+                with IndexManager(self.db_path, initialize=False) as manager:
+                    if self.category == "folders":
+                        results = manager.search_folders_page(
+                            self.query, self.filters, self.page, self.page_size
+                        )
+                    elif self.category == "files":
+                        results = manager.search_files_page(
+                            self.query, self.filters, self.page, self.page_size
+                        )
+                    elif self.category == "text":
+                        results = manager.search_text_page(
+                            self.query,
+                            self.filters,
+                            self.page,
+                            self.page_size,
+                            maximum=self.result_limit,
+                            should_cancel=self.isInterruptionRequested,
+                        )
+                    else:
+                        raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
             self.completed.emit(self.generation, self.category, results, "")
         except Exception as exc:
             self.completed.emit(self.generation, self.category, [], str(exc))
-        finally:
-            if manager is not None:
-                manager.close()
 
     def _search_customers(self) -> SearchPage:
         if not self.customer_db_path.exists():

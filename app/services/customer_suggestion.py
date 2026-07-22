@@ -330,10 +330,6 @@ class CustomerSuggestionService:
         if NOISE_LINE_RE.search(line) or DATE_RE.search(line) or "," in value:
             return ""
         compact = re.sub(r"\D", "", value)
-        if value.strip().startswith("+"):
-            normalized = "+" + compact
-        else:
-            normalized = compact
         if compact.startswith("00") and not compact.startswith("0049"):
             return ""
         if not (7 <= len(compact) <= 15):

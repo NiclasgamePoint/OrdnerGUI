@@ -389,11 +389,22 @@ class FileViewer(QWidget):
 
     def open_externally(self):
         if self.current_file is not None:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current_file)))
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current_file))):
+                QMessageBox.warning(
+                    self,
+                    "Datei konnte nicht geöffnet werden",
+                    f"Kein Standardprogramm verfügbar oder Start fehlgeschlagen:\n{self.current_file}",
+                )
 
     def open_containing_folder(self):
         if self.current_file is not None:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current_file.parent)))
+            target = self.current_file.parent
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+                QMessageBox.warning(
+                    self,
+                    "Ordner konnte nicht geöffnet werden",
+                    f"Kein Standardprogramm verfügbar oder Start fehlgeschlagen:\n{target}",
+                )
 
     def closeEvent(self, event):
         self.shutdown()

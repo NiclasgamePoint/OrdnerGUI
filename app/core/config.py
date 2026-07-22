@@ -1,12 +1,28 @@
+import os
 from pathlib import Path
 from dataclasses import asdict, dataclass
 import hashlib
 import json
 from PySide6.QtCore import QSettings
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
-BAUVORHABEN_DIR = BASE_DIR / "Bauvorhaben"
+def _resolve_path_setting(env_name: str) -> Path | None:
+    value = os.getenv(env_name, "").strip()
+    if not value:
+        return None
+    return Path(value).expanduser().resolve()
+
+
+def _resolve_base_dir() -> Path:
+    configured = _resolve_path_setting("PAPAGUI_BASE_DIR")
+    if configured is not None:
+        return configured
+    # Always derive defaults from source location, never from cwd.
+    return Path(__file__).resolve().parents[2]
+
+
+BASE_DIR = _resolve_base_dir()
+DATA_DIR = _resolve_path_setting("PAPAGUI_DATA_DIR") or (BASE_DIR / "data")
+BAUVORHABEN_DIR = _resolve_path_setting("PAPAGUI_SOURCE_DIR") or (BASE_DIR / "Bauvorhaben")
 DB_FILE = DATA_DIR / "index.db"
 CUSTOMER_DB_FILE = DATA_DIR / "customers.db"
 

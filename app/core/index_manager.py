@@ -12,6 +12,7 @@ import json
 import hashlib
 import importlib.util
 import logging
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tempfile import TemporaryDirectory
 
@@ -38,6 +39,7 @@ class IndexManager:
     SCHEMA_VERSION = "4"
     EXTRACTOR_VERSION = "3"
     APP_VERSION = "0.2"
+    _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     def __init__(
         self,
@@ -177,11 +179,24 @@ class IndexManager:
         
         self.conn.commit()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def _validate_identifier(self, value: str, kind: str):
+        if not self._VALID_IDENTIFIER.fullmatch(value):
+            raise ValueError(f"Ungültiger {kind}-Name: {value!r}")
+
     def _ensure_column(self, cursor: sqlite3.Cursor, table: str, column: str, col_type: str):
-        cursor.execute(f"PRAGMA table_info({table})")
+        self._validate_identifier(table, "Tabellen")
+        self._validate_identifier(column, "Spalten")
+        cursor.execute(f'PRAGMA table_info("{table}")')
         columns = {row[1] for row in cursor.fetchall()}
         if column not in columns:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            cursor.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {col_type}')
 
     def _is_year_bucket(self, value: Optional[str]) -> bool:
         if not value:
@@ -249,6 +264,11 @@ class IndexManager:
         replace_existing: bool = False,
         should_cancel: Optional[Callable[[], bool]] = None,
     ):
+        warnings.warn(
+            "index_directory() ist veraltet. Bitte synchronize_directory() verwenden.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.synchronize_directory(
             base_path,
             full_rebuild=replace_existing,
@@ -1280,7 +1300,7 @@ class IndexManager:
         if not fts_query:
             return []
 
-        sql = f"""
+        sql = """
             SELECT
                 file_content_fts.path AS path,
                 snippet(file_content_fts, 1, '', '', ' … ', 18) AS excerpt
@@ -1442,12 +1462,9 @@ class IndexManager:
 
 if __name__ == "__main__":
     from app.core.config import DB_FILE, get_default_index_source
-    
-    manager = IndexManager(DB_FILE)
+
     index_root = get_default_index_source()
-    manager.index_directory(index_root)
-    
-    results = manager.search_customers("Müller")
-    logger.info("Gefundene Kunden: %s", results)
-    
-    manager.close()
+    with IndexManager(DB_FILE) as manager:
+        manager.index_directory(index_root)
+        results = manager.search_customers("Müller")
+        logger.info("Gefundene Kunden: %s", results)

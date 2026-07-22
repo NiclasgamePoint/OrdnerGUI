@@ -4,6 +4,8 @@
 
 ## Funktionen
 
+- Versionierung über `app.__version__` und `pyproject.toml`
+
 - Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
 - Filter nach Fachthema, Jahr/Vorlagen und Dateityp
@@ -46,6 +48,7 @@ app/
 └── gui/
     ├── dialogs/                  Kundendaten-Editor
     ├── pages/                    Suche, Kundendetails und Ordner-/Viewer-Seite
+    ├── panels/                   Wiederverwendbare Panel-Bausteine (reserviert)
     ├── viewers/                  PDF-, Tabellen- und Textviewer
     ├── widgets/                  App-Rahmen, Ergebniszeilen und Suchwidgets
     ├── workers/                  Suche und Steuerung des Indexprozesses
@@ -67,6 +70,13 @@ python -m venv .venv
 
 Unter Windows werden entsprechend `.venv\Scripts\pip.exe` und `.venv\Scripts\python.exe` verwendet. Die Anwendung nicht mit `sudo` starten.
 
+Alternative Startskripte:
+
+- Linux: `start.sh`
+- macOS: `start.command`
+- Windows CMD: `start.bat`
+- Windows PowerShell: `start.ps1`
+
 Optionale Systemprogramme:
 
 - `ripgrep` als Textsuch-Fallback
@@ -74,6 +84,8 @@ Optionale Systemprogramme:
 - LibreOffice sowie `catdoc` oder `antiword` für alte Office-Dateien
 
 Fehlende optionale Programme verhindern den normalen Start nicht.
+
+Für reproduzierbare Builds steht zusätzlich `requirements-lock.txt` mit exakt gepinnten Versionen bereit.
 
 ## Tests
 
