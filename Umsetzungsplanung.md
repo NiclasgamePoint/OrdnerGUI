@@ -3,10 +3,11 @@
 ## 1. Offene Punkte aus den Vorschlägen
 
 - [ ] E-Mails aus einem konfigurierten IMAP-Postfach abrufen und Anhänge automatisch in die Ordnerstruktur einordnen
+- [ ] Mail-Ansicht ergänzen: In der Ordneransicht Tabs für "Ordner" und "Mails" bereitstellen
 - [ ] IMAP-Verbindung (Server, Port, TLS, Anmeldedaten) im Einstellungs-Dialog konfigurierbar machen
 - [ ] E-Mails und Anhänge wie reguläre Dokumente indizieren und durchsuchbar machen
 - [ ] Anmeldedaten nicht im Klartext in QSettings ablegen, stattdessen keyring nutzen
-- [ ] Eingehende E-Mails via Kundenerkennung automatisch zuordnen
+- [ ] Eingehende E-Mails via Kundenerkennung automatisch zuordnen (Vorbereitung, nicht final)
 - [ ] Kontextmenüs: Rechtsklick auf Ergebnis-Zeilen (ResultRow), Datei-Einträge im FolderPage-Baum und Kunden-Einträge mit passenden Aktionen
 - [ ] Maus-Hover konsistent: Hover-Highlighting auch für Datei-Einträge in FolderPage und Kontaktzeilen in CustomerPage
 - [ ] Installer/Deployment: Windows Installer (Inno Setup oder NSIS) mit eingebetteter Venv und Abhängigkeiten
@@ -29,6 +30,7 @@
 
 ### Onboarding / erster Start
 - [ ] Einrichtungs-Dialog beim ersten Start, wenn kein gültiger Datenpfad konfiguriert ist
+- [ ] NAS-Server als primäre Datenquelle sauber unterstützten (Pfadwahl, Erreichbarkeit, Reconnect)
 
 ### Leerer app/gui/panels/-Ordner
 - [ ] Ordner inhaltlich nutzen oder bereinigen
@@ -37,6 +39,9 @@
 
 ### Logging
 - [ ] StreamHandler für Konsole im Entwicklungs-/Debug-Betrieb ergänzen (z. B. über PAPAGUI_DEBUG=1)
+
+### Security
+- [ ] Security-Konzept dokumentieren und Mindestmaßnahmen ableiten (Secrets, Rechte, Dateizugriff, Update-Vertrauen)
 
 ### SETTINGS_ORG / SETTINGS_APP
 - [x] Doppelte Definition entfernen, theme.py importiert Konstanten aus app.core.config
@@ -53,6 +58,9 @@
 ### Konfigurierbares Arbeitsverzeichnis
 - [x] Pfadauflösung robust machen und nicht von os.getcwd() abhängig
 
+### Kundenerstellung
+- [ ] Fehlerfall bei Kundenerstellung/-zuordnung ("Kunden-Blending") reproduzieren, Ursache dokumentieren und in Task unterteilen
+
 ## 4. Cross-Platform-Verbesserungen
 
 - [x] Start-Skript: start.bat / start.ps1 für Windows ergänzen
@@ -62,6 +70,7 @@
 - [ ] Pfad-Trennzeichen: verbliebene String-Pfade konsequent auf pathlib.Path umstellen
 - [ ] Prozess-Signale: optional os.kill(..., signal.CTRL_BREAK_EVENT) unter Windows prüfen
 - [ ] Schriftarten: Mindestgröße und Lesbarkeit auf Windows/macOS/Linux gezielt testen
+- [ ] Kundenerkennung vor 2016 explizit per Regel und Tests absichern (Verifikationspunkt)
 
 ## 5. Tests und Qualitätssicherung
 
@@ -71,6 +80,7 @@
 - [x] SearchWorker Test
 - [x] SettingsPopup Smoke-Test
 - [ ] IndexJobController dedizierten GUI-nahen Testfall für Controller-Lebenszyklus weiter ausbauen
+- [ ] Regressionstest für QPdf-Connect-Warnung (invalid nullptr parameter) erstellen und Behebung absichern
 
 ### Kontrollfluss SearchWorker.run()
 - [x] Kontrollfluss mit klarer elif-Struktur ohne schwer lesbares Fall-Through
@@ -87,9 +97,12 @@
 - [ ] Fokus-Reihenfolge (Tab-Reihenfolge), insbesondere im CustomerEditorDialog, prüfen
 - [ ] Barrierefreiheit: accessibleName()/setAccessibleDescription() für zentrale Widgets setzen
 - [ ] Sortierung der Suchergebnisse konfigurierbar machen (Relevanz/Datum/Alphabet)
+- [ ] Globale Suche: Unterordner unter Dienstleistung/Jahr/Name, Ort standardmäßig ausblenden und per Filter optional einblenden
 - [ ] Vorschau im Suchergebnis mit Snippet (FTS5 snippet()) anzeigen
 - [ ] Drag & Drop: Dateien aus Dateibaum in externe Apps ziehen
 - [ ] Drag & Drop: Dokumente per Drop in Ordner importieren
+- [ ] Startseite: beim Öffnen Gesamtanzahl von Kunden und Ordnern sichtbar anzeigen
+- [ ] Einstellungen: separaten Statistik-Tab mit Kernkennzahlen ergänzen
 
 ## 7. Sonstige Hinweise
 
