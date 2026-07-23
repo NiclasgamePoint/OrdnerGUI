@@ -1075,7 +1075,7 @@ class IndexManager:
         }
 
     def _canonical_folder_path(self, folder_path: str) -> str:
-        path = str(Path(folder_path))
+        path = str(Path(folder_path).resolve())
         row = self.conn.execute(
             "SELECT project_root_path FROM folders WHERE path = ?",
             (path,),

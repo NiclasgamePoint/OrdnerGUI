@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import QEvent, Qt, Signal, QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -32,6 +32,15 @@ class ClickActivatedSpinBox(QSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._wheel_adjustment_enabled = False
+        self.lineEdit().installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.lineEdit()
+            and event.type() == QEvent.Type.MouseButtonPress
+        ):
+            self._wheel_adjustment_enabled = True
+        return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event):
         self._wheel_adjustment_enabled = True
