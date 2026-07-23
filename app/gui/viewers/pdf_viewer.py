@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QCoreApplication, QEvent, QPointF
 from PySide6.QtPdf import QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget
@@ -99,8 +99,14 @@ class PdfViewerWidget(QWidget):
         self.search_model.setSearchString("")
         self.view.setDocument(self._empty_document)
         self.search_model.setDocument(self._empty_document)
-        self.document.close()
+        old_document = self.document
+        old_document.close()
+        old_document.deleteLater()
+        QCoreApplication.sendPostedEvents(
+            old_document, QEvent.Type.DeferredDelete
+        )
         app = QApplication.instance()
         if app is not None:
             app.processEvents()
+        self.document = QPdfDocument(self)
         self._update_page_label(0)
