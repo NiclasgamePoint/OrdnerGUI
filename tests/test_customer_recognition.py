@@ -49,11 +49,54 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(len(customers), 1)
             self.assertEqual(customers[0].display_name, "Müller")
             self.assertEqual(customers[0].entity_type, "Privatperson")
-            self.assertEqual(customers[0].city, "Berlin")
+            self.assertEqual(customers[0].city, "")
             self.assertIn("Energieberatung", customers[0].service_types)
             self.assertEqual(
                 repository.get_by_folder(str(project / "Unterordner")).id,
                 customers[0].id,
+            )
+            repository.close()
+
+    def test_company_address_is_separate_from_multiple_project_cities(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            projects = [
+                root / "Blower Door" / "2026" / "Architekturbüro Mustermann, Musterdorf",
+                root / "Blower Door" / "2025" / "Architekturbüro Mustermann, Musterhausen",
+            ]
+            for project in projects:
+                project.mkdir(parents=True)
+                (project / "Angebot.txt").write_text(
+                    "Angebot an\n"
+                    "Architekturbüro Mustermann\n"
+                    "Musterstraße 10\n"
+                    "12345 Musterstadt\n",
+                    encoding="utf-8",
+                )
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+
+            stats = CustomerRecognitionService(
+                index_path,
+                customer_path,
+                CustomerRecognitionOptions(enabled=True),
+            ).synchronize()
+            repository = CustomerRepository(customer_path)
+            customers = repository.list_customers()
+            projects_for_customer = repository.list_projects_for_customer(
+                int(customers[0].id)
+            )
+
+            self.assertEqual(stats.created, 1)
+            self.assertEqual(len(customers), 1)
+            self.assertEqual(customers[0].street, "Musterstraße 10")
+            self.assertEqual(customers[0].postal_code, "12345")
+            self.assertEqual(customers[0].city, "Musterstadt")
+            self.assertEqual(
+                {project.project_city for project in projects_for_customer},
+                {"Musterdorf", "Musterhausen"},
             )
             repository.close()
 
@@ -176,7 +219,9 @@ class CustomerRecognitionTests(unittest.TestCase):
             project = root / "DEKRA" / "2026" / "Müller, Berlin"
             project.mkdir(parents=True)
             (project / "info.txt").write_text(
-                "neu@example.de\n030 999999\nNeuweg 8\n12345 Berlin",
+                "Angebot an\nMüller\n"
+                "Neuweg 8\n12345 Berlin\n"
+                "neu@example.de\n030 999999",
                 encoding="utf-8",
             )
             index_path = base / "index.db"
@@ -207,6 +252,11 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(updated.email, "manuell@example.de")
             self.assertEqual(updated.phone, "030 111111")
             self.assertEqual(updated.street, "Altweg 1")
+            self.assertEqual(updated.postal_code, "")
+            suggestions = repository.list_data_suggestions(int(existing.id))
+            self.assertTrue({
+                "street", "postal_code"
+            }.issubset({suggestion.field_name for suggestion in suggestions}))
             self.assertIn(str(project.resolve()), updated.folder_paths)
             suggestions = repository.list_data_suggestions(updated.id)
             self.assertTrue(any(

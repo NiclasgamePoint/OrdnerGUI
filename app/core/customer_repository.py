@@ -1022,8 +1022,6 @@ class CustomerRepository:
             else ""
         )
         project = self._infer_project_from_folder(folder_path, service)
-        if project.project_city == "" and candidate.city:
-            project.project_city = candidate.city
         if project.year is None and candidate.years:
             project.year = candidate.years[min(index, len(candidate.years) - 1)]
         if not project.project_label:
@@ -1355,6 +1353,11 @@ class CustomerRepository:
     ) -> Customer:
         """Create or safely enrich one customer from an automatic candidate."""
         target = self.get(customer_id) if customer_id is not None else None
+        has_complete_address = all((
+            candidate.street.strip(),
+            candidate.postal_code.strip(),
+            candidate.city.strip(),
+        ))
         if customer_id is not None and target is None:
             raise ValueError("Der ausgewählte Bestandskunde existiert nicht mehr.")
 
@@ -1379,11 +1382,13 @@ class CustomerRepository:
                     display_name=candidate.display_name,
                     entity_type=candidate.entity_type or "Unternehmen",
                     company=candidate.display_name,
-                    city=candidate.city,
+                    city=candidate.city if has_complete_address else "",
                     email=candidate.email,
                     phone=candidate.phone,
-                    street=candidate.street,
-                    postal_code=candidate.postal_code,
+                    street=candidate.street if has_complete_address else "",
+                    postal_code=(
+                        candidate.postal_code if has_complete_address else ""
+                    ),
                     contacts=[],
                     service_types=list(candidate.service_types),
                     folder_path=candidate.folder_paths[0] if candidate.folder_paths else "",
@@ -1408,11 +1413,8 @@ class CustomerRepository:
 
                 updates = {
                     "company": candidate.display_name,
-                    "city": candidate.city,
                     "email": candidate.email,
                     "phone": candidate.phone,
-                    "street": candidate.street,
-                    "postal_code": candidate.postal_code,
                 }
                 assignments = []
                 values = []
@@ -1431,6 +1433,44 @@ class CustomerRepository:
                         pending_field_suggestions.append(
                             (column, cleaned_value, normalized_folders[0] if normalized_folders else "")
                         )
+                candidate_address = (
+                    candidate.street.strip(),
+                    candidate.postal_code.strip(),
+                    candidate.city.strip(),
+                )
+                existing_address = (
+                    str(row["street"] or "").strip(),
+                    str(row["postal_code"] or "").strip(),
+                    str(row["city"] or "").strip(),
+                )
+                if has_complete_address:
+                    if not any(existing_address):
+                        for column, value in zip(
+                            ("street", "postal_code", "city"),
+                            candidate_address,
+                        ):
+                            assignments.append(f"{column} = ?")
+                            values.append(value)
+                    elif tuple(
+                        normalize_identity(value) for value in candidate_address
+                    ) != tuple(
+                        normalize_identity(value) for value in existing_address
+                    ):
+                        for column, value, existing_value in zip(
+                            ("street", "postal_code", "city"),
+                            candidate_address,
+                            existing_address,
+                        ):
+                            if normalize_identity(value) != normalize_identity(
+                                existing_value
+                            ):
+                                pending_field_suggestions.append((
+                                    column,
+                                    value,
+                                    normalized_folders[0]
+                                    if normalized_folders
+                                    else "",
+                                ))
                 if assignments:
                     self.connection.execute(
                         f"UPDATE customers SET {', '.join(assignments)}, "

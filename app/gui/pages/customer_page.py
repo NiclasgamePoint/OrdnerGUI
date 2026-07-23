@@ -237,6 +237,8 @@ class CustomerPage(QWidget):
             details = [project.service_type or "Dienstleistung"]
             if project.year is not None:
                 details.append(str(project.year))
+            if project.project_label:
+                details.append(project.project_label)
             details.append(f"{int(summary.get('file_count') or 0)} Dateien")
             modified = str(summary.get("last_modified") or "")
             if modified:
@@ -246,13 +248,12 @@ class CustomerPage(QWidget):
                     pass
                 details.append(f"geändert {modified}")
             details.append(path)
-            folder_name = project.project_label or Path(path).name or path
             title = " · ".join(
                 value
                 for value in (
                     project.service_type or "Dienstleistung",
                     str(project.year) if project.year is not None else "",
-                    folder_name,
+                    project.project_city or "Ort unbekannt",
                 )
                 if value
             )
