@@ -669,6 +669,7 @@ class MainWindow(QMainWindow):
             self.recent_customer_history.clear()
             self.customer_repository.close()
             self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            self.customer_page.repository = self.customer_repository
             self.navigator.reset("search")
             self._show_initial_customers()
             self.status_bar.set_text("Kundendaten gelöscht · Kundenliste ist leer")
@@ -676,6 +677,7 @@ class MainWindow(QMainWindow):
                 self.settings_popup.set_recognition_state({}, 0)
         except Exception as exc:
             self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            self.customer_page.repository = self.customer_repository
             QMessageBox.warning(
                 self,
                 "Kundendaten konnten nicht gelöscht werden",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+import hashlib
 import json
 import os
 import sqlite3
@@ -125,6 +126,12 @@ class CustomerRepository:
                 rule TEXT NOT NULL DEFAULT '',
                 confidence REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'pending',
+                suggestion_type TEXT NOT NULL DEFAULT 'field',
+                contact_name TEXT NOT NULL DEFAULT '',
+                contact_role TEXT NOT NULL DEFAULT '',
+                contact_email TEXT NOT NULL DEFAULT '',
+                contact_phone TEXT NOT NULL DEFAULT '',
+                fingerprint TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS customer_folders (
@@ -506,25 +513,25 @@ class CustomerRepository:
         value = str(suggested_value or "").strip()
         if not field or not value:
             return None
+        fingerprint = self._field_fingerprint(field, value)
         existing = self.connection.execute(
             """
             SELECT * FROM customer_data_suggestions
             WHERE customer_id = ?
-              AND COALESCE(project_id, 0) = COALESCE(?, 0)
-              AND field_name = ?
-              AND suggested_value = ?
+              AND suggestion_type = 'field'
+              AND fingerprint = ?
             ORDER BY CASE status
                 WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END, id DESC
             LIMIT 1
             """,
-            (customer_id, project_id, field, value),
+            (customer_id, fingerprint),
         ).fetchone()
         if existing is not None:
             status = str(existing["status"] or "pending")
             if status == "accepted":
                 return None
-            if status == "rejected" and not reopen_rejected:
-                existing = None
+            if status == "rejected":
+                return None
         if existing is not None:
             bounded_confidence = max(0.0, min(1.0, float(confidence)))
             if excerpt or rule or bounded_confidence or existing["status"] == "rejected":
@@ -551,18 +558,162 @@ class CustomerRepository:
                 """
                 INSERT INTO customer_data_suggestions
                     (customer_id, project_id, field_name, suggested_value, source_path,
-                     excerpt, rule, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     excerpt, rule, confidence, fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     customer_id, project_id, field, value, source_path,
                     excerpt, rule, max(0.0, min(1.0, float(confidence))),
+                    fingerprint,
                 ),
             )
             suggestion_id = int(self.connection.execute(
                 "SELECT last_insert_rowid()"
             ).fetchone()[0])
         return self.get_data_suggestion(suggestion_id)
+
+    @staticmethod
+    def _field_fingerprint(field_name: str, value: str) -> str:
+        if field_name == "email":
+            normalized = value.strip().casefold()
+        elif field_name == "phone":
+            normalized = "".join(
+                character for character in value if character.isdigit()
+            )
+        else:
+            normalized = normalize_identity(value)
+        payload = f"field|{field_name.strip().casefold()}|{normalized}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _contact_fingerprint(contact: Contact) -> str:
+        payload = "|".join((
+            normalize_identity(contact.name),
+            normalize_identity(contact.role),
+            contact.email.strip().casefold(),
+            "".join(character for character in contact.phone if character.isdigit()),
+        ))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def apply_contact_suggestion(
+        self,
+        customer_id: int,
+        project_id: int | None,
+        contact: Contact,
+        source_path: str = "",
+        excerpt: str = "",
+        rule: str = "",
+        confidence: float = 0.0,
+    ) -> CustomerDataSuggestion | None:
+        contact = Contact(
+            name=contact.name.strip(),
+            role=contact.role.strip(),
+            email=contact.email.strip().casefold(),
+            phone=contact.phone.strip(),
+        )
+        if not contact.name:
+            return None
+        fingerprint = self._contact_fingerprint(contact)
+        existing = self.connection.execute(
+            """
+            SELECT * FROM customer_data_suggestions
+            WHERE customer_id=? AND suggestion_type='contact' AND fingerprint=?
+            ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END,
+                     id DESC
+            LIMIT 1
+            """,
+            (customer_id, fingerprint),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["status"]) in {"accepted", "rejected"}:
+                return None
+            return self._hydrate_data_suggestion(existing)
+        words = normalize_identity(contact.name).split()
+        if len(words) >= 2:
+            pending_rows = self.connection.execute(
+                """
+                SELECT * FROM customer_data_suggestions
+                WHERE customer_id=? AND suggestion_type='contact' AND status='pending'
+                ORDER BY id
+                """,
+                (customer_id,),
+            ).fetchall()
+            surname_match = next((
+                row for row in pending_rows
+                if normalize_identity(str(row["contact_name"])) == words[-1]
+            ), None)
+            if surname_match is not None:
+                with self.connection:
+                    self.connection.execute(
+                        """
+                        UPDATE customer_data_suggestions
+                        SET suggested_value=?, contact_name=?, contact_role=?,
+                            contact_email=?, contact_phone=?, fingerprint=?,
+                            source_path=CASE WHEN ?!='' THEN ? ELSE source_path END,
+                            excerpt=CASE WHEN ?!='' THEN ? ELSE excerpt END,
+                            rule=CASE WHEN ?!='' THEN ? ELSE rule END,
+                            confidence=MAX(confidence, ?)
+                        WHERE id=?
+                        """,
+                        (
+                            contact.name, contact.name, contact.role, contact.email,
+                            contact.phone, fingerprint, source_path, source_path,
+                            excerpt, excerpt, rule, rule,
+                            max(0.0, min(1.0, float(confidence))),
+                            int(surname_match["id"]),
+                        ),
+                    )
+                return self.get_data_suggestion(int(surname_match["id"]))
+        matching_contact = self._find_matching_contact(customer_id, contact)
+        if matching_contact is not None and all(
+            not str(getattr(contact, field) or "").strip()
+            or str(matching_contact[field] or "").strip().casefold()
+            == str(getattr(contact, field) or "").strip().casefold()
+            for field in ("name", "role", "email", "phone")
+        ):
+            return None
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO customer_data_suggestions
+                    (customer_id, project_id, field_name, suggested_value,
+                     source_path, excerpt, rule, confidence, suggestion_type,
+                     contact_name, contact_role, contact_email, contact_phone,
+                     fingerprint)
+                VALUES (?, ?, 'contact', ?, ?, ?, ?, ?, 'contact', ?, ?, ?, ?, ?)
+                """,
+                (
+                    customer_id, project_id, contact.name, source_path, excerpt,
+                    rule, max(0.0, min(1.0, float(confidence))), contact.name,
+                    contact.role, contact.email, contact.phone, fingerprint,
+                ),
+            )
+        return self.get_data_suggestion(int(cursor.lastrowid))
+
+    def _find_matching_contact(
+        self, customer_id: int, contact: Contact
+    ) -> sqlite3.Row | None:
+        rows = self.connection.execute(
+            "SELECT id, name, role, email, phone FROM contacts WHERE customer_id=?",
+            (customer_id,),
+        ).fetchall()
+        name_key = normalize_identity(contact.name)
+        email_key = contact.email.strip().casefold()
+        phone_key = "".join(character for character in contact.phone if character.isdigit())
+        return next((
+            row for row in rows
+            if normalize_identity(str(row["name"])) == name_key
+            or (
+                email_key and str(row["email"] or "").strip().casefold() == email_key
+            )
+            or (
+                phone_key
+                and "".join(
+                    character for character in str(row["phone"] or "")
+                    if character.isdigit()
+                ) == phone_key
+            )
+        ), None)
 
     def apply_contact_scan_candidate(
         self,
@@ -583,10 +734,28 @@ class CustomerRepository:
             if item.field_name in supported
         }
         stats.found_fields = len(found)
+        contact_emails = {
+            contact.email.strip().casefold()
+            for contact in candidate.contacts if contact.email.strip()
+        }
+        contact_phones = {
+            "".join(character for character in contact.phone if character.isdigit())
+            for contact in candidate.contacts if contact.phone.strip()
+        }
 
         automatic_by_field = {}
         for evidence in candidate.evidence:
             if evidence.field_name not in supported or not evidence.automatic:
+                continue
+            if (
+                evidence.field_name == "email"
+                and evidence.value.strip().casefold() in contact_emails
+            ) or (
+                evidence.field_name == "phone"
+                and "".join(
+                    character for character in evidence.value if character.isdigit()
+                ) in contact_phones
+            ):
                 continue
             current = automatic_by_field.get(evidence.field_name)
             if current is None or evidence.confidence > current.confidence:
@@ -619,20 +788,45 @@ class CustomerRepository:
                     setattr(customer, field_name, evidence.value)
                     stats.applied_fields += 1
 
-            for contact in candidate.contacts:
-                stats.applied_fields += self._upsert_automatic_contact(
-                    customer_id, contact, candidate
-                )
-
         project_ids = {
             project.folder_path: project.id
             for project in self.list_projects_for_customer(customer_id)
         }
         suggested_keys: set[tuple[str, str]] = set()
+        for contact in candidate.contacts:
+            matches = [
+                item for item in candidate.evidence
+                if item.field_name == "contact_name"
+                and normalize_identity(item.value) == normalize_identity(contact.name)
+            ]
+            evidence = max(matches, key=lambda item: item.confidence, default=None)
+            source_path = evidence.source_path if evidence else ""
+            project_id = next((
+                project_id for folder, project_id in project_ids.items()
+                if source_path == folder or source_path.startswith(f"{folder}{os.sep}")
+            ), None)
+            self.apply_contact_suggestion(
+                customer_id, project_id, contact, source_path,
+                evidence.excerpt if evidence else "",
+                evidence.rule if evidence else "Erkannter Ansprechpartner",
+                evidence.confidence if evidence else 0.0,
+            )
         for evidence in sorted(
             candidate.evidence, key=lambda item: item.confidence, reverse=True
         ):
             if evidence.field_name not in supported:
+                continue
+            if evidence.field_name == "contact_name":
+                continue
+            if (
+                evidence.field_name == "email"
+                and evidence.value.strip().casefold() in contact_emails
+            ) or (
+                evidence.field_name == "phone"
+                and "".join(
+                    character for character in evidence.value if character.isdigit()
+                ) in contact_phones
+            ):
                 continue
             suggestion_key = (evidence.field_name, evidence.normalized_value)
             if suggestion_key in suggested_keys:
@@ -657,7 +851,7 @@ class CustomerRepository:
             self.apply_project_suggestion(
                 customer_id, project_id, evidence.field_name, evidence.value,
                 evidence.source_path, evidence.excerpt, evidence.rule,
-                evidence.confidence, reopen_rejected=True,
+                evidence.confidence,
             )
         stats.pending_fields = len(self.list_data_suggestions(customer_id))
         return stats
@@ -689,14 +883,19 @@ class CustomerRepository:
         if suggestion is None or suggestion.status != "pending":
             raise ValueError("Der Vorschlag ist nicht mehr offen.")
         allowed = {
-            "company", "contact_name", "email", "phone", "street", "postal_code", "city",
+            "company", "contact", "contact_name", "email", "phone",
+            "street", "postal_code", "city",
         }
         if suggestion.field_name not in allowed:
             raise ValueError("Dieses vorgeschlagene Feld wird nicht unterstützt.")
         status = "accepted" if accept else "rejected"
         with self.connection:
             if accept:
-                if suggestion.field_name == "contact_name":
+                if suggestion.is_contact:
+                    self._accept_contact_suggestion(
+                        int(suggestion.customer_id), suggestion.contact
+                    )
+                elif suggestion.field_name == "contact_name":
                     self._accept_contact_name(
                         int(suggestion.customer_id), suggestion.suggested_value
                     )
@@ -719,6 +918,33 @@ class CustomerRepository:
         if customer is None:
             raise ValueError("Der zugehörige Kunde existiert nicht mehr.")
         return customer
+
+    def _accept_contact_suggestion(self, customer_id: int, contact: Contact):
+        existing = self._find_matching_contact(customer_id, contact)
+        if existing is None:
+            self.connection.execute(
+                """
+                INSERT INTO contacts (customer_id, name, role, email, phone)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    customer_id, contact.name.strip(), contact.role.strip(),
+                    contact.email.strip(), contact.phone.strip(),
+                ),
+            )
+            return
+        updates: dict[str, str] = {}
+        for field in ("name", "role", "email", "phone"):
+            current = str(existing[field] or "").strip()
+            proposed = str(getattr(contact, field) or "").strip()
+            if proposed and not current:
+                updates[field] = proposed
+        if updates:
+            assignments = ", ".join(f"{field}=?" for field in updates)
+            self.connection.execute(
+                f"UPDATE contacts SET {assignments} WHERE id=?",
+                (*updates.values(), int(existing["id"])),
+            )
 
     def _project_from_root(
         self,
@@ -836,6 +1062,12 @@ class CustomerRepository:
             rule=str(row["rule"] or ""),
             confidence=float(row["confidence"] or 0.0),
             status=str(row["status"] or "pending"),
+            suggestion_type=str(row["suggestion_type"] or "field"),
+            contact_name=str(row["contact_name"] or ""),
+            contact_role=str(row["contact_role"] or ""),
+            contact_email=str(row["contact_email"] or ""),
+            contact_phone=str(row["contact_phone"] or ""),
+            fingerprint=str(row["fingerprint"] or ""),
         )
 
     def _migrate_data_suggestions(self):
@@ -849,11 +1081,58 @@ class CustomerRepository:
             "excerpt": "TEXT NOT NULL DEFAULT ''",
             "rule": "TEXT NOT NULL DEFAULT ''",
             "confidence": "REAL NOT NULL DEFAULT 0",
+            "suggestion_type": "TEXT NOT NULL DEFAULT 'field'",
+            "contact_name": "TEXT NOT NULL DEFAULT ''",
+            "contact_role": "TEXT NOT NULL DEFAULT ''",
+            "contact_email": "TEXT NOT NULL DEFAULT ''",
+            "contact_phone": "TEXT NOT NULL DEFAULT ''",
+            "fingerprint": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in additions.items():
             if name not in columns:
                 self.connection.execute(
                     f"ALTER TABLE customer_data_suggestions ADD COLUMN {name} {definition}"
+                )
+        rows = self.connection.execute(
+            """
+            SELECT id, field_name, suggested_value, suggestion_type,
+                   contact_name, contact_role, contact_email, contact_phone,
+                   fingerprint
+            FROM customer_data_suggestions
+            """
+        ).fetchall()
+        for row in rows:
+            field_name = str(row["field_name"] or "")
+            if field_name == "contact_name" and str(row["suggestion_type"]) == "field":
+                contact = Contact(name=str(row["suggested_value"] or "").strip())
+                self.connection.execute(
+                    """
+                    UPDATE customer_data_suggestions
+                    SET field_name='contact', suggestion_type='contact',
+                        contact_name=?, fingerprint=?
+                    WHERE id=?
+                    """,
+                    (
+                        contact.name, self._contact_fingerprint(contact),
+                        int(row["id"]),
+                    ),
+                )
+            elif not str(row["fingerprint"] or ""):
+                if str(row["suggestion_type"]) == "contact":
+                    contact = Contact(
+                        str(row["contact_name"] or ""),
+                        str(row["contact_role"] or ""),
+                        str(row["contact_email"] or ""),
+                        str(row["contact_phone"] or ""),
+                    )
+                    fingerprint = self._contact_fingerprint(contact)
+                else:
+                    fingerprint = self._field_fingerprint(
+                        field_name, str(row["suggested_value"] or "")
+                    )
+                self.connection.execute(
+                    "UPDATE customer_data_suggestions SET fingerprint=? WHERE id=?",
+                    (fingerprint, int(row["id"])),
                 )
 
     def _sync_legacy_project_links(self, customer_id: int):
@@ -1089,7 +1368,7 @@ class CustomerRepository:
                     phone=candidate.phone,
                     street=candidate.street,
                     postal_code=candidate.postal_code,
-                    contacts=list(candidate.contacts),
+                    contacts=[],
                     service_types=list(candidate.service_types),
                     folder_path=candidate.folder_paths[0] if candidate.folder_paths else "",
                     folder_paths=list(candidate.folder_paths),
@@ -1215,8 +1494,6 @@ class CustomerRepository:
                             (customer_id, service.strip()),
                         )
 
-                for contact in candidate.contacts:
-                    self._upsert_automatic_contact(customer_id, contact, candidate)
         except sqlite3.IntegrityError as error:
             raise ValueError("Die automatische Zuordnung ist nicht eindeutig.") from error
 
@@ -1228,6 +1505,22 @@ class CustomerRepository:
             if saved_project is not None and saved_project.id is not None:
                 project_ids.append(int(saved_project.id))
         suggestion_project_id = project_ids[0] if project_ids else None
+        for contact in candidate.contacts:
+            matches = [
+                evidence for evidence in candidate.evidence
+                if evidence.field_name == "contact_name"
+                and normalize_identity(evidence.value) == normalize_identity(contact.name)
+            ]
+            evidence = max(matches, key=lambda item: item.confidence, default=None)
+            self.apply_contact_suggestion(
+                int(customer_id),
+                suggestion_project_id,
+                contact,
+                evidence.source_path if evidence else "",
+                evidence.excerpt if evidence else "",
+                evidence.rule if evidence else "Erkannter Ansprechpartner",
+                evidence.confidence if evidence else 0.0,
+            )
         for field, value, source_path in pending_field_suggestions:
             self.apply_project_suggestion(
                 customer_id,
@@ -1472,6 +1765,17 @@ class CustomerRepository:
             if evidence.automatic or evidence.field_name not in allowed or key in seen:
                 continue
             seen.add(key)
+            if evidence.field_name == "contact_name":
+                self.apply_contact_suggestion(
+                    customer_id,
+                    project_id,
+                    Contact(name=evidence.value),
+                    evidence.source_path,
+                    evidence.excerpt,
+                    evidence.rule,
+                    evidence.confidence,
+                )
+                continue
             self.apply_project_suggestion(
                 customer_id, project_id, evidence.field_name,
                 evidence.value, evidence.source_path, evidence.excerpt,

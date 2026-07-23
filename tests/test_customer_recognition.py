@@ -56,7 +56,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             )
             repository.close()
 
-    def test_contact_rescan_is_customer_scoped_and_reopens_rejected_value(self):
+    def test_contact_rescan_is_customer_scoped_and_keeps_rejected_value_closed(self):
         with TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "Bauvorhaben"
@@ -100,9 +100,8 @@ class CustomerRecognitionTests(unittest.TestCase):
             second = service.rescan_customer_contacts(int(target.id))
             repository = CustomerRepository(customer_path)
             reopened = repository.list_data_suggestions(int(target.id))
-            self.assertEqual(second.pending_fields, 1)
-            self.assertEqual(len(reopened), 1)
-            self.assertEqual(reopened[0].id, pending[0].id)
+            self.assertEqual(second.pending_fields, 0)
+            self.assertEqual(reopened, [])
             repository.close()
 
     def test_contact_rescan_applies_two_document_confirmation(self):
@@ -130,7 +129,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             ).rescan_customer_contacts(int(customer.id))
             repository = CustomerRepository(customer_path)
 
-            self.assertEqual(result.applied_fields, 2)
+            self.assertEqual(result.applied_fields, 1)
             self.assertEqual(
                 repository.get(int(customer.id)).email,
                 "bestaetigt@example.de",

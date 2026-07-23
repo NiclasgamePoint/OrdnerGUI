@@ -47,6 +47,15 @@ CONTACT_LABEL_RE = re.compile(
     r"(?:(?:herrn?|frau)\s+)?(?:(?:dr\.?|prof\.?)\s+)?"
     r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+){1,3})$"
 )
+ROLE_LABEL_RE = re.compile(
+    r"(?i)^(?:(?:funktion|position|rolle|tätigkeit)\s*:?\s*)"
+    r"([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß /&+.-]{2,60})$"
+)
+ROLE_VALUE_RE = re.compile(
+    r"(?i)^(?:architekt(?:in)?|ingenieur(?:in)?|projektleiter(?:in)?|"
+    r"bauleiter(?:in)?|geschäftsführer(?:in)?|inhaber(?:in)?|"
+    r"sachbearbeiter(?:in)?|assistenz|vorstand|prokurist(?:in)?)$"
+)
 RECIPIENT_CONTEXT_RE = re.compile(
     r"(?i)\b(?:auftraggeber|kunde|angebot an|empfänger|z\.?\s*hd\.?|"
     r"ansprechpartner(?:in)?|kontakt)\b"
@@ -235,9 +244,21 @@ class CustomerSuggestionService:
                 contacts.append(Contact(name=fallback_name))
         suggestion.contacts = self._deduplicate_contacts(contacts, suggestion.evidence)
         if suggestion.contacts:
-            primary = suggestion.contacts[0]
-            suggestion.email = suggestion.email or primary.email
-            suggestion.phone = suggestion.phone or primary.phone
+            personal_emails = {
+                contact.email.casefold() for contact in suggestion.contacts
+                if contact.email
+            }
+            personal_phones = {
+                "".join(character for character in contact.phone if character.isdigit())
+                for contact in suggestion.contacts if contact.phone
+            }
+            if suggestion.email.casefold() in personal_emails:
+                suggestion.email = ""
+            suggestion_phone = "".join(
+                character for character in suggestion.phone if character.isdigit()
+            )
+            if suggestion_phone and suggestion_phone in personal_phones:
+                suggestion.phone = ""
         identity_source = str(
             (preferred or eligible or [{"path": str(folder_path)}])[0].get("path")
         )
@@ -372,15 +393,27 @@ class CustomerSuggestionService:
                     confidence,
                 ))
             if name:
-                nearby = " ".join(lines[index:min(len(lines), index + 4)])
+                nearby_lines = lines[index:min(len(lines), index + 5)]
+                nearby = " ".join(nearby_lines)
                 nearby_email = EMAIL_RE.search(nearby)
                 nearby_phone_match = PHONE_RE.search(nearby)
                 nearby_phone = (
                     self._clean_phone_candidate(nearby_phone_match.group(0), nearby)
                     if nearby_phone_match else ""
                 )
+                role = ""
+                for role_line in nearby_lines[1:3]:
+                    labeled_role = ROLE_LABEL_RE.match(role_line)
+                    candidate_role = (
+                        labeled_role.group(1).strip()
+                        if labeled_role else role_line.strip()
+                    )
+                    if ROLE_VALUE_RE.fullmatch(candidate_role):
+                        role = candidate_role
+                        break
                 contacts.append(Contact(
                     name=name,
+                    role=role,
                     email=(
                         nearby_email.group(0).casefold()
                         if nearby_email
@@ -513,6 +546,7 @@ class CustomerSuggestionService:
             if key not in automatic_names:
                 continue
             existing = unique.setdefault(key, Contact(name=contact.name))
+            existing.role = existing.role or contact.role
             existing.email = existing.email or contact.email
             existing.phone = existing.phone or contact.phone
         return list(unique.values())
@@ -524,7 +558,9 @@ class CustomerSuggestionService:
         entity_type: str,
     ) -> str:
         label = folder_path.name.split(",", 1)[0].strip()
-        candidate = display_name.strip() if entity_type == "Privatperson" else label
+        if entity_type != "Privatperson":
+            return ""
+        candidate = display_name.strip()
         if not candidate or len(candidate) > 60:
             return ""
         lowered = candidate.casefold()
@@ -534,9 +570,6 @@ class CustomerSuggestionService:
         if any(character.isdigit() for character in candidate):
             return ""
         words = candidate.split()
-        if entity_type != "Privatperson":
-            if "," not in folder_path.name or len(words) != 1:
-                return ""
         if not 1 <= len(words) <= 4:
             return ""
         if not all(re.fullmatch(r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+", word) for word in words):

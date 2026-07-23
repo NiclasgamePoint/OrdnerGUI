@@ -123,13 +123,35 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         card.setObjectName("PageCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
-        heading = QLabel(
-            f"{FIELD_LABELS.get(suggestion.field_name, suggestion.field_name)}: "
-            f"{suggestion.suggested_value}"
-        )
+        if suggestion.is_contact:
+            heading_text = f"Ansprechpartner: {suggestion.contact_name}"
+        else:
+            heading_text = (
+                f"{FIELD_LABELS.get(suggestion.field_name, suggestion.field_name)}: "
+                f"{suggestion.suggested_value}"
+            )
+        heading = QLabel(heading_text)
         heading.setObjectName("SectionTitle")
         heading.setWordWrap(True)
         layout.addWidget(heading)
+        if suggestion.is_contact:
+            details = [
+                ("Rolle", suggestion.contact_role),
+                ("E-Mail", suggestion.contact_email),
+                ("Telefon", suggestion.contact_phone),
+            ]
+            for label, value in details:
+                if value:
+                    detail = QLabel(f"{label}: {value}")
+                    detail.setObjectName("PopupCaption")
+                    detail.setWordWrap(True)
+                    layout.addWidget(detail)
+            conflict = self._contact_conflict_text(suggestion)
+            if conflict:
+                warning = QLabel(conflict)
+                warning.setObjectName("PopupWarning")
+                warning.setWordWrap(True)
+                layout.addWidget(warning)
         confidence = QLabel(f"Sicherheit: {suggestion.confidence:.0%}")
         confidence.setObjectName("PopupCaption")
         layout.addWidget(confidence)
@@ -185,6 +207,8 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         self._reload()
 
     def _would_overwrite(self, suggestion: CustomerDataSuggestion) -> bool:
+        if suggestion.is_contact:
+            return False
         if suggestion.field_name == "contact_name":
             return False
         customer = self.repository.get(self.customer_id)
@@ -192,6 +216,37 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
             return False
         current = str(getattr(customer, suggestion.field_name, "") or "").strip()
         return bool(current and current.casefold() != suggestion.suggested_value.casefold())
+
+    def _contact_conflict_text(self, suggestion: CustomerDataSuggestion) -> str:
+        customer = self.repository.get(self.customer_id)
+        if customer is None:
+            return ""
+        proposed = suggestion.contact
+        for existing in customer.contacts:
+            same_name = (
+                existing.name.strip().casefold()
+                == proposed.name.strip().casefold()
+            )
+            same_email = bool(
+                proposed.email
+                and existing.email.strip().casefold() == proposed.email.casefold()
+            )
+            if not (same_name or same_email):
+                continue
+            conflicts = []
+            for label, current, new in (
+                ("Rolle", existing.role, proposed.role),
+                ("E-Mail", existing.email, proposed.email),
+                ("Telefon", existing.phone, proposed.phone),
+            ):
+                if current and new and current.casefold() != new.casefold():
+                    conflicts.append(f"{label}: „{current}“ statt „{new}“")
+            if conflicts:
+                return (
+                    "Vorhandene manuelle Angaben bleiben erhalten: "
+                    + "; ".join(conflicts)
+                )
+        return ""
 
     def _start_scan(self):
         if self.scan_worker is not None and self.scan_worker.isRunning():
