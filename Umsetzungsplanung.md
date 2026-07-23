@@ -67,7 +67,7 @@
 - [x] Tray-Icon: optionales System-Tray-Icon für Status bei minimierter App
 - [x] Datei extern öffnen: Fehlerfälle sichtbar dem Nutzer melden
 - [x] HiDPI / Retina: QApplication.setHighDpiScaleFactorRoundingPolicy explizit setzen
-- [ ] Pfad-Trennzeichen: verbliebene String-Pfade konsequent auf pathlib.Path umstellen
+- [X] Pfad-Trennzeichen: verbliebene String-Pfade konsequent auf pathlib.Path umstellen
 - [x] Prozess-Signale: optional os.kill(..., signal.CTRL_BREAK_EVENT) unter Windows prüfen
  testen
 - [x] Kundenerkennung vor 2016 explizit per Regel und Tests absichern (Verifikationspunkt)

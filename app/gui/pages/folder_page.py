@@ -38,6 +38,7 @@ class FolderPage(QWidget):
     """Folder file list and reusable document viewer."""
 
     backRequested = Signal()
+    openFileRequested = Signal(str)
     openPathRequested = Signal(str)
     manageCustomerRequested = Signal(str, str)
 
@@ -271,24 +272,30 @@ class FolderPage(QWidget):
         path = str(item.data(0, Qt.UserRole) or "")
 
         menu = QMenu(self.file_list)
-        open_action = menu.addAction("Oeffnen/Anzeigen")
-        open_folder_action = menu.addAction("Ordner im System oeffnen")
+        open_action = menu.addAction("Öffnen")
+        open_folder_action = menu.addAction("Ordner im System öffnen")
         copy_action = menu.addAction("Pfad kopieren")
+        open_action.setEnabled(bool(path))
         open_folder_action.setEnabled(bool(path))
         copy_action.setEnabled(bool(path))
 
         selected = menu.exec(self.file_list.viewport().mapToGlobal(position))
         if selected == open_action:
-            if item_type == "file":
-                self._open_selected_file(item)
-            elif path:
-                self.openPathRequested.emit(path)
+            self._open_context_item(item_type, path)
             return
         if selected == open_folder_action and path:
             self.openPathRequested.emit(path)
             return
         if selected == copy_action and path:
             QApplication.clipboard().setText(path)
+
+    def _open_context_item(self, item_type: str, path: str):
+        if not path:
+            return
+        if item_type == "file":
+            self.openFileRequested.emit(path)
+        else:
+            self.openPathRequested.emit(path)
 
     def _open_folder(self):
         if self.folder_path:

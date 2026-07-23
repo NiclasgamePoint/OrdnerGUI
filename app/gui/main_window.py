@@ -211,6 +211,7 @@ class MainWindow(QMainWindow):
         self.customer_page.customerChanged.connect(self._on_customer_changed)
 
         self.folder_page.backRequested.connect(self.navigator.back)
+        self.folder_page.openFileRequested.connect(self.open_native_file)
         self.folder_page.openPathRequested.connect(self.open_native_path)
         self.folder_page.manageCustomerRequested.connect(self.manage_folder_customer)
 
@@ -313,6 +314,24 @@ class MainWindow(QMainWindow):
                 self,
                 "Ordner konnte nicht geöffnet werden",
                 f"Kein Standardprogramm für den Pfad gefunden oder Start fehlgeschlagen:\n{target}",
+            )
+
+    def open_native_file(self, path_value: str):
+        path = Path(path_value).expanduser()
+        if not path.is_file():
+            QMessageBox.warning(
+                self,
+                "Datei nicht gefunden",
+                f"Die Datei wurde nicht gefunden:\n{path}",
+            )
+            return
+        target = path.resolve()
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+            QMessageBox.warning(
+                self,
+                "Datei konnte nicht geöffnet werden",
+                "Kein Standardprogramm für die Datei gefunden oder Start "
+                f"fehlgeschlagen:\n{target}",
             )
 
     def manage_folder_customer(self, folder_path: str, folder_name: str):
