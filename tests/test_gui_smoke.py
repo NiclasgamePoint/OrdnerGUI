@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QComboBox
 
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_models import Customer
@@ -183,6 +183,9 @@ class GuiSmokeTests(unittest.TestCase):
 
             dialog.customer_search.clear()
             dialog.customer_list.setCurrentRow(1)
+            dialog.entity_type_combo.setCurrentIndex(
+                dialog.entity_type_combo.findData("Unternehmen")
+            )
             selected_customer_id = dialog._selected_customer_id()
             with patch.object(
                 CustomerRecognitionService,
@@ -191,6 +194,10 @@ class GuiSmokeTests(unittest.TestCase):
             ) as resolve_case:
                 dialog._resolve("assign")
             self.assertEqual(resolve_case.call_args.args[-1], selected_customer_id)
+            self.assertEqual(
+                resolve_case.call_args.args[0].entity_type,
+                "Unternehmen",
+            )
             dialog.close()
 
     def test_customer_contact_scan_dialog_shows_button_and_result(self):
@@ -221,6 +228,51 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIn("3 Felder gefunden", dialog.scan_result.text())
             self.assertIn("2 jetzt zu prüfen", dialog.scan_result.text())
 
+            dialog.close()
+            repository.close()
+
+    def test_customer_type_can_be_changed_in_contact_review(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            index_path = root / "index.db"
+            customers_path = root / "customers.db"
+            with IndexManager(index_path) as _manager:
+                pass
+            repository = CustomerRepository(customers_path)
+            customer = repository.save(Customer(
+                display_name="Unklarer Kunde",
+                entity_type="Privatperson",
+            ))
+            suggestion = repository.apply_project_suggestion(
+                int(customer.id),
+                None,
+                "entity_type",
+                "Privatperson",
+                rule="Kundentyp unsicher",
+                confidence=0.55,
+            )
+            dialog = CustomerDataSuggestionsDialog(
+                repository,
+                int(customer.id),
+                index_path,
+                CustomerRecognitionOptions(enabled=True),
+            )
+
+            type_combos = [
+                combo for combo in dialog.findChildren(QComboBox)
+                if combo.accessibleName() == "Kundentyp auswählen"
+            ]
+            self.assertEqual(len(type_combos), 1)
+            type_combos[0].setCurrentIndex(
+                type_combos[0].findData("Unternehmen")
+            )
+            dialog._resolve(suggestion, True, "Unternehmen")
+
+            self.assertEqual(
+                repository.get(int(customer.id)).entity_type,
+                "Unternehmen",
+            )
+            self.assertEqual(repository.list_data_suggestions(int(customer.id)), [])
             dialog.close()
             repository.close()
 

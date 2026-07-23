@@ -573,7 +573,7 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(page.review_button.count(), 2)
             self.assertTrue(page.review_button.badge.isVisibleTo(page))
             self.assertEqual(page.edit_button.text(), "Kundendaten bearbeiten")
-            self.assertEqual(page.review_button.text(), "Kontaktdaten prüfen")
+            self.assertEqual(page.review_button.text(), "Kundendaten prüfen")
 
             page.close()
             repository.close()

@@ -277,7 +277,10 @@ class CustomerRecognitionTests(unittest.TestCase):
             ]
             for project in projects:
                 project.mkdir(parents=True)
-                (project / "info.txt").write_text("Kontakt: Max Mustermann", encoding="utf-8")
+                (project / "info.txt").write_text(
+                    "Kunde: Max Mustermann",
+                    encoding="utf-8",
+                )
             index_path = base / "index.db"
             customer_path = base / "customers.db"
             self._build_index(root, index_path)
@@ -457,11 +460,25 @@ class CustomerRecognitionTests(unittest.TestCase):
             self.assertEqual(stats.created, 1)
             self.assertEqual(stats.pending, 0)
             self.assertEqual(len(customers), 1)
-            self.assertEqual(customers[0].display_name, "AB S+E")
-            self.assertEqual(set(customers[0].folder_paths), {
+            customer = customers[0]
+            self.assertEqual(customer.entity_type, "Privatperson")
+            type_suggestions = [
+                suggestion
+                for suggestion in repository.list_data_suggestions(int(customer.id))
+                if suggestion.field_name == "entity_type"
+            ]
+            self.assertEqual(len(type_suggestions), 1)
+            customer = repository.resolve_data_suggestion(
+                int(type_suggestions[0].id),
+                True,
+                "Unternehmen",
+            )
+            self.assertEqual(customer.entity_type, "Unternehmen")
+            self.assertEqual(customer.display_name, "AB S+E")
+            self.assertEqual(set(customer.folder_paths), {
                 str(project.resolve()) for project in projects
             })
-            self.assertEqual(set(customers[0].service_types), {"Blower Door", "DEKRA"})
+            self.assertEqual(set(customer.service_types), {"Blower Door", "DEKRA"})
             repository.close()
 
     def test_existing_duplicates_with_different_city_are_not_merged_automatically(self):
