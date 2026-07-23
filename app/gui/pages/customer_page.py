@@ -117,6 +117,10 @@ class CustomerPage(QWidget):
         self.contacts_table.setMouseTracking(True)
         self.contacts_table.horizontalHeader().setStretchLastSection(True)
         self.contacts_table.setMinimumHeight(150)
+        self.contacts_table.setAccessibleName("Kontakte des Kunden")
+        self.contacts_table.setAccessibleDescription(
+            "Tabelle mit Name, Rolle, E-Mail und Telefonnummer."
+        )
         form_layout.addWidget(self.contacts_table)
 
         notes_title = QLabel("Notizen")
@@ -126,6 +130,7 @@ class CustomerPage(QWidget):
         self.notes.setReadOnly(True)
         self.notes.setMinimumHeight(120)
         self.notes.setPlaceholderText("Keine Notiz hinterlegt")
+        self.notes.setAccessibleName("Kundennotizen")
         form_layout.addWidget(self.notes)
         form_layout.addStretch(1)
         scroll.setWidget(content)
@@ -133,10 +138,12 @@ class CustomerPage(QWidget):
 
         button_row = QHBoxLayout()
         self.edit_button = AppButton("Kundendaten bearbeiten", AppButton.SECONDARY)
+        self.edit_button.setAccessibleName("Kundendaten bearbeiten")
         self.edit_button.clicked.connect(self._edit_customer)
         self.review_button = CountBadgeButton(
             "Kontaktdaten prüfen", AppButton.SECONDARY
         )
+        self.review_button.setAccessibleName("Kontaktdaten prüfen")
         self.review_button.clicked.connect(self._review_suggestions)
         button_row.addWidget(self.edit_button, 1)
         button_row.addWidget(self.review_button, 1)
@@ -156,6 +163,7 @@ class CustomerPage(QWidget):
         self.folder_scroll = QScrollArea()
         self.folder_scroll.setObjectName("PageScrollArea")
         self.folder_scroll.setWidgetResizable(True)
+        self.folder_scroll.setAccessibleName("Dienstleistungen und Projektordner")
         content = QWidget()
         content.setObjectName("ThemedScrollContent")
         self.folder_layout = QVBoxLayout(content)

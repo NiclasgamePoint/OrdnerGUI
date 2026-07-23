@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from PySide6.QtCore import QSettings
@@ -8,15 +9,53 @@ from PySide6.QtCore import QSettings
 from app.core.config import SETTINGS_APP, SETTINGS_ORG
 
 
+class SearchSort(str, Enum):
+    RELEVANCE = "relevance"
+    DATE = "date"
+    ALPHABETICAL = "alphabetical"
+
+
 @dataclass(frozen=True)
 class SearchFilters:
     domain_folder: str = ""
     year: str = ""
     file_type: str = ""
+    sort_order: SearchSort = SearchSort.RELEVANCE
+    include_subfolders: bool = False
 
     @property
     def active(self) -> bool:
         return bool(self.domain_folder or self.year or self.file_type)
+
+
+class SearchPreferences:
+    """Persist user-controlled search presentation options."""
+
+    SORT_KEY = "search/sort_order"
+    SUBFOLDERS_KEY = "search/include_subfolders"
+
+    def __init__(self):
+        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+    def load(self) -> tuple[SearchSort, bool]:
+        raw_sort = str(
+            self.settings.value(self.SORT_KEY, SearchSort.RELEVANCE.value)
+        )
+        try:
+            sort_order = SearchSort(raw_sort)
+        except ValueError:
+            sort_order = SearchSort.RELEVANCE
+        raw_subfolders = self.settings.value(self.SUBFOLDERS_KEY, False)
+        include_subfolders = (
+            raw_subfolders
+            if isinstance(raw_subfolders, bool)
+            else str(raw_subfolders).casefold() in {"1", "true", "yes"}
+        )
+        return sort_order, include_subfolders
+
+    def save(self, sort_order: SearchSort, include_subfolders: bool):
+        self.settings.setValue(self.SORT_KEY, sort_order.value)
+        self.settings.setValue(self.SUBFOLDERS_KEY, bool(include_subfolders))
 
 
 @dataclass(frozen=True)

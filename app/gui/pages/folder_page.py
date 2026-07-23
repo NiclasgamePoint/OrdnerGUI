@@ -93,8 +93,12 @@ class FolderPage(QWidget):
 
         actions = QHBoxLayout()
         self.open_folder_button = AppButton("Ordner öffnen", AppButton.SECONDARY)
+        self.open_folder_button.setAccessibleName("Aktuellen Ordner öffnen")
         self.open_folder_button.clicked.connect(self._open_folder)
         self.customer_button = AppButton("Kundendaten", AppButton.SECONDARY)
+        self.customer_button.setAccessibleName(
+            "Kundendaten zum aktuellen Ordner verwalten"
+        )
         self.customer_button.clicked.connect(self._manage_customer)
         actions.addWidget(self.open_folder_button)
         actions.addWidget(self.customer_button)
@@ -105,9 +109,14 @@ class FolderPage(QWidget):
         self.file_filter = QLineEdit()
         self.file_filter.setPlaceholderText("Dateien in diesem Ordner filtern …")
         self.file_filter.setClearButtonEnabled(True)
+        self.file_filter.setAccessibleName("Dateien filtern")
+        self.file_filter.setAccessibleDescription(
+            "Filtert Dateien im geöffneten Projektordner nach Namen."
+        )
         self.file_filter.textChanged.connect(self._apply_file_filter)
         self.file_type_filter = QComboBox()
         self.file_type_filter.setMinimumWidth(150)
+        self.file_type_filter.setAccessibleName("Dateitypfilter")
         self.file_type_filter.currentIndexChanged.connect(self._apply_file_filter)
         filter_row.addWidget(self.file_filter, 1)
         filter_row.addWidget(self.file_type_filter)
@@ -119,10 +128,15 @@ class FolderPage(QWidget):
         self.file_list.setColumnWidth(0, 330)
         self.file_list.setAlternatingRowColors(True)
         self.file_list.setMouseTracking(True)
+        self.file_list.setAccessibleName("Ordner und Dateien")
+        self.file_list.setAccessibleDescription(
+            "Dateibaum des aktuellen Projektordners. Aktivieren zeigt eine Vorschau."
+        )
         self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._open_tree_context_menu)
         self.file_list.itemClicked.connect(self._open_selected_file)
         self.file_tabs = QTabWidget()
+        self.file_tabs.setAccessibleName("Ordner- und Mailansicht")
         self.file_tabs.addTab(self.file_list, "Ordner")
         self.mail_panel = MailPanel()
         self.file_tabs.addTab(self.mail_panel, "Mails")
@@ -138,6 +152,10 @@ class FolderPage(QWidget):
         title.setObjectName("PageTitle")
         layout.addWidget(title)
         self.file_viewer = FileViewer()
+        self.file_viewer.setAccessibleName("Dateivorschau")
+        self.file_viewer.setAccessibleDescription(
+            "Zeigt den Inhalt der im Dateibaum ausgewählten Datei."
+        )
         layout.addWidget(self.file_viewer, 1)
         return card
 

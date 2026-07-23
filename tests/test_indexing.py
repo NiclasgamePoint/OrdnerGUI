@@ -9,7 +9,7 @@ from app.core.config import IndexOptions
 from app.core.index_diagnostics import IndexDiagnosticsService
 from app.core import fuzzy_search
 from app.core.index_manager import IndexManager
-from app.core.search_models import SearchFilters
+from app.core.search_models import SearchFilters, SearchSort
 
 
 class IndexingTests(unittest.TestCase):
@@ -117,6 +117,78 @@ class IndexingTests(unittest.TestCase):
         self.assertIn("Elektroplanung", text_page.items[0]["path"])
         manager.close()
 
+    def test_folder_results_support_relevance_date_and_alphabet_sorting(self):
+        projects = [
+            self.root / "DEKRA" / "2025" / "Sortierkunde Alpha, Berlin",
+            self.root / "DEKRA" / "2026" / "Sortierkunde Zulu, Berlin",
+        ]
+        for project in projects:
+            project.mkdir(parents=True)
+            (project / "datei.txt").write_text("Sortierung", encoding="utf-8")
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+
+        relevant = manager.search_folders_page(
+            "Sortierkunde",
+            SearchFilters(sort_order=SearchSort.RELEVANCE),
+            page_size=10,
+        )
+        alphabetical = manager.search_folders_page(
+            "Sortierkunde",
+            SearchFilters(sort_order=SearchSort.ALPHABETICAL),
+            page_size=10,
+        )
+        newest = manager.search_folders_page(
+            "Sortierkunde",
+            SearchFilters(sort_order=SearchSort.DATE),
+            page_size=10,
+        )
+
+        self.assertEqual(relevant.total, 2)
+        self.assertIn("Alpha", alphabetical.items[0]["folder_name"])
+        self.assertIn("Zulu", newest.items[0]["folder_name"])
+        manager.close()
+
+    def test_fts_snippets_include_document_metadata_and_sorting(self):
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        manager.synchronize_directory(self.root, full_rebuild=True)
+        manager.conn.execute(
+            "UPDATE files SET modified_date='2024-01-01T00:00:00' "
+            "WHERE filename LIKE '%Blower Door%'"
+        )
+        manager.conn.execute(
+            "UPDATE files SET modified_date='2099-01-01T00:00:00' "
+            "WHERE filename LIKE '%DEKRA%'"
+        )
+        manager.conn.commit()
+
+        relevance = manager.search_text_page(
+            "Prüftext",
+            SearchFilters(sort_order=SearchSort.RELEVANCE),
+            page_size=10,
+        )
+        alphabetical = manager.search_text_page(
+            "Prüftext",
+            SearchFilters(sort_order=SearchSort.ALPHABETICAL),
+            page_size=10,
+        )
+        newest = manager.search_text_page(
+            "Prüftext",
+            SearchFilters(sort_order=SearchSort.DATE),
+            page_size=10,
+        )
+
+        self.assertEqual(relevance.total, 4)
+        self.assertIn("Prüftext", relevance.items[0]["excerpt"])
+        self.assertTrue(relevance.items[0]["filename"].endswith(".txt"))
+        self.assertTrue(relevance.items[0]["folder_path"])
+        self.assertLessEqual(
+            alphabetical.items[0]["filename"].casefold(),
+            alphabetical.items[1]["filename"].casefold(),
+        )
+        self.assertIn("DEKRA", newest.items[0]["filename"])
+        manager.close()
+
     def test_fuzzy_multiword_folder_search_uses_name_city_and_service(self):
         target = self.root / "Blower Door" / "2025" / "Wahnhorst, Kaltenkirchen"
         target.mkdir(parents=True)
@@ -197,17 +269,24 @@ class IndexingTests(unittest.TestCase):
         manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
         manager.synchronize_directory(self.root, full_rebuild=True)
 
-        structured = manager.search_folders_page(
+        structured_hidden = manager.search_folders_page(
             "Bilder", SearchFilters(), page=1, page_size=25
+        )
+        structured_visible = manager.search_folders_page(
+            "Bilder",
+            SearchFilters(include_subfolders=True),
+            page=1,
+            page_size=25,
         )
         legacy_result = manager.search_folders_page(
             "Scans", SearchFilters(), page=1, page_size=25
         )
         details = manager.get_folder_details(str(pictures))
 
-        self.assertEqual(structured.total, 1)
+        self.assertEqual(structured_hidden.total, 0)
+        self.assertEqual(structured_visible.total, 1)
         self.assertEqual(
-            structured.items[0]["folder_path"], str(current_project.resolve())
+            structured_visible.items[0]["folder_path"], str(current_project.resolve())
         )
         self.assertEqual(legacy_result.total, 1)
         self.assertEqual(legacy_result.items[0]["folder_path"], str(legacy.resolve()))

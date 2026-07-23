@@ -907,6 +907,7 @@ class IndexManager:
             fuzzy_record_score,
             search_tokens,
         )
+        from app.core.search_models import SearchSort
 
         cursor = self.conn.cursor()
         tokens = search_tokens(query)
@@ -942,7 +943,15 @@ class IndexManager:
             SELECT folder.path, folder.name, folder.relative_path,
                    COALESCE(NULLIF(folder.project_root_path, ''), folder.path) AS canonical_path,
                    project.customer_label, project.customer_name, project.city,
-                   project.service_type, project.year
+                   project.service_type, project.year,
+                   (
+                       SELECT MAX(candidate_file.modified_date)
+                       FROM files candidate_file
+                       WHERE candidate_file.project_root_path =
+                           COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
+                          OR candidate_file.folder_path =
+                           COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
+                   ) AS last_modified
             FROM folders folder
             LEFT JOIN project_roots project ON project.path =
                 COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
@@ -954,9 +963,18 @@ class IndexManager:
                        OR ancestor.path LIKE folder.path || ? || '%'
                 )
             )
+            AND (
+                ? = 1
+                OR COALESCE(folder.project_root_path, '') = ''
+                OR folder.path = folder.project_root_path
+            )
             {eligibility_sql}
         """
-        base_params: list[str] = [os.sep, *eligibility_params]
+        base_params: list = [
+            os.sep,
+            int(filters.include_subfolders),
+            *eligibility_params,
+        ]
 
         # Fast path: every query word must occur as an exact substring in at
         # least one indexed name/path field. SQLite reduces the candidate set
@@ -977,11 +995,16 @@ class IndexManager:
             (*base_params, *exact_params),
         ).fetchall()
 
-        ranked_by_path: dict[str, tuple[float, str]] = {}
+        ranked_by_path: dict[str, tuple[float, str, int, str]] = {}
         if rows:
             for row in rows:
                 canonical_path = str(row["canonical_path"])
-                ranked_by_path[canonical_path] = (1.0, canonical_path.casefold())
+                ranked_by_path[canonical_path] = (
+                    1.0,
+                    str(row["customer_label"] or row["name"]).casefold(),
+                    int(row["year"] or 0),
+                    str(row["last_modified"] or ""),
+                )
         else:
             # Typo fallback: ask SQLite for at most five plausible prefix
             # matches. Only this bounded set receives the costlier fuzzy score.
@@ -1014,15 +1037,28 @@ class IndexManager:
                 ])
                 if score is not None:
                     canonical_path = str(row["canonical_path"])
-                    ranked_by_path[canonical_path] = (score, canonical_path.casefold())
+                    ranked_by_path[canonical_path] = (
+                        score,
+                        str(row["customer_label"] or row["name"]).casefold(),
+                        int(row["year"] or 0),
+                        str(row["last_modified"] or ""),
+                    )
 
-        ranked = sorted(
-            ((score, sort_path, path) for path, (score, sort_path) in ranked_by_path.items()),
-            key=lambda item: (-item[0], item[1]),
-        )
+        ranked = [
+            (score, name, year, modified, path)
+            for path, (score, name, year, modified) in ranked_by_path.items()
+        ]
+        if filters.sort_order == SearchSort.DATE:
+            ranked.sort(key=lambda item: (item[1], item[4]))
+            ranked.sort(key=lambda item: item[3], reverse=True)
+            ranked.sort(key=lambda item: item[2], reverse=True)
+        elif filters.sort_order == SearchSort.ALPHABETICAL:
+            ranked.sort(key=lambda item: (item[1], item[4]))
+        else:
+            ranked.sort(key=lambda item: (-item[0], item[1], item[4]))
         total = len(ranked)
         offset = max(0, page - 1) * page_size
-        selected_paths = [item[2] for item in ranked[offset:offset + page_size]]
+        selected_paths = [item[4] for item in ranked[offset:offset + page_size]]
         items = []
         for path in selected_paths:
             row = cursor.execute(
@@ -1368,6 +1404,9 @@ class IndexManager:
                 continue
             parsed.append({
                 "path": file_path,
+                "filename": Path(file_path).name,
+                "folder_path": str(Path(file_path).parent),
+                "modified_date": "",
                 "line": data.get("line_number"),
                 "excerpt": (lines_data.get("text") or "").strip(),
                 "source": "text",
@@ -1385,6 +1424,9 @@ class IndexManager:
         limit: int = 200,
         filters: Optional[SearchFilters] = None,
     ) -> List[Dict]:
+        from app.core.search_models import SearchSort
+
+        filters = filters or SearchFilters()
         fts_query = self._build_fts_query(query)
         if not fts_query:
             return []
@@ -1392,19 +1434,29 @@ class IndexManager:
         sql = """
             SELECT
                 file_content_fts.path AS path,
+                files.filename AS filename,
+                files.folder_path AS folder_path,
+                files.project_root_path AS project_root_path,
+                files.modified_date AS modified_date,
                 snippet(file_content_fts, 1, '', '', ' … ', 18) AS excerpt
             FROM file_content_fts
             JOIN files ON files.path = file_content_fts.path
             WHERE file_content_fts MATCH ?
         """
         params = [fts_query]
-        filter_sql, filter_params = self._metadata_filter_clause(filters or SearchFilters())
+        filter_sql, filter_params = self._metadata_filter_clause(filters)
         sql += filter_sql
         params.extend(filter_params)
         if customer_name:
             sql += f" AND {self.SEARCH_LABEL_SQL} = ?"
             params.append(customer_name)
-        sql += " ORDER BY rank LIMIT ?"
+        if filters.sort_order == SearchSort.DATE:
+            sql += " ORDER BY files.modified_date DESC, files.filename COLLATE NOCASE"
+        elif filters.sort_order == SearchSort.ALPHABETICAL:
+            sql += " ORDER BY files.filename COLLATE NOCASE, files.path COLLATE NOCASE"
+        else:
+            sql += " ORDER BY rank, files.filename COLLATE NOCASE"
+        sql += " LIMIT ?"
         params.append(limit)
 
         cursor = self.conn.cursor()
@@ -1412,6 +1464,11 @@ class IndexManager:
         return [
             {
                 "path": row["path"],
+                "filename": str(row["filename"] or Path(str(row["path"])).name),
+                "folder_path": str(
+                    row["project_root_path"] or row["folder_path"] or ""
+                ),
+                "modified_date": str(row["modified_date"] or ""),
                 "line": None,
                 "excerpt": (row["excerpt"] or "").replace("\n", " ").strip(),
                 "source": "document",
@@ -1515,9 +1572,25 @@ class IndexManager:
                     continue
                 seen.add(key)
                 unique_results.append(result)
-                if len(unique_results) >= limit:
-                    break
-            return unique_results
+            from app.core.search_models import SearchSort
+
+            sort_order = (filters or SearchFilters()).sort_order
+            if sort_order == SearchSort.DATE:
+                unique_results.sort(
+                    key=lambda item: (
+                        str(item.get("modified_date") or ""),
+                        str(item.get("filename") or "").casefold(),
+                    ),
+                    reverse=True,
+                )
+            elif sort_order == SearchSort.ALPHABETICAL:
+                unique_results.sort(
+                    key=lambda item: (
+                        str(item.get("filename") or Path(item["path"]).name).casefold(),
+                        str(item["path"]).casefold(),
+                    )
+                )
+            return unique_results[:limit]
         except Exception:
             logger.exception("Fehler bei Volltextsuche: query=%r", query)
             return []

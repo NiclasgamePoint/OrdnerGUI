@@ -21,6 +21,10 @@ class IndexStatusBar(QFrame):
         self.setMinimumHeight(38)
         self.setCursor(QCursor(Qt.PointingHandCursor))
         self.setToolTip("Indexdiagnose öffnen")
+        self.setAccessibleName("Anwendungsstatus")
+        self.setAccessibleDescription(
+            "Zeigt Such- und Indexstatus. Aktivieren öffnet die Indexdiagnose."
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 5, 8, 5)
@@ -45,6 +49,9 @@ class IndexStatusBar(QFrame):
 
     def set_text(self, text: str):
         self.status_label.setText(text)
+        self.setAccessibleDescription(
+            f"Aktueller Status: {text}. Aktivieren öffnet die Indexdiagnose."
+        )
         self.textChanged.emit(text)
 
     def set_busy(self, busy: bool):

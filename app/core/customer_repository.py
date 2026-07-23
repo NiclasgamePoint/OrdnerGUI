@@ -21,6 +21,7 @@ from app.core.customer_recognition_models import (
     RecognitionStats,
 )
 from app.core.folder_structure import ProjectRoot, normalize_identity
+from app.core.search_models import SearchSort
 
 
 class CustomerRepository:
@@ -1192,25 +1193,30 @@ class CustomerRepository:
                 except ValueError:
                     continue
 
-    def search(self, query: str, limit: int = 25) -> list[Customer]:
+    def search(
+        self,
+        query: str,
+        limit: int = 25,
+        sort_order: SearchSort = SearchSort.RELEVANCE,
+    ) -> list[Customer]:
         from app.core.fuzzy_search import (
             SearchField,
             fuzzy_record_score,
             normalize_search_text,
         )
-
         rows = self.connection.execute(
             """
             SELECT customers.*,
                    GROUP_CONCAT(DISTINCT customer_projects.project_label) AS project_labels,
                    GROUP_CONCAT(DISTINCT customer_projects.project_city) AS project_cities,
-                   GROUP_CONCAT(DISTINCT customer_projects.folder_path) AS project_paths
+                   GROUP_CONCAT(DISTINCT customer_projects.folder_path) AS project_paths,
+                   MAX(customer_projects.year) AS latest_project_year
             FROM customers
             LEFT JOIN customer_projects ON customer_projects.customer_id = customers.id
             GROUP BY customers.id
             """,
         ).fetchall()
-        ranked: list[tuple[float, str, int]] = []
+        ranked: list[tuple[float, str, int, int]] = []
         for row in rows:
             path_text = normalize_search_text(row["project_paths"])
             identity_values = [
@@ -1227,11 +1233,21 @@ class CustomerRepository:
                 SearchField(row["project_cities"], 1.08),
             ])
             if score is not None:
-                ranked.append((score, str(row["display_name"]).casefold(), int(row["id"])))
-        ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+                ranked.append((
+                    score,
+                    str(row["display_name"]).casefold(),
+                    int(row["latest_project_year"] or 0),
+                    int(row["id"]),
+                ))
+        if sort_order == SearchSort.DATE:
+            ranked.sort(key=lambda item: (-item[2], item[1], item[3]))
+        elif sort_order == SearchSort.ALPHABETICAL:
+            ranked.sort(key=lambda item: (item[1], item[3]))
+        else:
+            ranked.sort(key=lambda item: (-item[0], item[1], item[3]))
         return [
             customer
-            for _, _, customer_id in ranked[:max(0, limit)]
+            for _, _, _, customer_id in ranked[:max(0, limit)]
             if (customer := self.get(customer_id)) is not None
         ]
 

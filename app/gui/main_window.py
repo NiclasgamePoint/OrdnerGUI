@@ -46,7 +46,13 @@ from app.core.index_store import (
     create_restore_build,
     validate_index,
 )
-from app.core.search_models import RecentCustomerHistory, SearchFilters, SearchHistory
+from app.core.search_models import (
+    RecentCustomerHistory,
+    SearchFilters,
+    SearchHistory,
+    SearchPreferences,
+    SearchSort,
+)
 from app.gui.dialogs import (
     CustomerEditorDialog,
     CustomerRecognitionReviewDialog,
@@ -62,6 +68,7 @@ from app.gui.workers import (
     IndexJobController,
     SearchWorker,
     SettingsDataWorker,
+    StatisticsWorker,
 )
 from app.services import FileSystemMonitor
 from app.services.document_converter import DocumentConverter
@@ -91,6 +98,8 @@ class MainWindow(QMainWindow):
         self.diagnostics_service = IndexDiagnosticsService()
         self.settings_popup: SettingsPopup | None = None
         self.settings_data_worker: SettingsDataWorker | None = None
+        self.statistics_worker: StatisticsWorker | None = None
+        self.statistics_refresh_pending = False
         self.blacklist_cleanup_worker: BlacklistCleanupWorker | None = None
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
@@ -104,8 +113,10 @@ class MainWindow(QMainWindow):
         self.search_counts: dict[str, int | None] = {
             "customers": None,
             "folders": None,
+            "text": None,
         }
         self.search_history = SearchHistory()
+        self.search_preferences = SearchPreferences()
         self.recent_customer_history = RecentCustomerHistory(maximum=5)
         self.search_debounce = QTimer(self)
         self.search_debounce.setSingleShot(True)
@@ -124,6 +135,7 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         self.navigator.reset("search")
         self._show_initial_customers()
+        self._refresh_statistics()
         self.initialization_timer.start(0)
 
     def _initialize_data_source(self):
@@ -172,10 +184,17 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.header)
 
         self.filter_popup = SearchFilterPopup(self)
-        self.filter_popup.filtersChanged.connect(self._on_filter_changed)
         self.domain_filter = self.filter_popup.domain_combo
         self.year_filter = self.filter_popup.year_combo
         self.file_type_filter = self.filter_popup.file_type_combo
+        sort_order, include_subfolders = self.search_preferences.load()
+        self.filter_popup.sort_combo.setCurrentIndex(
+            max(0, self.filter_popup.sort_combo.findData(sort_order))
+        )
+        self.filter_popup.include_subfolders_checkbox.setChecked(
+            include_subfolders
+        )
+        self.filter_popup.filtersChanged.connect(self._on_filter_changed)
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("PageStack")
@@ -203,6 +222,7 @@ class MainWindow(QMainWindow):
 
         self.search_page.customerActivated.connect(self.open_customer_page)
         self.search_page.folderActivated.connect(self.open_folder_page)
+        self.search_page.openFileRequested.connect(self.open_native_file)
         self.search_page.openPathRequested.connect(self.open_native_path)
 
         self.customer_page.backRequested.connect(self.navigator.back)
@@ -349,6 +369,7 @@ class MainWindow(QMainWindow):
             self.navigator.navigate("customer", customer.id)
 
     def _on_customer_changed(self, _customer_id: int):
+        self._refresh_statistics()
         self._refresh_customer_results_only()
         if self.navigator.current.page == "customer":
             self._show_route(self.navigator.current)
@@ -360,13 +381,19 @@ class MainWindow(QMainWindow):
             if (customer := self.customer_repository.get(customer_id)) is not None
         ]
         self.search_page.reset(customers)
-        self.search_counts = {"customers": len(customers), "folders": None}
+        self.search_counts = {
+            "customers": len(customers),
+            "folders": None,
+            "text": None,
+        }
         if customers:
             self.status_bar.set_text(
                 f"{len(customers)} zuletzt gesuchte Kunden · Suchbegriff eingeben"
             )
         else:
-            self.status_bar.set_text("Suchbegriff für Kunden oder Ordner eingeben")
+            self.status_bar.set_text(
+                "Suchbegriff für Kunden, Ordner oder Dokumente eingeben"
+            )
 
     def _refresh_customer_results_only(self):
         query = self.header.query()
@@ -374,6 +401,7 @@ class MainWindow(QMainWindow):
             customers = self.customer_repository.search(
                 query,
                 self.index_options.result_limit,
+                self._current_search_filters().sort_order,
             )
         else:
             self._show_initial_customers()
@@ -386,7 +414,7 @@ class MainWindow(QMainWindow):
         self.search_debounce.stop()
         self.navigator.navigate("search")
         query = text.strip()
-        self.search_counts = {"customers": None, "folders": None}
+        self.search_counts = {"customers": None, "folders": None, "text": None}
         if not query:
             self._show_initial_customers()
             return
@@ -395,7 +423,9 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text("Bitte mindestens zwei Zeichen eingeben.")
             return
         self.search_page.prepare_search()
-        self.status_bar.set_text("Kunden- und Ordnersuche wird vorbereitet …")
+        self.status_bar.set_text(
+            "Kunden-, Ordner- und Dokumentsuche wird vorbereitet …"
+        )
         self.search_debounce.start()
 
     def _start_live_search(self):
@@ -413,13 +443,13 @@ class MainWindow(QMainWindow):
         self._cancel_outdated_searches()
         self.navigator.navigate("search")
         self.header.set_history(self.search_history.add(query))
-        self.search_counts = {"customers": None, "folders": None}
+        self.search_counts = {"customers": None, "folders": None, "text": None}
         self.search_page.prepare_search()
         self.status_bar.set_text("Durchsuche Kunden und Ordner parallel …")
         self._launch_visible_searches(query, self.search_generation)
 
     def _launch_visible_searches(self, query: str, generation: int):
-        for category in ("customers", "folders"):
+        for category in ("customers", "folders", "text"):
             worker = SearchWorker(
                 DB_FILE,
                 generation,
@@ -452,6 +482,8 @@ class MainWindow(QMainWindow):
                 self.search_page.set_customer_error(error)
             elif category == "folders":
                 self.search_page.set_folder_error(error)
+            elif category == "text":
+                self.search_page.set_document_error(error)
             self.search_counts[category] = 0
         else:
             page = results
@@ -465,15 +497,20 @@ class MainWindow(QMainWindow):
                 ])
             elif category == "folders":
                 self.search_page.set_folders(page.items, page.total)
+            elif category == "text":
+                self.search_page.set_documents(page.items, page.total)
         self._update_search_status()
 
     def _update_search_status(self):
         customers = self.search_counts["customers"]
         folders = self.search_counts["folders"]
+        documents = self.search_counts["text"]
         customer_text = "…" if customers is None else str(customers)
         folder_text = "…" if folders is None else str(folders)
+        document_text = "…" if documents is None else str(documents)
         self.status_bar.set_text(
-            f"Kunden: {customer_text} · Ordner: {folder_text}"
+            f"Kunden: {customer_text} · Ordner: {folder_text} · "
+            f"Dokumente: {document_text}"
         )
 
     def _cancel_outdated_searches(self):
@@ -489,6 +526,13 @@ class MainWindow(QMainWindow):
             domain_folder=str(self.domain_filter.currentData() or ""),
             year=str(self.year_filter.currentData() or ""),
             file_type=str(self.file_type_filter.currentData() or ""),
+            sort_order=(
+                self.filter_popup.sort_combo.currentData()
+                or SearchSort.RELEVANCE
+            ),
+            include_subfolders=(
+                self.filter_popup.include_subfolders_checkbox.isChecked()
+            ),
         )
 
     def _refresh_search_facets(self):
@@ -513,6 +557,10 @@ class MainWindow(QMainWindow):
         self._update_filter_button()
 
     def _on_filter_changed(self):
+        self.search_preferences.save(
+            self.filter_popup.sort_combo.currentData() or SearchSort.RELEVANCE,
+            self.filter_popup.include_subfolders_checkbox.isChecked(),
+        )
         self._update_filter_button()
         if len(self.header.query()) >= 2:
             self.start_full_search()
@@ -569,6 +617,7 @@ class MainWindow(QMainWindow):
         self.settings_popup.set_backups_loading()
         self.settings_popup.set_diagnostics_loading()
         self.settings_popup.set_recognition_state_loading()
+        self.settings_popup.set_statistics_loading()
         self.settings_popup.appearanceChanged.connect(
             self.on_settings_appearance_changed
         )
@@ -634,7 +683,32 @@ class MainWindow(QMainWindow):
         self.settings_popup.set_backups_loading()
         self.settings_popup.set_diagnostics_loading()
         self.settings_popup.set_recognition_state_loading()
+        self.settings_popup.set_statistics_loading()
         self._start_settings_data_load()
+
+    def _refresh_statistics(self):
+        if (
+            self.statistics_worker is not None
+            and self.statistics_worker.isRunning()
+        ):
+            self.statistics_refresh_pending = True
+            return
+        self.statistics_refresh_pending = False
+        self.search_page.set_statistics(None)
+        worker = StatisticsWorker(DB_FILE, CUSTOMER_DB_FILE, parent=self)
+        worker.completed.connect(self.search_page.set_statistics)
+        worker.finished.connect(self._release_statistics_worker)
+        self.statistics_worker = worker
+        worker.start()
+
+    def _release_statistics_worker(self):
+        worker = self.sender()
+        if isinstance(worker, StatisticsWorker):
+            worker.deleteLater()
+            if self.statistics_worker is worker:
+                self.statistics_worker = None
+        if self.statistics_refresh_pending:
+            self._refresh_statistics()
 
     def _on_settings_data_loaded(self, payload):
         if self.settings_popup is None:
@@ -647,6 +721,10 @@ class MainWindow(QMainWindow):
         )
         self.settings_popup.set_blacklist_suggestions(
             payload.get("blacklist_suggestions") or []
+        )
+        self.settings_popup.set_statistics(
+            payload.get("statistics"),
+            str(payload.get("error") or ""),
         )
         error = str(payload.get("error") or "")
         if error:
@@ -691,6 +769,7 @@ class MainWindow(QMainWindow):
             self.customer_page.repository = self.customer_repository
             self.navigator.reset("search")
             self._show_initial_customers()
+            self._refresh_statistics()
             self.status_bar.set_text("Kundendaten gelöscht · Kundenliste ist leer")
             if self.settings_popup is not None:
                 self.settings_popup.set_recognition_state({}, 0)
@@ -785,6 +864,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.customersChanged.connect(self._refresh_customer_results_only)
+        dialog.customersChanged.connect(self._refresh_statistics)
         dialog.casesChanged.connect(
             lambda count: self.status_bar.set_text(
                 f"Kundenerkennung · {count} offene Prüffälle"
@@ -1066,6 +1146,7 @@ class MainWindow(QMainWindow):
                 options=self.index_options,
             )
         self._refresh_search_facets()
+        self._refresh_statistics()
 
     def _reload_active_index(self):
         self.search_generation += 1
@@ -1075,6 +1156,7 @@ class MainWindow(QMainWindow):
         self.index_manager.close()
         self.index_manager = IndexManager(DB_FILE, options=self.index_options)
         self._refresh_search_facets()
+        self._refresh_statistics()
 
     def _start_filesystem_monitor(self):
         if self.filesystem_monitor is not None:
@@ -1178,6 +1260,12 @@ class MainWindow(QMainWindow):
         ):
             self.settings_data_worker.requestInterruption()
             self.settings_data_worker.wait()
+        if (
+            self.statistics_worker is not None
+            and self.statistics_worker.isRunning()
+        ):
+            self.statistics_worker.requestInterruption()
+            self.statistics_worker.wait()
         if (
             self.blacklist_cleanup_worker is not None
             and self.blacklist_cleanup_worker.isRunning()

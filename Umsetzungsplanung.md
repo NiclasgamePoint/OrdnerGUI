@@ -96,14 +96,14 @@
 - [ ] Statusmeldung während erstem Indexlauf: "Index wird erstellt, bitte warten..."
 - [x] Tastatur-Navigation: Alt+Right für Vorwärts ergänzt
 - [ ] Fokus-Reihenfolge (Tab-Reihenfolge), insbesondere im CustomerEditorDialog, prüfen
-- [ ] Barrierefreiheit: accessibleName()/setAccessibleDescription() für zentrale Widgets setzen
-- [ ] Sortierung der Suchergebnisse konfigurierbar machen (Relevanz/Datum/Alphabet)
-- [ ] Globale Suche: Unterordner unter Dienstleistung/Jahr/Name, Ort standardmäßig ausblenden und per Filter optional einblenden
-- [ ] Vorschau im Suchergebnis mit Snippet (FTS5 snippet()) anzeigen
+- [x] Barrierefreiheit: accessibleName()/setAccessibleDescription() für zentrale Widgets setzen
+- [x] Sortierung der Suchergebnisse konfigurierbar machen (Relevanz/Datum/Alphabet)
+- [x] Globale Suche: Unterordner unter Dienstleistung/Jahr/Name, Ort standardmäßig ausblenden und per Filter optional einblenden
+- [x] Vorschau im Suchergebnis mit Snippet (FTS5 snippet()) anzeigen
 - [ ] Drag & Drop: Dateien aus Dateibaum in externe Apps ziehen
 - [ ] Drag & Drop: Dokumente per Drop in Ordner importieren
-- [ ] Startseite: beim Öffnen Gesamtanzahl von Kunden und Ordnern sichtbar anzeigen
-- [ ] Einstellungen: separaten Statistik-Tab mit Kernkennzahlen ergänzen
+- [x] Startseite: beim Öffnen Gesamtanzahl von Kunden und Ordnern sichtbar anzeigen
+- [x] Einstellungen: separaten Statistik-Tab mit Kernkennzahlen ergänzen
 
 ## 7. Sonstige Hinweise
 

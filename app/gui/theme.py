@@ -259,13 +259,15 @@ def build_stylesheet(
         font-size: {scaled(14)}px;
     }}
 
-    QFrame#ResultRow {{
+    QFrame#ResultRow,
+    QFrame#DocumentResultRow {{
         background-color: {surface};
         border: 1px solid {border};
         border-radius: 11px;
     }}
 
-    QFrame#ResultRow:hover {{
+    QFrame#ResultRow:hover,
+    QFrame#DocumentResultRow:hover {{
         background-color: {item_hover};
         border-color: {accent};
     }}
@@ -291,6 +293,20 @@ def build_stylesheet(
         font-size: {scaled(13)}px;
         font-weight: 700;
         padding: 2px 3px;
+        border: none;
+        background: transparent;
+    }}
+
+    QFrame#StatisticsWidget {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 11px;
+    }}
+
+    QLabel#StatisticValue {{
+        color: {text};
+        font-size: {scaled(15)}px;
+        font-weight: 700;
         border: none;
         background: transparent;
     }}
