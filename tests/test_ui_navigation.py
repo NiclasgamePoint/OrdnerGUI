@@ -233,9 +233,15 @@ class UiNavigationTests(unittest.TestCase):
             ]
 
             self.assertEqual(row_titles, [
-                "Baubegleitung · 2025 · Muster, Hamburg",
-                "Blower Door · 2023 · Muster, Kiel",
+                "Baubegleitung · 2025 · Hamburg",
+                "Blower Door · 2023 · Kiel",
             ])
+            row_subtitles = [
+                row.findChildren(QLabel)[1].text()
+                for row in page._folder_rows
+            ]
+            self.assertIn("Muster, Hamburg", row_subtitles[0])
+            self.assertIn("Muster, Kiel", row_subtitles[1])
             self.assertFalse(page.folder_message.isVisible())
             page.close()
             repository.close()

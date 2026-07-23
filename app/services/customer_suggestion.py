@@ -526,10 +526,45 @@ class CustomerSuggestionService:
         return max(matches, key=lambda item: item.confidence, default=None)
 
     def _apply_resolved_evidence(self, suggestion: CustomerSuggestion):
-        for field_name in ("email", "phone", "street", "postal_code", "city"):
+        for field_name in ("email", "phone"):
             item = self._best_evidence(suggestion.evidence, field_name)
             if item is not None:
                 setattr(suggestion, field_name, item.value)
+        address = self._best_complete_address(suggestion.evidence)
+        if address is not None:
+            suggestion.street = address["street"].value
+            suggestion.postal_code = address["postal_code"].value
+            suggestion.city = address["city"].value
+
+    @staticmethod
+    def _best_complete_address(
+        evidence: list[ExtractionEvidence],
+    ) -> dict[str, ExtractionEvidence] | None:
+        address_fields = {"street", "postal_code", "city"}
+        grouped: dict[
+            tuple[str, int, str],
+            dict[str, ExtractionEvidence],
+        ] = {}
+        for item in evidence:
+            if not item.automatic or item.field_name not in address_fields:
+                continue
+            key = (item.source_path, item.position, item.rule)
+            grouped.setdefault(key, {})[item.field_name] = item
+        complete = [
+            values
+            for values in grouped.values()
+            if address_fields.issubset(values)
+        ]
+        if not complete:
+            return None
+        return max(
+            complete,
+            key=lambda values: (
+                min(item.confidence for item in values.values()),
+                sum(item.confidence for item in values.values()),
+                -min(item.position for item in values.values()),
+            ),
+        )
 
     def _deduplicate_contacts(
         self,

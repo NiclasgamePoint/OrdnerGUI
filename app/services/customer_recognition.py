@@ -328,7 +328,7 @@ class CustomerRecognitionService:
                 # name-and-city identity is migrated without another rebuild.
                 recognition_key=normalize_identity(str(root["customer_name"])),
                 display_name=str(root["customer_name"]),
-                city=str(root["city"]),
+                city=suggestion.city,
                 folder_paths=[str(root["path"])],
                 service_types=[str(root["service_type"])],
                 years=[int(root["year"])],
@@ -365,10 +365,15 @@ class CustomerRecognitionService:
                     RecognitionBlacklist.normalize_phone(contact.phone),
                 )
                 contacts.setdefault(key, contact)
+        address_candidate = next((
+            item
+            for item in candidates
+            if item.street and item.postal_code and item.city
+        ), None)
         return RecognitionCandidate(
             recognition_key=first.recognition_key,
             display_name=first.display_name,
-            city=first.city,
+            city=address_candidate.city if address_candidate is not None else "",
             folder_paths=sorted({
                 path for candidate in candidates for path in candidate.folder_paths
             }),
@@ -379,8 +384,14 @@ class CustomerRecognitionService:
             entity_type=next((item.entity_type for item in candidates if item.entity_type), ""),
             email=next((item.email for item in candidates if item.email), ""),
             phone=next((item.phone for item in candidates if item.phone), ""),
-            street=next((item.street for item in candidates if item.street), ""),
-            postal_code=next((item.postal_code for item in candidates if item.postal_code), ""),
+            street=(
+                address_candidate.street if address_candidate is not None else ""
+            ),
+            postal_code=(
+                address_candidate.postal_code
+                if address_candidate is not None
+                else ""
+            ),
             contacts=list(contacts.values()),
             evidence=[
                 evidence
@@ -424,6 +435,10 @@ class CustomerRecognitionService:
             return True
 
         exact_by_name = repository.find_by_name(candidate.display_name)
+        if len(exact_by_name) == 1 and exact_by_name[0].id is not None:
+            repository.apply_recognition_candidate(candidate, exact_by_name[0].id)
+            stats.assigned += len(candidate.folder_paths)
+            return True
         if len(exact_by_name) > 1:
             candidate.reason = (
                 "Mehrere Bestandskunden mit gleichem Namen wurden gefunden. "

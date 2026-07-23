@@ -4,10 +4,58 @@ import unittest
 
 from app.core.customer_models import Contact
 from app.core.customer_recognition_models import ExtractionEvidence
-from app.services.customer_suggestion import CustomerSuggestionService
+from app.services.customer_suggestion import (
+    CustomerSuggestion,
+    CustomerSuggestionService,
+)
 
 
 class CustomerSuggestionTests(unittest.TestCase):
+    def test_address_fields_from_different_blocks_are_not_combined(self):
+        service = CustomerSuggestionService()
+        suggestion = CustomerSuggestion()
+        suggestion.evidence = [
+            ExtractionEvidence(
+                field_name="street",
+                value="Musterstraße 10",
+                normalized_value="musterstraße 10",
+                source_path="a.pdf",
+                excerpt="Straße",
+                position=3,
+                rule="vollständiger Adressblock",
+                confidence=0.95,
+                automatic=True,
+            ),
+            ExtractionEvidence(
+                field_name="postal_code",
+                value="12345",
+                normalized_value="12345",
+                source_path="b.pdf",
+                excerpt="PLZ Ort",
+                position=8,
+                rule="vollständiger Adressblock",
+                confidence=0.95,
+                automatic=True,
+            ),
+            ExtractionEvidence(
+                field_name="city",
+                value="Musterstadt",
+                normalized_value="musterstadt",
+                source_path="b.pdf",
+                excerpt="PLZ Ort",
+                position=8,
+                rule="vollständiger Adressblock",
+                confidence=0.95,
+                automatic=True,
+            ),
+        ]
+
+        service._apply_resolved_evidence(suggestion)
+
+        self.assertEqual(suggestion.street, "")
+        self.assertEqual(suggestion.postal_code, "")
+        self.assertEqual(suggestion.city, "")
+
     def test_formal_salutations_are_strong_name_evidence(self):
         service = CustomerSuggestionService()
         for line, expected in (
