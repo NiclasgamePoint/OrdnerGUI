@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 from app.gui.widgets import AppButton, BusyIndicator
 from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.index_diagnostics import IndexDiagnostics
+from app.core.statistics import ApplicationStatistics
+from app.gui.widgets.statistics_widget import StatisticsWidget
 
 
 class ClickActivatedSpinBox(QSpinBox):
@@ -88,6 +90,7 @@ class SettingsPopup(QFrame):
         recognition_summary: dict | None = None,
         pending_recognition_cases: int = 0,
         blacklist_suggestions=None,
+        statistics: ApplicationStatistics | None = None,
     ):
         super().__init__(
             parent,
@@ -111,6 +114,7 @@ class SettingsPopup(QFrame):
         self.recognition_summary = dict(recognition_summary or {})
         self.pending_recognition_cases = int(pending_recognition_cases)
         self.blacklist_suggestions = list(blacklist_suggestions or [])
+        self.statistics = statistics
         self._color_dialog_active = False
 
         root_layout = QVBoxLayout(self)
@@ -136,6 +140,11 @@ class SettingsPopup(QFrame):
         self.nav_list.setUniformItemSizes(True)
         self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.nav_list.setAccessibleName("Einstellungsbereiche")
+        self.nav_list.setAccessibleDescription(
+            "Wechselt zwischen Allgemein, Indexierung, Kundenerkennung, "
+            "Statistik und Aussehen."
+        )
 
         general_item = QListWidgetItem("Allgemein")
         item_size = QSize(max(164, self.selected_font_size * 12), max(42, self.selected_font_size * 3))
@@ -150,6 +159,10 @@ class SettingsPopup(QFrame):
         recognition_item.setSizeHint(item_size)
         self.nav_list.addItem(recognition_item)
 
+        statistics_item = QListWidgetItem("Statistik")
+        statistics_item.setSizeHint(item_size)
+        self.nav_list.addItem(statistics_item)
+
         appearance_item = QListWidgetItem("Aussehen")
         appearance_item.setSizeHint(item_size)
         self.nav_list.addItem(appearance_item)
@@ -158,11 +171,13 @@ class SettingsPopup(QFrame):
         split_layout.addWidget(self.nav_list)
 
         self.stack = QStackedWidget()
+        self.stack.setAccessibleName("Einstellungsinhalt")
         split_layout.addWidget(self.stack, 1)
 
         self.stack.addWidget(self._build_general_page())
         self.stack.addWidget(self._build_index_page())
         self.stack.addWidget(self._build_recognition_page())
+        self.stack.addWidget(self._build_statistics_page())
         self.stack.addWidget(self._build_appearance_page())
 
         content_layout.addLayout(split_layout)
@@ -198,6 +213,10 @@ class SettingsPopup(QFrame):
         self.data_path_input = QLineEdit(self.data_path)
         self.data_path_input.setPlaceholderText("Ordner mit den zu durchsuchenden Daten")
         self.data_path_input.setCursorPosition(0)
+        self.data_path_input.setAccessibleName("Datenquelle")
+        self.data_path_input.setAccessibleDescription(
+            "Pfad zum Ordner mit den zu indexierenden Projektdaten."
+        )
         self.data_path_input.textChanged.connect(self._clear_path_error)
         path_row.addWidget(self.data_path_input, 1)
 
@@ -583,6 +602,42 @@ class SettingsPopup(QFrame):
             self.recognition_summary, self.pending_recognition_cases
         )
         return page
+
+    def _build_statistics_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("SettingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(10)
+        heading = QLabel("Statistik")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+        hint = QLabel(
+            "Kernkennzahlen aus Kundenverwaltung und aktivem Suchindex."
+        )
+        hint.setObjectName("PopupCaption")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.statistics_widget = StatisticsWidget()
+        layout.addWidget(self.statistics_widget)
+        layout.addStretch()
+        if self.statistics is None:
+            self.statistics_widget.set_loading()
+        else:
+            self.statistics_widget.set_statistics(self.statistics)
+        return page
+
+    def set_statistics(self, statistics: ApplicationStatistics | None, error: str = ""):
+        self.statistics = statistics
+        if error:
+            self.statistics_widget.set_error(error)
+        elif statistics is None:
+            self.statistics_widget.set_loading()
+        else:
+            self.statistics_widget.set_statistics(statistics)
+
+    def set_statistics_loading(self):
+        self.statistics_widget.set_loading()
 
     def save_customer_recognition_options(self):
         self.recognition_options = CustomerRecognitionOptions(

@@ -32,8 +32,14 @@ class AppHeader(QFrame):
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("GlobalSearchInput")
-        self.search_input.setPlaceholderText("Kunden oder Ordner durchsuchen …")
+        self.search_input.setPlaceholderText(
+            "Kunden, Ordner oder Dokumentinhalte durchsuchen …"
+        )
         self.search_input.setClearButtonEnabled(True)
+        self.search_input.setAccessibleName("Globale Suche")
+        self.search_input.setAccessibleDescription(
+            "Durchsucht Kunden, Ordnernamen und extrahierte Dokumentinhalte."
+        )
         self.search_input.textChanged.connect(self.queryChanged.emit)
         self.search_input.returnPressed.connect(self.searchRequested.emit)
 
@@ -44,9 +50,14 @@ class AppHeader(QFrame):
         self.search_input.setCompleter(completer)
 
         self.search_button = AppButton("Suchen", minimum_width=108)
+        self.search_button.setAccessibleName("Suche starten")
         self.search_button.clicked.connect(self.searchRequested.emit)
 
         self.filter_button = AppButton("Filter", AppButton.SECONDARY, minimum_width=92)
+        self.filter_button.setAccessibleName("Suchfilter öffnen")
+        self.filter_button.setAccessibleDescription(
+            "Öffnet Filter, Sortierung und die Unterordneroption."
+        )
         self.filter_button.clicked.connect(self.filterRequested.emit)
 
         self.settings_button = QToolButton()
@@ -59,6 +70,7 @@ class AppHeader(QFrame):
         else:
             self.settings_button.setIcon(icon)
         self.settings_button.setToolTip("Einstellungen öffnen")
+        self.settings_button.setAccessibleName("Einstellungen öffnen")
         self.settings_button.clicked.connect(self.settingsRequested.emit)
 
         layout.addWidget(self.search_input, 1)

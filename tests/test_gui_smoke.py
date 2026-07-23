@@ -226,7 +226,8 @@ class GuiSmokeTests(unittest.TestCase):
 
     def test_settings_popup_smoke(self):
         popup = SettingsPopup("light", "#2db89d")
-        self.assertEqual(popup.nav_list.count(), 4)
+        self.assertEqual(popup.nav_list.count(), 5)
+        self.assertIsNotNone(popup.statistics_widget)
         popup.close()
 
 

@@ -7,6 +7,7 @@ from PySide6.QtCore import QThread, Signal
 from app.core.customer_repository import CustomerRepository
 from app.core.index_diagnostics import IndexDiagnosticsService
 from app.core.index_store import available_backups
+from app.core.statistics import StatisticsService
 
 
 class SettingsDataWorker(QThread):
@@ -26,12 +27,17 @@ class SettingsDataWorker(QThread):
             "recognition_summary": {},
             "pending_recognition_cases": 0,
             "blacklist_suggestions": [],
+            "statistics": None,
             "error": "",
         }
         repository = None
         try:
             payload["backups"] = available_backups(self.index_path)
             payload["diagnostics"] = IndexDiagnosticsService().inspect(self.index_path)
+            payload["statistics"] = StatisticsService().load(
+                self.index_path,
+                self.customer_database_path,
+            )
             repository = CustomerRepository(self.customer_database_path)
             payload["recognition_summary"] = repository.last_recognition_run()
             payload["pending_recognition_cases"] = repository.pending_recognition_count()

@@ -13,6 +13,7 @@ from app.core.customer_models import Customer
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
 from app.core.search_models import RecentCustomerHistory
+from app.core.statistics import ApplicationStatistics
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
@@ -93,6 +94,7 @@ class UiNavigationTests(unittest.TestCase):
             id=12,
             display_name="Muster GmbH",
             entity_type="Unternehmen",
+            city="Hamburg",
             folder_path="/data/Muster GmbH",
             folder_paths=["/data/Muster GmbH"],
         )
@@ -109,6 +111,9 @@ class UiNavigationTests(unittest.TestCase):
 
         self.assertEqual(page.customer_section.row_count, 1)
         self.assertEqual(page.folder_section.row_count, 1)
+        customer_labels = page.customer_section._rows[0].findChildren(QLabel)
+        self.assertEqual(customer_labels[0].text(), "Muster GmbH · Hamburg")
+        self.assertNotIn("Hamburg", customer_labels[1].text())
 
     def test_search_page_can_start_with_empty_customer_overview(self):
         page = SearchPage()
@@ -234,6 +239,57 @@ class UiNavigationTests(unittest.TestCase):
             self.assertFalse(page.folder_message.isVisible())
             page.close()
             repository.close()
+
+    def test_search_page_shows_home_statistics_and_document_results(self):
+        page = SearchPage()
+        page.set_statistics(ApplicationStatistics(
+            customer_count=7,
+            project_count=12,
+        ))
+        page.reset([])
+        self.assertFalse(page.statistics_widget.isHidden())
+        card_layout = page.statistics_widget.parentWidget().layout()
+        self.assertGreater(
+            card_layout.indexOf(page.statistics_widget),
+            card_layout.indexOf(page.scroll_area),
+        )
+        self.assertEqual(
+            page.statistics_widget._value_labels["customer_count"].text(),
+            "7",
+        )
+        opened_files: list[str] = []
+        opened_paths: list[str] = []
+        page.openFileRequested.connect(opened_files.append)
+        page.openPathRequested.connect(opened_paths.append)
+        page.prepare_search()
+        page.set_documents([
+            {
+                "filename": "bericht.docx",
+                "path": "/tmp/projekt/bericht.docx",
+                "excerpt": "Passender Dokumentausschnitt",
+            }
+        ], 1)
+
+        self.assertTrue(page.statistics_widget.isHidden())
+        row = page.document_section._rows[0]
+        row._open_file()
+        row._open_folder()
+        self.assertEqual(opened_files, ["/tmp/projekt/bericht.docx"])
+        self.assertEqual(opened_paths, ["/tmp/projekt"])
+        self.assertIn("Dokumentausschnitt", row.snippet_label.text())
+        page.close()
+
+    def test_central_widgets_expose_accessibility_metadata(self):
+        page = SearchPage()
+        self.assertTrue(page.scroll_area.accessibleName())
+        self.assertTrue(page.scroll_area.accessibleDescription())
+        self.assertTrue(page.statistics_widget.accessibleName())
+        popup = SettingsPopup("light", "#2db89d")
+        self.assertTrue(popup.nav_list.accessibleName())
+        self.assertTrue(popup.nav_list.accessibleDescription())
+        self.assertTrue(popup.data_path_input.accessibleName())
+        popup.close()
+        page.close()
 
     def test_folder_page_populates_only_matching_files(self):
         with TemporaryDirectory() as directory:
@@ -390,10 +446,16 @@ class UiNavigationTests(unittest.TestCase):
             pending_recognition_cases=2,
         )
 
-        self.assertEqual(popup.nav_list.count(), 4)
+        self.assertEqual(popup.nav_list.count(), 5)
         self.assertEqual(
             [popup.nav_list.item(index).text() for index in range(popup.nav_list.count())],
-            ["Allgemein", "Indexierung", "Kundenerkennung", "Aussehen"],
+            [
+                "Allgemein",
+                "Indexierung",
+                "Kundenerkennung",
+                "Statistik",
+                "Aussehen",
+            ],
         )
         self.assertIn("Diagnose", popup.diagnostics_text.toPlainText())
         self.assertTrue(popup.clear_customer_data_button.isEnabled())

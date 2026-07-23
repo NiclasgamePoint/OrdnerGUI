@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.widgets.buttons import AppButton
+from app.core.search_models import SearchSort
 
 
 class SearchFilterPopup(QFrame):
@@ -41,6 +43,24 @@ class SearchFilterPopup(QFrame):
         self.domain_combo = self._add_filter(layout, "Fachthema")
         self.year_combo = self._add_filter(layout, "Jahr oder Vorlagen")
         self.file_type_combo = self._add_filter(layout, "Dateityp")
+        self.sort_combo = self._add_filter(layout, "Sortierung")
+        self.sort_combo.addItem("Relevanz", SearchSort.RELEVANCE)
+        self.sort_combo.addItem("Datum", SearchSort.DATE)
+        self.sort_combo.addItem("Alphabet", SearchSort.ALPHABETICAL)
+        self.sort_combo.setAccessibleName("Sortierung der Suchergebnisse")
+        self.sort_combo.setAccessibleDescription(
+            "Sortiert alle Ergebnisbereiche nach Relevanz, Datum oder Alphabet."
+        )
+        self.include_subfolders_checkbox = QCheckBox(
+            "Unterordner in der Ordnersuche einbeziehen"
+        )
+        self.include_subfolders_checkbox.setAccessibleName(
+            "Unterordner einbeziehen"
+        )
+        self.include_subfolders_checkbox.setAccessibleDescription(
+            "Berücksichtigt Namen strukturierter Projektunterordner bei der Suche."
+        )
+        layout.addWidget(self.include_subfolders_checkbox)
 
         actions = QHBoxLayout()
         self.clear_button = AppButton("Zurücksetzen", AppButton.SECONDARY)
@@ -55,6 +75,8 @@ class SearchFilterPopup(QFrame):
 
         for combo in self.combos:
             combo.currentIndexChanged.connect(self.filtersChanged.emit)
+        self.sort_combo.currentIndexChanged.connect(self.filtersChanged.emit)
+        self.include_subfolders_checkbox.toggled.connect(self.filtersChanged.emit)
 
     @property
     def combos(self) -> tuple[QComboBox, QComboBox, QComboBox]:
@@ -65,6 +87,8 @@ class SearchFilterPopup(QFrame):
         label.setObjectName("PopupCaption")
         layout.addWidget(label)
         combo = QComboBox()
+        combo.setAccessibleName(label_text)
+        combo.setAccessibleDescription(f"Suchergebnisse nach {label_text} filtern.")
         combo.setMinimumHeight(34)
         layout.addWidget(combo)
         return combo
@@ -77,8 +101,24 @@ class SearchFilterPopup(QFrame):
             combo.blockSignals(True)
             combo.setCurrentIndex(0)
             combo.blockSignals(False)
+        if self.sort_combo.currentData() != SearchSort.RELEVANCE:
+            changed = True
+        self.sort_combo.blockSignals(True)
+        self.sort_combo.setCurrentIndex(
+            self.sort_combo.findData(SearchSort.RELEVANCE)
+        )
+        self.sort_combo.blockSignals(False)
+        if self.include_subfolders_checkbox.isChecked():
+            changed = True
+        self.include_subfolders_checkbox.blockSignals(True)
+        self.include_subfolders_checkbox.setChecked(False)
+        self.include_subfolders_checkbox.blockSignals(False)
         if changed:
             self.filtersChanged.emit()
 
     def active_filter_count(self) -> int:
-        return sum(bool(combo.currentData()) for combo in self.combos)
+        return (
+            sum(bool(combo.currentData()) for combo in self.combos)
+            + int(self.sort_combo.currentData() != SearchSort.RELEVANCE)
+            + int(self.include_subfolders_checkbox.isChecked())
+        )

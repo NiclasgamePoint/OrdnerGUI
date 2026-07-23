@@ -73,6 +73,10 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         self.case_list.setTextElideMode(Qt.ElideNone)
         self.case_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.case_list.setResizeMode(QListView.Adjust)
+        self.case_list.setAccessibleName("Offene Kundenerkennungs-Prüffälle")
+        self.case_list.setAccessibleDescription(
+            "Liste mehrdeutiger automatisch erkannter Kundenordner."
+        )
         self.case_list.currentItemChanged.connect(self._show_selected_case)
         splitter.addWidget(self.case_list)
 
@@ -94,12 +98,17 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
             "Kunden nach Name, Ort oder Kundentyp suchen …"
         )
         self.customer_search.setClearButtonEnabled(True)
+        self.customer_search.setAccessibleName("Bestandskunden suchen")
+        self.customer_search.setAccessibleDescription(
+            "Filtert die Kundenliste nach Name, Ort oder Kundentyp."
+        )
         self.customer_search.textChanged.connect(self._filter_customers)
         details_layout.addWidget(self.customer_search)
         self.customer_list = QListWidget()
         self.customer_list.setObjectName("RecognitionCustomerList")
         self.customer_list.setMinimumWidth(280)
         self.customer_list.setMinimumHeight(110)
+        self.customer_list.setAccessibleName("Gefundene Bestandskunden")
         details_layout.addWidget(self.customer_list)
 
         action_row = QHBoxLayout()

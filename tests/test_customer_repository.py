@@ -11,11 +11,45 @@ from app.core.customer_recognition_models import (
 from app.core.customer_repository import CustomerRepository
 from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.index_manager import IndexManager
-from app.core.search_models import SearchFilters
+from app.core.search_models import SearchFilters, SearchSort
 from app.gui.workers.search_worker import SearchWorker
 
 
 class CustomerRepositoryTests(unittest.TestCase):
+    def test_customer_search_supports_all_sort_orders(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = CustomerRepository(root / "customers.db")
+            repository.save(Customer(
+                display_name="Sortierkunde Alpha",
+                folder_path=str(
+                    root / "DEKRA" / "2025" / "Sortierkunde Alpha, Berlin"
+                ),
+                service_types=["DEKRA"],
+            ))
+            repository.save(Customer(
+                display_name="Sortierkunde Zulu",
+                folder_path=str(
+                    root / "DEKRA" / "2026" / "Sortierkunde Zulu, Berlin"
+                ),
+                service_types=["DEKRA"],
+            ))
+
+            relevant = repository.search(
+                "Sortierkunde", sort_order=SearchSort.RELEVANCE
+            )
+            alphabetical = repository.search(
+                "Sortierkunde", sort_order=SearchSort.ALPHABETICAL
+            )
+            newest = repository.search(
+                "Sortierkunde", sort_order=SearchSort.DATE
+            )
+
+            self.assertEqual(len(relevant), 2)
+            self.assertEqual(alphabetical[0].display_name, "Sortierkunde Alpha")
+            self.assertEqual(newest[0].display_name, "Sortierkunde Zulu")
+            repository.close()
+
     @staticmethod
     def _name_candidate(name: str, automatic: bool = True) -> RecognitionCandidate:
         return RecognitionCandidate(

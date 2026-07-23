@@ -30,6 +30,8 @@ class ResultRow(QFrame):
         self.setMinimumHeight(62)
         self._payload = payload
         self._path = path
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(subtitle or "Suchergebnis")
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 9, 10, 9)
@@ -54,6 +56,7 @@ class ResultRow(QFrame):
             minimum_width=102,
         )
         self.open_button.setToolTip("Ordner im Explorer oder Finder öffnen")
+        self.open_button.setAccessibleName(f"Ordner zu {title} öffnen")
         self.open_button.setEnabled(bool(path))
         self.open_button.clicked.connect(self._open_path)
         layout.addWidget(self.open_button)

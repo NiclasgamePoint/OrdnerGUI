@@ -69,7 +69,11 @@ class SearchWorker(QThread):
             return SearchPage([], 0, 1, self.page_size)
         repository = CustomerRepository(self.customer_db_path, readonly=True)
         try:
-            customers = repository.search(self.query, self.result_limit)
+            customers = repository.search(
+                self.query,
+                self.result_limit,
+                self.filters.sort_order,
+            )
         finally:
             repository.close()
         return SearchPage(
