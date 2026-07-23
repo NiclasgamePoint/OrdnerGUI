@@ -39,7 +39,7 @@ class CustomerRepositoryTests(unittest.TestCase):
             )],
         )
 
-    def test_automatic_surname_contact_is_upgraded_to_full_name(self):
+    def test_pending_surname_contact_is_upgraded_and_accepted_as_card(self):
         with TemporaryDirectory() as directory:
             repository = CustomerRepository(Path(directory) / "customers.db")
             customer = repository.save(Customer(display_name="Müller"))
@@ -51,15 +51,15 @@ class CustomerRepositoryTests(unittest.TestCase):
                 int(customer.id), self._name_candidate("Max Müller")
             )
 
-            contacts = repository.get(int(customer.id)).contacts
-            self.assertEqual(contacts, [Contact(name="Max Müller")])
-            provenance = repository.connection.execute(
-                """
-                SELECT value FROM automatic_field_sources
-                WHERE owner_type='contact' AND field_name='name'
-                """
-            ).fetchall()
-            self.assertEqual([row[0] for row in provenance], ["Max Müller"])
+            pending = repository.list_data_suggestions(int(customer.id))
+            self.assertEqual(len(pending), 1)
+            self.assertTrue(pending[0].is_contact)
+            self.assertEqual(pending[0].contact_name, "Max Müller")
+            repository.resolve_data_suggestion(int(pending[0].id), True)
+            self.assertEqual(
+                repository.get(int(customer.id)).contacts,
+                [Contact(name="Max Müller")],
+            )
             repository.close()
 
     def test_manual_surname_contact_is_not_renamed_automatically(self):
@@ -76,8 +76,10 @@ class CustomerRepositoryTests(unittest.TestCase):
 
             self.assertEqual(
                 [contact.name for contact in repository.get(int(customer.id)).contacts],
-                ["Müller", "Max Müller"],
+                ["Müller"],
             )
+            pending = repository.list_data_suggestions(int(customer.id))
+            self.assertEqual([item.contact_name for item in pending], ["Max Müller"])
             repository.close()
 
     def test_accepted_name_suggestion_creates_contact(self):
@@ -108,8 +110,56 @@ class CustomerRepositoryTests(unittest.TestCase):
 
             suggestions = repository.list_data_suggestions(int(customer.id))
             self.assertEqual(len(suggestions), 1)
-            self.assertEqual(suggestions[0].field_name, "contact_name")
+            self.assertEqual(suggestions[0].field_name, "contact")
+            self.assertTrue(suggestions[0].is_contact)
             self.assertEqual(suggestions[0].suggested_value, "Erika Muster")
+            repository.close()
+
+    def test_rejected_contact_card_stays_hidden_after_repository_restart(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "customers.db"
+            repository = CustomerRepository(database)
+            customer = repository.save(Customer(display_name="Muster GmbH"))
+            contact = Contact(
+                "Maike Mayer", "Architektin", "maike@example.de", "040 12345"
+            )
+            suggestion = repository.apply_contact_suggestion(
+                int(customer.id), None, contact
+            )
+            repository.resolve_data_suggestion(int(suggestion.id), False)
+            repository.close()
+
+            repository = CustomerRepository(database)
+            duplicate = repository.apply_contact_suggestion(
+                int(customer.id), None, contact, source_path="/tmp/anderes.pdf"
+            )
+            self.assertIsNone(duplicate)
+            self.assertEqual(repository.list_data_suggestions(int(customer.id)), [])
+            repository.close()
+
+    def test_accepted_contact_card_fills_blanks_without_overwriting_manual_data(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Muster GmbH",
+                contacts=[Contact("Maike Mayer", email="manuell@example.de")],
+            ))
+            suggestion = repository.apply_contact_suggestion(
+                int(customer.id), None,
+                Contact(
+                    "Maike Mayer", "Architektin",
+                    "erkannt@example.de", "040 12345",
+                ),
+            )
+            repository.resolve_data_suggestion(int(suggestion.id), True)
+
+            self.assertEqual(
+                repository.get(int(customer.id)).contacts,
+                [Contact(
+                    "Maike Mayer", "Architektin",
+                    "manuell@example.de", "040 12345",
+                )],
+            )
             repository.close()
 
     def test_data_suggestion_keeps_evidence_and_can_be_accepted_or_rejected(self):
@@ -146,7 +196,7 @@ class CustomerRepositoryTests(unittest.TestCase):
             )), 1)
             repository.close()
 
-    def test_rescan_reopens_rejected_but_not_accepted_suggestions(self):
+    def test_rescan_keeps_rejected_and_accepted_suggestions_closed(self):
         with TemporaryDirectory() as directory:
             repository = CustomerRepository(Path(directory) / "customers.db")
             customer = repository.save(Customer(display_name="Muster"))
@@ -161,7 +211,7 @@ class CustomerRepositoryTests(unittest.TestCase):
             repository.resolve_data_suggestion(int(rejected.id), False)
             repository.resolve_data_suggestion(int(accepted.id), True)
 
-            reopened = repository.apply_project_suggestion(
+            rejected_again = repository.apply_project_suggestion(
                 int(customer.id), None, "email", "erneut@example.de",
                 excerpt="erneuter Fund", confidence=0.80,
                 reopen_rejected=True,
@@ -171,13 +221,11 @@ class CustomerRepositoryTests(unittest.TestCase):
                 confidence=0.82, reopen_rejected=True,
             )
 
-            self.assertEqual(reopened.id, rejected.id)
-            self.assertEqual(reopened.status, "pending")
-            self.assertEqual(reopened.excerpt, "erneuter Fund")
+            self.assertIsNone(rejected_again)
             self.assertIsNone(protected)
             self.assertEqual(len(repository.list_data_suggestions(
                 int(customer.id)
-            )), 1)
+            )), 0)
             repository.close()
 
     def test_blacklist_cleanup_only_removes_automatic_values(self):

@@ -162,7 +162,7 @@ class CustomerSuggestionTests(unittest.TestCase):
             for item in suggestion.evidence
         ))
 
-    def test_person_folder_gets_name_only_fallback_but_company_does_not(self):
+    def test_folder_names_are_not_invented_as_contact_people(self):
         service = CustomerSuggestionService()
 
         person = service.suggest_from_documents(
@@ -175,11 +175,11 @@ class CustomerSuggestionTests(unittest.TestCase):
             Path("/tmp/Wagner, Berlin"), "Wagner", []
         )
 
-        self.assertEqual(person.contacts, [Contact(name="Müller")])
+        self.assertEqual(person.contacts, [])
         self.assertEqual(company.contacts, [])
         self.assertEqual(
             surname_with_legal_form_letters.contacts,
-            [Contact(name="Wagner")],
+            [],
         )
         self.assertEqual(person.entity_type, "Unternehmen")
 
@@ -350,11 +350,46 @@ class CustomerSuggestionTests(unittest.TestCase):
             self.assertIn("Blower Door", suggestion.service_types)
             self.assertEqual(suggestion.city, "Beispielstadt")
             self.assertEqual(suggestion.postal_code, "22844")
-            self.assertEqual(suggestion.email, "max.mueller@example.de")
+            self.assertEqual(suggestion.email, "")
             normalized_street = suggestion.street.casefold().replace("ß", "ss")
             self.assertIn("strasse", normalized_street)
             self.assertGreaterEqual(len(suggestion.contacts), 1)
-            self.assertTrue(any(contact.name for contact in suggestion.contacts))
+            self.assertTrue(any(
+                contact.name == "Max Müller"
+                and contact.email == "max.mueller@example.de"
+                and contact.phone == "+49 40 1234567"
+                for contact in suggestion.contacts
+            ))
+
+    def test_two_company_contacts_keep_role_email_and_phone_separate(self):
+        service = CustomerSuggestionService()
+        suggestion = service.suggest_from_documents(
+            Path("/tmp/Architekturbüro Mayer GmbH, Hamburg"),
+            "Architekturbüro Mayer GmbH",
+            [{
+                "path": "/tmp/Ansprechpartner.txt",
+                "filename": "Ansprechpartner.txt",
+                "file_type": "txt",
+                "content": (
+                    "Ansprechpartnerin: Frau Maike Mayer\n"
+                    "Architektin\nmaike@mayer.de\nTelefon: 040 111111\n\n"
+                    "Ansprechpartner: Herr Max Mustermann\n"
+                    "Projektleiter\nmax@mayer.de\nTelefon: 040 222222"
+                ),
+            }],
+        )
+
+        self.assertIn(
+            Contact("Maike Mayer", "Architektin", "maike@mayer.de", "040 111111"),
+            suggestion.contacts,
+        )
+        self.assertIn(
+            Contact(
+                "Max Mustermann", "Projektleiter",
+                "max@mayer.de", "040 222222",
+            ),
+            suggestion.contacts,
+        )
 
     def test_infers_organization_and_ignores_noise_contacts(self):
         with TemporaryDirectory() as directory:

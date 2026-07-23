@@ -44,6 +44,25 @@ class CustomerDataSuggestion:
     rule: str = ""
     confidence: float = 0.0
     status: str = "pending"
+    suggestion_type: str = "field"
+    contact_name: str = ""
+    contact_role: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    fingerprint: str = ""
+
+    @property
+    def is_contact(self) -> bool:
+        return self.suggestion_type == "contact"
+
+    @property
+    def contact(self) -> Contact:
+        return Contact(
+            name=self.contact_name,
+            role=self.contact_role,
+            email=self.contact_email,
+            phone=self.contact_phone,
+        )
 
 
 @dataclass
