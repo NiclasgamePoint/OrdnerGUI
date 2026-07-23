@@ -35,6 +35,53 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIsNotNone(window.folder_page)
             window.close()
 
+    def test_main_window_opens_existing_file_with_standard_program(self):
+        with TemporaryDirectory() as directory:
+            document = Path(directory) / "tabelle.xlsx"
+            document.write_bytes(b"workbook")
+            with patch.object(MainWindow, "_initialize_data_source", lambda self: None):
+                window = MainWindow()
+            with (
+                patch(
+                    "app.gui.main_window.QDesktopServices.openUrl",
+                    return_value=True,
+                ) as open_url,
+                patch("app.gui.main_window.QMessageBox.warning") as warning,
+            ):
+                window.open_native_file(str(document))
+
+            opened_url = open_url.call_args.args[0]
+            self.assertEqual(Path(opened_url.toLocalFile()), document.resolve())
+            warning.assert_not_called()
+            window.close()
+
+    def test_main_window_reports_missing_and_failed_external_file_open(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing = root / "fehlt.docx"
+            existing = root / "vorhanden.docx"
+            existing.write_bytes(b"document")
+            with patch.object(MainWindow, "_initialize_data_source", lambda self: None):
+                window = MainWindow()
+            with (
+                patch(
+                    "app.gui.main_window.QDesktopServices.openUrl",
+                    return_value=False,
+                ) as open_url,
+                patch("app.gui.main_window.QMessageBox.warning") as warning,
+            ):
+                window.open_native_file(str(missing))
+                open_url.assert_not_called()
+                self.assertEqual(warning.call_args.args[1], "Datei nicht gefunden")
+
+                window.open_native_file(str(existing))
+                open_url.assert_called_once()
+                self.assertEqual(
+                    warning.call_args.args[1],
+                    "Datei konnte nicht geöffnet werden",
+                )
+            window.close()
+
     def test_customer_recognition_review_dialog_smoke(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

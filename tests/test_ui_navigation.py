@@ -272,6 +272,64 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(page.file_list.count(), 1)
             page.cleanup()
 
+    def test_folder_page_context_open_uses_external_file_signal(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = root / "angebot.docx"
+            document.write_bytes(b"document")
+            page = FolderPage()
+            page.set_folder({
+                "folder_path": str(root),
+                "folder_name": "Projekt",
+                "file_count": 1,
+                "files": [{
+                    "filename": document.name,
+                    "path": str(document),
+                    "relative_dir": "",
+                }],
+            })
+            opened_files: list[str] = []
+            opened_paths: list[str] = []
+            page.openFileRequested.connect(opened_files.append)
+            page.openPathRequested.connect(opened_paths.append)
+
+            file_item = page.file_list.topLevelItem(0)
+            class FakeAction:
+                def __init__(self, text):
+                    self.text = text
+
+                def setEnabled(self, _enabled):
+                    pass
+
+            class FakeMenu:
+                def __init__(self, _parent):
+                    self.actions = []
+
+                def addAction(self, text):
+                    action = FakeAction(text)
+                    self.actions.append(action)
+                    return action
+
+                def exec(self, _position):
+                    return next(
+                        action for action in self.actions
+                        if action.text == "Öffnen"
+                    )
+
+            with (
+                patch.object(page.file_list, "itemAt", return_value=file_item),
+                patch("app.gui.pages.folder_page.QMenu", FakeMenu),
+            ):
+                page._open_tree_context_menu(QPoint(1, 1))
+            page._open_context_item("folder", str(root))
+
+            self.assertEqual(opened_files, [str(document)])
+            self.assertEqual(opened_paths, [str(root)])
+            with patch.object(page.file_viewer, "open_file") as open_file:
+                page._open_selected_file(file_item)
+            open_file.assert_called_once_with(document)
+            page.cleanup()
+
     def test_folder_page_renders_nested_and_empty_subfolders_as_tree(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
