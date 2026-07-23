@@ -55,6 +55,7 @@ class ViewerTests(unittest.TestCase):
             viewer.text_viewer.search_input.setText("zwei")
             viewer.text_viewer.find_next()
             self.assertTrue(viewer.text_viewer.editor.textCursor().hasSelection())
+            viewer.shutdown()
             viewer.close()
 
     def test_spreadsheet_viewer_displays_explicit_truncation_hint(self):
@@ -74,6 +75,7 @@ class ViewerTests(unittest.TestCase):
 
             self.assertIn("angezeigt bis 500 × 50", viewer.spreadsheet_viewer.info_label.text())
             self.assertIn("Hinweis: Anzeige ist auf 500 Zeilen und 50 Spalten begrenzt", viewer.spreadsheet_viewer.info_label.text())
+            viewer.shutdown()
             viewer.close()
 
     def test_pdf_close_document_does_not_emit_nullptr_warning(self):
@@ -100,6 +102,7 @@ class ViewerTests(unittest.TestCase):
                 )
                 viewer.pdf_viewer.close_document()
                 self.app.processEvents()
+                viewer.shutdown()
                 viewer.close()
             finally:
                 qInstallMessageHandler(previous_handler)
@@ -144,6 +147,7 @@ class ViewerTests(unittest.TestCase):
                 self.assertFalse(viewer.is_converting)
                 self.assertIs(viewer.stack.currentWidget(), viewer.pdf_viewer)
                 self.assertEqual(viewer.pdf_viewer.document.pageCount(), 1)
+                viewer.shutdown()
                 viewer.close()
 
     def test_docx_preview_falls_back_to_text_when_pdf_conversion_fails(self):
@@ -170,6 +174,7 @@ class ViewerTests(unittest.TestCase):
                 text = viewer.text_viewer.editor.toPlainText()
                 self.assertIn("Formatierte Word-Vorschau konnte nicht erstellt werden", text)
                 self.assertIn("Fallback Inhalt", text)
+                viewer.shutdown()
                 viewer.close()
 
     def test_legacy_doc_processing_runs_asynchronously_with_loading_view(self):
@@ -202,6 +207,7 @@ class ViewerTests(unittest.TestCase):
                     "Legacy customer document",
                     viewer.text_viewer.editor.toPlainText(),
                 )
+                viewer.shutdown()
                 viewer.close()
 
 

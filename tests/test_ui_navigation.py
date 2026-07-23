@@ -394,7 +394,7 @@ class UiNavigationTests(unittest.TestCase):
         self.assertFalse(event.isAccepted())
         self.assertEqual(spinbox.value(), initial_value)
 
-        QTest.mouseClick(spinbox, Qt.LeftButton)
+        QTest.mouseClick(spinbox.lineEdit(), Qt.LeftButton)
         self.assertTrue(spinbox._wheel_adjustment_enabled)
         spinbox.wheelEvent(wheel_event())
         self.assertEqual(spinbox.value(), initial_value + 1)

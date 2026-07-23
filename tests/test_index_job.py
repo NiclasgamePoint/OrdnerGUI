@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication
 
-from app.core.index_job_state import read_state
+from app.core.index_job_state import read_state, write_state
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
 from app.core.index_manager import IndexManager
@@ -128,34 +128,23 @@ class DetachedIndexJobTests(unittest.TestCase):
             finished_states = []
             controller.finished.connect(lambda state: finished_states.append(state))
 
-            state_dir.mkdir(parents=True, exist_ok=True)
-            (state_dir / "index_job.json").write_text(
-                """
-{
-  "job_id": "adopt-job",
-  "pid": %d,
-  "status": "running",
-  "source": "%s",
-  "active_path": "%s"
-}
-                """ % (os.getpid(), source, active),
-                encoding="utf-8",
-            )
+            write_state(state_dir, {
+                "job_id": "adopt-job",
+                "pid": os.getpid(),
+                "status": "running",
+                "source": str(source),
+                "active_path": str(active),
+            })
 
             self.assertTrue(controller.adopt_running_job())
 
-            (state_dir / "index_job.json").write_text(
-                """
-{
-  "job_id": "adopt-job",
-  "pid": %d,
-  "status": "completed",
-  "source": "%s",
-  "active_path": "%s"
-}
-                """ % (os.getpid(), source, active),
-                encoding="utf-8",
-            )
+            write_state(state_dir, {
+                "job_id": "adopt-job",
+                "pid": os.getpid(),
+                "status": "completed",
+                "source": str(source),
+                "active_path": str(active),
+            })
             controller.poll()
             self.assertEqual(len(finished_states), 1)
             self.assertEqual(finished_states[0].get("status"), "completed")
