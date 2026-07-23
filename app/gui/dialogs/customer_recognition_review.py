@@ -4,10 +4,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListView,
     QListWidget,
     QListWidgetItem,
@@ -42,6 +42,7 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         self.options = options
         self._cases: dict[str, RecognitionCandidate] = {}
         self._customer_labels: dict[int, str] = {}
+        self._customers: list[tuple[int, str, str]] = []
         self.resize(1100, 680)
         self.setMinimumSize(980, 520)
 
@@ -88,9 +89,18 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         customer_label = QLabel("Vorhandenem Kunden zuordnen")
         customer_label.setObjectName("PopupCaption")
         details_layout.addWidget(customer_label)
-        self.customer_combo = QComboBox()
-        self.customer_combo.setMinimumWidth(280)
-        details_layout.addWidget(self.customer_combo)
+        self.customer_search = QLineEdit()
+        self.customer_search.setPlaceholderText(
+            "Kunden nach Name, Ort oder Kundentyp suchen …"
+        )
+        self.customer_search.setClearButtonEnabled(True)
+        self.customer_search.textChanged.connect(self._filter_customers)
+        details_layout.addWidget(self.customer_search)
+        self.customer_list = QListWidget()
+        self.customer_list.setObjectName("RecognitionCustomerList")
+        self.customer_list.setMinimumWidth(280)
+        self.customer_list.setMinimumHeight(110)
+        details_layout.addWidget(self.customer_list)
 
         action_row = QHBoxLayout()
         self.assign_button = AppButton("Ordner zuordnen")
@@ -134,21 +144,70 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
             customers = repository.list_customers()
         finally:
             repository.close()
-        selected = self.customer_combo.currentData()
-        self.customer_combo.clear()
+        selected = self._selected_customer_id()
+        self._customers.clear()
         self._customer_labels.clear()
-        self.customer_combo.addItem("Kunden auswählen …", None)
         for customer in customers:
             context = " · ".join(
                 value for value in (customer.city, customer.entity_type) if value
             )
             label = f"{customer.display_name} · {context}" if context else customer.display_name
-            self.customer_combo.addItem(label, customer.id)
             if customer.id is not None:
-                self._customer_labels[int(customer.id)] = label
+                customer_id = int(customer.id)
+                search_text = " ".join(
+                    value
+                    for value in (
+                        customer.display_name,
+                        customer.city,
+                        customer.entity_type,
+                    )
+                    if value
+                ).casefold()
+                self._customers.append((customer_id, label, search_text))
+                self._customer_labels[customer_id] = label
+        self._filter_customers()
         if selected is not None:
-            index = self.customer_combo.findData(selected)
-            self.customer_combo.setCurrentIndex(max(0, index))
+            self._select_customer(selected)
+
+    def _filter_customers(self, search_text: str = ""):
+        selected = self._selected_customer_id()
+        query = search_text.strip().casefold()
+        self.customer_list.clear()
+        matches = [
+            customer
+            for customer in self._customers
+            if not query or query in customer[2]
+        ]
+        if not matches:
+            message = (
+                "Noch keine Kunden vorhanden."
+                if not self._customers
+                else "Keine passenden Kunden gefunden."
+            )
+            item = QListWidgetItem(message)
+            item.setFlags(Qt.NoItemFlags)
+            self.customer_list.addItem(item)
+            return
+        for customer_id, label, _search_value in matches:
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, customer_id)
+            self.customer_list.addItem(item)
+        if selected is not None:
+            self._select_customer(selected)
+
+    def _selected_customer_id(self) -> int | None:
+        item = self.customer_list.currentItem()
+        value = item.data(Qt.UserRole) if item is not None else None
+        return int(value) if value is not None else None
+
+    def _select_customer(self, customer_id: int) -> bool:
+        for row in range(self.customer_list.count()):
+            item = self.customer_list.item(row)
+            if item.data(Qt.UserRole) == customer_id:
+                self.customer_list.setCurrentItem(item)
+                self.customer_list.scrollToItem(item)
+                return True
+        return False
 
     def _reload_cases(self):
         repository = self._repository()
@@ -212,6 +271,7 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
                     f"    Quelle: {evidence.source_path}",
                     f"    Kontext: {evidence.excerpt}",
                 ])
+        self.customer_search.clear()
         if candidate.suggested_customer_ids:
             lines.extend([
                 "",
@@ -221,13 +281,10 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
                     for value in candidate.suggested_customer_ids
                 ),
             ])
-            suggested_index = self.customer_combo.findData(
-                candidate.suggested_customer_ids[0]
-            )
-            if suggested_index >= 0:
-                self.customer_combo.setCurrentIndex(suggested_index)
+            self._select_customer(candidate.suggested_customer_ids[0])
         else:
-            self.customer_combo.setCurrentIndex(0)
+            self.customer_list.clearSelection()
+            self.customer_list.setCurrentItem(None)
         self.case_details.setPlainText("\n".join(lines))
         self.separate_button.setEnabled(len(candidate.folder_paths) > 1)
         self._set_actions_enabled(True, keep_separate_state=True)
@@ -243,7 +300,7 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         candidate = self._selected_candidate()
         if candidate is None:
             return
-        customer_id = self.customer_combo.currentData() if action == "assign" else None
+        customer_id = self._selected_customer_id() if action == "assign" else None
         if action == "assign" and customer_id is None:
             QMessageBox.warning(
                 self, "Kundenerkennung", "Bitte einen vorhandenen Kunden auswählen."

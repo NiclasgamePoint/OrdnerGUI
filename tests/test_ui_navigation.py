@@ -39,6 +39,23 @@ class UiNavigationTests(unittest.TestCase):
         self.assertEqual(navigator.current.page, "search")
         self.assertFalse(navigator.can_go_back)
 
+    def test_folder_page_path_key_normalizes_pathlib_variants(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            project = base / "Kunden" / "Projekt"
+            project.mkdir(parents=True)
+            with_parent_segment = project.parent / "Zwischenordner" / ".." / project.name
+            with_duplicate_separator = f"{project.parent}//{project.name}"
+
+            self.assertEqual(
+                FolderPage._path_key(str(project)),
+                FolderPage._path_key(str(with_parent_segment)),
+            )
+            self.assertEqual(
+                FolderPage._path_key(str(project)),
+                FolderPage._path_key(with_duplicate_separator),
+            )
+
     def test_navigation_controller_supports_forward(self):
         navigator = NavigationController()
         navigator.navigate("customer", 7)

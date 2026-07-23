@@ -1,8 +1,14 @@
+import re
 import unittest
 
 from PySide6.QtGui import QPalette
 
-from app.gui.theme import ThemeManager, build_palette, build_stylesheet
+from app.gui.theme import (
+    FONT_FAMILY_FALLBACKS,
+    ThemeManager,
+    build_palette,
+    build_stylesheet,
+)
 
 
 class ThemeTests(unittest.TestCase):
@@ -51,6 +57,20 @@ class ThemeTests(unittest.TestCase):
             f"font-size: {ThemeManager.MAX_FONT_SIZE}px",
             build_stylesheet("dark", "#2db89d", 100, 99),
         )
+
+    def test_font_fallbacks_and_minimum_size_are_cross_platform_safe(self):
+        stylesheet = build_stylesheet("light", "#2db89d", 100, 1)
+        self.assertIn(f"font-family: {FONT_FAMILY_FALLBACKS}", stylesheet)
+        self.assertIn("'Segoe UI'", FONT_FAMILY_FALLBACKS)
+        self.assertIn("'SF Pro Text'", FONT_FAMILY_FALLBACKS)
+        self.assertIn("'Noto Sans'", FONT_FAMILY_FALLBACKS)
+        self.assertTrue(FONT_FAMILY_FALLBACKS.endswith("sans-serif"))
+        sizes = [
+            int(value)
+            for value in re.findall(r"font-size:\s*(\d+)px", stylesheet)
+        ]
+        self.assertTrue(sizes)
+        self.assertGreaterEqual(min(sizes), ThemeManager.MIN_FONT_SIZE)
 
 
 if __name__ == "__main__":
