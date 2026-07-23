@@ -229,7 +229,12 @@ class CustomerSuggestionTests(unittest.TestCase):
             surname_with_legal_form_letters.contacts,
             [],
         )
-        self.assertEqual(person.entity_type, "Unternehmen")
+        self.assertEqual(person.entity_type, "Privatperson")
+        entity_evidence = next(
+            item for item in person.evidence
+            if item.field_name == "entity_type"
+        )
+        self.assertFalse(entity_evidence.automatic)
 
     def test_two_documents_confirm_a_weaker_contact_name(self):
         evidence = [

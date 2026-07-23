@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -89,6 +90,15 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         self.case_details = QPlainTextEdit()
         self.case_details.setReadOnly(True)
         details_layout.addWidget(self.case_details, 1)
+
+        entity_type_label = QLabel("Kundentyp bestätigen")
+        entity_type_label.setObjectName("PopupCaption")
+        details_layout.addWidget(entity_type_label)
+        self.entity_type_combo = QComboBox()
+        self.entity_type_combo.setAccessibleName("Kundentyp bestätigen")
+        for entity_type in ("Privatperson", "Unternehmen", "Organisation"):
+            self.entity_type_combo.addItem(entity_type, entity_type)
+        details_layout.addWidget(self.entity_type_combo)
 
         customer_label = QLabel("Vorhandenem Kunden zuordnen")
         customer_label.setObjectName("PopupCaption")
@@ -295,10 +305,15 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
             self.customer_list.clearSelection()
             self.customer_list.setCurrentItem(None)
         self.case_details.setPlainText("\n".join(lines))
+        entity_type_index = self.entity_type_combo.findData(
+            candidate.entity_type or "Privatperson"
+        )
+        self.entity_type_combo.setCurrentIndex(max(0, entity_type_index))
         self.separate_button.setEnabled(len(candidate.folder_paths) > 1)
         self._set_actions_enabled(True, keep_separate_state=True)
 
     def _set_actions_enabled(self, enabled: bool, keep_separate_state: bool = False):
+        self.entity_type_combo.setEnabled(enabled)
         self.assign_button.setEnabled(enabled)
         self.together_button.setEnabled(enabled)
         self.ignore_button.setEnabled(enabled)
@@ -309,6 +324,9 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         candidate = self._selected_candidate()
         if candidate is None:
             return
+        candidate.entity_type = str(
+            self.entity_type_combo.currentData() or "Privatperson"
+        )
         customer_id = self._selected_customer_id() if action == "assign" else None
         if action == "assign" and customer_id is None:
             QMessageBox.warning(

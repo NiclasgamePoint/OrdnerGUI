@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +30,7 @@ FIELD_LABELS = {
     "street": "Straße und Hausnummer",
     "postal_code": "Postleitzahl",
     "city": "Ort",
+    "entity_type": "Kundentyp",
 }
 
 
@@ -65,8 +67,8 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         title.setObjectName("PopupSectionTitle")
         layout.addWidget(title)
         hint = QLabel(
-            "Diese Angaben lagen unter 90 % Sicherheit. Du kannst jedes Feld "
-            "einzeln annehmen oder dauerhaft ablehnen."
+            "Diese Kunden- oder Kontaktdaten waren nicht sicher genug. "
+            "Du kannst jedes Feld prüfen und bestätigen oder ändern."
         )
         hint.setObjectName("PopupCaption")
         hint.setWordWrap(True)
@@ -110,7 +112,7 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
                 widget.deleteLater()
         suggestions = self.repository.list_data_suggestions(self.customer_id)
         if not suggestions:
-            empty = QLabel("Keine Kontaktdaten mehr zu prüfen.")
+            empty = QLabel("Keine Kunden- oder Kontaktdaten mehr zu prüfen.")
             empty.setObjectName("SearchSectionMessage")
             self.suggestion_layout.addWidget(empty)
         for suggestion in suggestions:
@@ -134,6 +136,22 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         heading.setObjectName("SectionTitle")
         heading.setWordWrap(True)
         layout.addWidget(heading)
+        entity_type_combo = None
+        if suggestion.field_name == "entity_type":
+            entity_type_combo = QComboBox()
+            entity_type_combo.setAccessibleName("Kundentyp auswählen")
+            for entity_type in ("Privatperson", "Unternehmen", "Organisation"):
+                entity_type_combo.addItem(entity_type, entity_type)
+            customer = self.repository.get(self.customer_id)
+            selected_type = (
+                customer.entity_type
+                if customer is not None
+                else suggestion.suggested_value
+            )
+            entity_type_combo.setCurrentIndex(
+                max(0, entity_type_combo.findData(selected_type))
+            )
+            layout.addWidget(entity_type_combo)
         if suggestion.is_contact:
             details = [
                 ("Rolle", suggestion.contact_role),
@@ -173,6 +191,18 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
             layout.addWidget(excerpt)
         actions = QHBoxLayout()
         actions.addStretch(1)
+        if entity_type_combo is not None:
+            save = AppButton("Kundentyp speichern")
+            save.clicked.connect(
+                lambda: self._resolve(
+                    suggestion,
+                    True,
+                    str(entity_type_combo.currentData()),
+                )
+            )
+            actions.addWidget(save)
+            layout.addLayout(actions)
+            return card
         reject = AppButton("Ablehnen", AppButton.DANGER)
         accept = AppButton("Annehmen")
         reject.clicked.connect(lambda: self._resolve(suggestion, False))
@@ -182,8 +212,17 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
         layout.addLayout(actions)
         return card
 
-    def _resolve(self, suggestion: CustomerDataSuggestion, accept: bool):
-        if accept and self._would_overwrite(suggestion):
+    def _resolve(
+        self,
+        suggestion: CustomerDataSuggestion,
+        accept: bool,
+        accepted_value: str | None = None,
+    ):
+        if (
+            accept
+            and suggestion.field_name != "entity_type"
+            and self._would_overwrite(suggestion)
+        ):
             answer = QMessageBox.question(
                 self,
                 "Vorhandenen Wert ersetzen?",
@@ -196,7 +235,9 @@ class CustomerDataSuggestionsDialog(CenteredPopupDialog):
                 return
         try:
             customer = self.repository.resolve_data_suggestion(
-                int(suggestion.id), accept
+                int(suggestion.id),
+                accept,
+                accepted_value,
             )
         except ValueError as error:
             QMessageBox.warning(self, "Kontaktdaten prüfen", str(error))

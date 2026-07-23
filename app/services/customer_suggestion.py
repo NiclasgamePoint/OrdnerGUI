@@ -222,12 +222,15 @@ class CustomerSuggestionService:
         suggestion.evidence = self._mark_automatic_evidence(evidence)
         self._apply_resolved_evidence(suggestion)
         suggestion.company = suggestion.display_name
-        suggestion.entity_type = self._infer_entity_type(
+        (
+            suggestion.entity_type,
+            entity_type_confidence,
+        ) = self._infer_entity_type_with_confidence(
             suggestion.display_name,
             folder_path.name,
             "\n".join(str(item.get("content") or "")[:4_000] for item in eligible),
         )
-        if not any(
+        if entity_type_confidence >= 0.9 and not any(
             item.field_name == "contact_name" and item.automatic
             for item in suggestion.evidence
         ):
@@ -265,14 +268,15 @@ class CustomerSuggestionService:
         suggestion.evidence.extend([
             self._evidence(
                 "entity_type", suggestion.entity_type, identity_source,
-                folder_path.name, 0, "Kundentyp-Regeln", 0.95,
+                folder_path.name, 0, "Kundentyp-Regeln",
+                entity_type_confidence,
             ),
             self._evidence(
                 "company", suggestion.company, str(folder_path),
                 folder_path.name, 0, "Projektordner", 0.95,
             ),
         ])
-        suggestion.evidence[-2].automatic = True
+        suggestion.evidence[-2].automatic = entity_type_confidence >= 0.9
         suggestion.evidence[-1].automatic = True
         return suggestion
 
@@ -687,20 +691,32 @@ class CustomerSuggestionService:
         project_label: str = "",
         document_text: str = "",
     ) -> str:
+        return self._infer_entity_type_with_confidence(
+            display_name,
+            project_label,
+            document_text,
+        )[0]
+
+    def _infer_entity_type_with_confidence(
+        self,
+        display_name: str,
+        project_label: str = "",
+        document_text: str = "",
+    ) -> tuple[str, float]:
         label_name = project_label.split(",", 1)[0].strip() if project_label else ""
         name_scope = label_name or display_name
         lowered = name_scope.casefold()
         if self._contains_company_form(lowered):
-            return "Unternehmen"
+            return "Unternehmen", 0.98
         if any(marker in lowered for marker in ORGANIZATION_MARKERS):
-            return "Organisation"
+            return "Organisation", 0.96
         hinted_name = NAME_HINT_RE.search(document_text)
         if PERSON_HINT_RE.search(document_text) or (
             hinted_name is not None
             and bool(self._clean_name_candidate(hinted_name.group(1)))
         ):
-            return "Privatperson"
-        return "Unternehmen"
+            return "Privatperson", 0.95
+        return "Privatperson", 0.55
 
     def _clean_phone_candidate(self, value: str, line: str) -> str:
         if (

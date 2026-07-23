@@ -879,16 +879,32 @@ class CustomerRepository:
         ).fetchall()
         return [self._hydrate_data_suggestion(row) for row in rows]
 
-    def resolve_data_suggestion(self, suggestion_id: int, accept: bool) -> Customer:
+    def resolve_data_suggestion(
+        self,
+        suggestion_id: int,
+        accept: bool,
+        accepted_value: str | None = None,
+    ) -> Customer:
         suggestion = self.get_data_suggestion(suggestion_id)
         if suggestion is None or suggestion.status != "pending":
             raise ValueError("Der Vorschlag ist nicht mehr offen.")
         allowed = {
             "company", "contact", "contact_name", "email", "phone",
-            "street", "postal_code", "city",
+            "street", "postal_code", "city", "entity_type",
         }
         if suggestion.field_name not in allowed:
             raise ValueError("Dieses vorgeschlagene Feld wird nicht unterstützt.")
+        resolved_value = str(
+            accepted_value
+            if accepted_value is not None
+            else suggestion.suggested_value
+        ).strip()
+        if suggestion.field_name == "entity_type" and resolved_value not in {
+            "Privatperson",
+            "Unternehmen",
+            "Organisation",
+        }:
+            raise ValueError("Der ausgewählte Kundentyp ist ungültig.")
         status = "accepted" if accept else "rejected"
         with self.connection:
             if accept:
@@ -904,7 +920,7 @@ class CustomerRepository:
                     self.connection.execute(
                         f"UPDATE customers SET {suggestion.field_name} = ?, "
                         "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (suggestion.suggested_value, suggestion.customer_id),
+                        (resolved_value, suggestion.customer_id),
                     )
                     self.connection.execute(
                         "DELETE FROM automatic_field_sources "
@@ -1814,6 +1830,7 @@ class CustomerRepository:
     ):
         allowed = {
             "contact_name", "email", "phone", "street", "postal_code", "city",
+            "entity_type",
         }
         seen: set[tuple[str, str]] = set()
         for evidence in candidate.evidence:

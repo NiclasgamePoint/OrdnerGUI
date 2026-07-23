@@ -57,7 +57,10 @@ class DetachedIndexJobTests(unittest.TestCase):
             source = root / "source"
             project = source / "DEKRA" / "2026" / "Müller, Berlin"
             project.mkdir(parents=True)
-            (project / "eins.txt").write_text("Kundendokument", encoding="utf-8")
+            (project / "eins.txt").write_text(
+                "Kunde: Max Müller",
+                encoding="utf-8",
+            )
             active = root / "index.db"
             customers = root / "customers.db"
             state_dir = root / "state"

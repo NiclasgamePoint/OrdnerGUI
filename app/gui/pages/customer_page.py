@@ -141,9 +141,9 @@ class CustomerPage(QWidget):
         self.edit_button.setAccessibleName("Kundendaten bearbeiten")
         self.edit_button.clicked.connect(self._edit_customer)
         self.review_button = CountBadgeButton(
-            "Kontaktdaten prüfen", AppButton.SECONDARY
+            "Kundendaten prüfen", AppButton.SECONDARY
         )
-        self.review_button.setAccessibleName("Kontaktdaten prüfen")
+        self.review_button.setAccessibleName("Kundendaten prüfen")
         self.review_button.clicked.connect(self._review_suggestions)
         button_row.addWidget(self.edit_button, 1)
         button_row.addWidget(self.review_button, 1)
