@@ -50,6 +50,7 @@ jobs:
           python -m compileall app main.py
 
       - name: Count Python code lines
+        shell: bash
         run: |
           python - <<'PY'
           import os
