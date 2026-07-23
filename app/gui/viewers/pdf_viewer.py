@@ -15,6 +15,7 @@ class PdfViewerWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("ViewerContent")
         self.document = QPdfDocument(self)
+        self._empty_document = QPdfDocument(self)
         self.search_model = QPdfSearchModel(self)
         self.search_model.setDocument(self.document)
 
@@ -65,6 +66,7 @@ class PdfViewerWidget(QWidget):
         error = self.document.load(str(path))
         if error != QPdfDocument.Error.None_:
             raise ValueError(f"PDF konnte nicht geladen werden ({error.name}).")
+        self.search_model.setDocument(self.document)
         self.view.setDocument(self.document)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
         self._update_page_label(0)
@@ -95,6 +97,8 @@ class PdfViewerWidget(QWidget):
 
     def close_document(self):
         self.search_model.setSearchString("")
+        self.view.setDocument(self._empty_document)
+        self.search_model.setDocument(self._empty_document)
         self.document.close()
         app = QApplication.instance()
         if app is not None:
