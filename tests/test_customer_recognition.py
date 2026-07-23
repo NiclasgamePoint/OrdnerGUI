@@ -4,6 +4,7 @@ import unittest
 
 from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.customer_models import Contact, Customer
+from app.core.customer_recognition_models import RecognitionCandidate
 from app.core.customer_repository import CustomerRepository
 from app.core.index_manager import IndexManager
 from app.services.customer_recognition import (
@@ -253,7 +254,7 @@ class CustomerRecognitionTests(unittest.TestCase):
             )
             repository.close()
 
-    def test_pre_2016_structured_folder_waits_for_review(self):
+    def test_pre_2016_structured_folder_is_fully_excluded(self):
         with TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "Bauvorhaben"
@@ -273,10 +274,67 @@ class CustomerRecognitionTests(unittest.TestCase):
             cases = repository.list_pending_recognition_cases()
 
             self.assertEqual(stats.created, 0)
-            self.assertEqual(stats.pending, 1)
+            self.assertEqual(stats.pending, 0)
             self.assertEqual(len(repository.list_customers()), 0)
-            self.assertEqual(cases[0].display_name, "Mustermann")
-            self.assertIn("vor 2016", cases[0].reason)
+            self.assertEqual(cases, [])
+            repository.close()
+
+    def test_pre_minimum_year_removes_existing_legacy_pending_case(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            legacy = root / "Blower Door" / "2015" / "Mustermann, Musterstadt"
+            legacy.mkdir(parents=True)
+            (legacy / "info.txt").write_text("Altprojekt", encoding="utf-8")
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+            repository = CustomerRepository(customer_path)
+            repository.replace_pending_recognition_cases([
+                RecognitionCandidate(
+                    recognition_key="mustermann",
+                    display_name="Mustermann",
+                    city="Musterstadt",
+                    folder_paths=[str(legacy)],
+                    service_types=["Blower Door"],
+                    years=[2015],
+                    reason="Alter Prüffall",
+                )
+            ])
+            repository.close()
+
+            stats = CustomerRecognitionService(
+                index_path,
+                customer_path,
+                CustomerRecognitionOptions(enabled=True),
+            ).synchronize()
+            repository = CustomerRepository(customer_path)
+
+            self.assertEqual(stats.pending, 0)
+            self.assertEqual(repository.pending_recognition_count(), 0)
+            repository.close()
+
+    def test_configured_minimum_year_excludes_younger_project_roots(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "Bauvorhaben"
+            project = root / "Blower Door" / "2018" / "Mustermann, Musterstadt"
+            project.mkdir(parents=True)
+            (project / "info.txt").write_text("Projekt", encoding="utf-8")
+            index_path = base / "index.db"
+            customer_path = base / "customers.db"
+            self._build_index(root, index_path)
+
+            stats = CustomerRecognitionService(
+                index_path,
+                customer_path,
+                CustomerRecognitionOptions(enabled=True, minimum_year=2020),
+            ).synchronize()
+            repository = CustomerRepository(customer_path)
+
+            self.assertEqual(stats.created, 0)
+            self.assertEqual(stats.pending, 0)
+            self.assertEqual(repository.list_customers(), [])
             repository.close()
 
     def test_similar_name_waits_for_persistent_review_decision(self):

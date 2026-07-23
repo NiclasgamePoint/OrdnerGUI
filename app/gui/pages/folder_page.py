@@ -309,7 +309,8 @@ class FolderPage(QWidget):
     def _path_key(path: str) -> str:
         if not path:
             return ""
-        return os.path.normcase(os.path.normpath(path))
+        normalized_path = Path(path).expanduser().resolve(strict=False)
+        return os.path.normcase(str(normalized_path))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

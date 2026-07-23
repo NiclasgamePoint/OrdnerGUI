@@ -3,6 +3,10 @@ from PySide6.QtGui import QColor, QPalette
 
 from app.core.config import SETTINGS_APP, SETTINGS_ORG
 
+FONT_FAMILY_FALLBACKS = (
+    "'Segoe UI', 'SF Pro Text', 'Noto Sans', 'Ubuntu', sans-serif"
+)
+
 
 def _safe_color(value: str, fallback: str) -> str:
     color = QColor(value)
@@ -199,18 +203,20 @@ def build_stylesheet(
         for color in (bg, surface, card, text, muted, border, item_hover, item_selected, line, chip)
     )
     def scaled(size: int) -> int:
-        return max(8, round(size * font_size / ThemeManager.DEFAULT_FONT_SIZE))
+        return max(ThemeManager.MIN_FONT_SIZE, round(
+            size * font_size / ThemeManager.DEFAULT_FONT_SIZE
+        ))
 
     return f"""
     QWidget {{
-        font-family: 'Segoe UI', 'Noto Sans', sans-serif;
+        font-family: {FONT_FAMILY_FALLBACKS};
         font-size: {font_size}px;
     }}
 
     QMainWindow, QWidget#RootWidget {{
         background-color: {bg};
         color: {text};
-        font-family: 'Segoe UI', 'Noto Sans', sans-serif;
+        font-family: {FONT_FAMILY_FALLBACKS};
         font-size: {font_size}px;
     }}
 
