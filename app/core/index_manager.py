@@ -953,25 +953,16 @@ class IndexManager:
                            COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
                    ) AS last_modified
             FROM folders folder
-            LEFT JOIN project_roots project ON project.path =
+            JOIN project_roots project ON project.path =
                 COALESCE(NULLIF(folder.project_root_path, ''), folder.path)
-            WHERE (
-                COALESCE(folder.project_root_path, '') <> ''
-                OR NOT EXISTS (
-                    SELECT 1 FROM project_roots ancestor
-                    WHERE ancestor.path = folder.path
-                       OR ancestor.path LIKE folder.path || ? || '%'
-                )
-            )
+            WHERE COALESCE(folder.project_root_path, '') <> ''
             AND (
                 ? = 1
-                OR COALESCE(folder.project_root_path, '') = ''
                 OR folder.path = folder.project_root_path
             )
             {eligibility_sql}
         """
         base_params: list = [
-            os.sep,
             int(filters.include_subfolders),
             *eligibility_params,
         ]

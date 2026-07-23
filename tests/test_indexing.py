@@ -255,7 +255,7 @@ class IndexingTests(unittest.TestCase):
         )
         manager.close()
 
-    def test_structured_subfolders_collapse_to_project_root_but_legacy_stays_visible(self):
+    def test_folder_search_only_lists_structured_project_roots(self):
         current_project = self.root / "DEKRA" / "2026" / "Müller, Berlin"
         pictures = current_project / "Bilder"
         empty = current_project / "Dokumente" / "Leer"
@@ -288,8 +288,19 @@ class IndexingTests(unittest.TestCase):
         self.assertEqual(
             structured_visible.items[0]["folder_path"], str(current_project.resolve())
         )
-        self.assertEqual(legacy_result.total, 1)
-        self.assertEqual(legacy_result.items[0]["folder_path"], str(legacy.resolve()))
+        self.assertEqual(legacy_result.total, 0)
+        structure_name_results = manager.search_folders_page(
+            "Bauvorhaben", SearchFilters(), page=1, page_size=25
+        )
+        indexed_project_roots = {
+            str(row["path"])
+            for row in manager.list_project_roots()
+        }
+        self.assertTrue(structure_name_results.items)
+        self.assertTrue(all(
+            str(item["folder_path"]) in indexed_project_roots
+            for item in structure_name_results.items
+        ))
         self.assertEqual(details["folder_path"], str(current_project.resolve()))
         self.assertEqual(
             {node["name"] for node in details["subfolders"]},
