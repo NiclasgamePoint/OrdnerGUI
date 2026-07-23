@@ -74,7 +74,7 @@ class IndexOptions:
 
 @dataclass
 class CustomerRecognitionOptions:
-    enabled: bool = False
+    enabled: bool = True
     minimum_year: int = 2016
     email_blacklist: str = ""
     phone_blacklist: str = ""

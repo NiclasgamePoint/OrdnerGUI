@@ -16,12 +16,36 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QPlainTextEdit,
     QScrollArea,
+    QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 from app.gui.widgets import AppButton, BusyIndicator
 from app.core.config import CustomerRecognitionOptions, IndexOptions
 from app.core.index_diagnostics import IndexDiagnostics
+
+
+class ClickActivatedSpinBox(QSpinBox):
+    """Only consume wheel input after the user explicitly clicked the field."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wheel_adjustment_enabled = False
+
+    def mousePressEvent(self, event):
+        self._wheel_adjustment_enabled = True
+        super().mousePressEvent(event)
+
+    def focusOutEvent(self, event):
+        self._wheel_adjustment_enabled = False
+        super().focusOutEvent(event)
+
+    def wheelEvent(self, event):
+        if not self._wheel_adjustment_enabled:
+            event.ignore()
+            return
+        super().wheelEvent(event)
 
 
 class SettingsPopup(QFrame):
@@ -78,6 +102,7 @@ class SettingsPopup(QFrame):
         self.recognition_summary = dict(recognition_summary or {})
         self.pending_recognition_cases = int(pending_recognition_cases)
         self.blacklist_suggestions = list(blacklist_suggestions or [])
+        self._color_dialog_active = False
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -303,19 +328,19 @@ class SettingsPopup(QFrame):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
 
-        self.max_file_size_spin = QSpinBox()
+        self.max_file_size_spin = ClickActivatedSpinBox()
         self.max_file_size_spin.setRange(1, 10_240)
         self.max_file_size_spin.setSuffix(" MB")
         self.max_file_size_spin.setValue(self.index_options.max_file_size_mb)
         form.addRow(self._form_label("Maximale Dokumentgröße"), self.max_file_size_spin)
 
-        self.max_characters_spin = QSpinBox()
+        self.max_characters_spin = ClickActivatedSpinBox()
         self.max_characters_spin.setRange(10_000, 20_000_000)
         self.max_characters_spin.setSingleStep(100_000)
         self.max_characters_spin.setValue(self.index_options.max_extracted_characters)
         form.addRow(self._form_label("Maximale Extraktlänge"), self.max_characters_spin)
 
-        self.result_limit_spin = QSpinBox()
+        self.result_limit_spin = ClickActivatedSpinBox()
         self.result_limit_spin.setRange(10, 5_000)
         self.result_limit_spin.setValue(self.index_options.result_limit)
         form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
@@ -324,12 +349,12 @@ class SettingsPopup(QFrame):
         self.ocr_checkbox.setChecked(self.index_options.ocr_enabled)
         form.addRow(self._form_label("OCR"), self.ocr_checkbox)
 
-        self.ocr_pages_spin = QSpinBox()
+        self.ocr_pages_spin = ClickActivatedSpinBox()
         self.ocr_pages_spin.setRange(1, 1_000)
         self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
         form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
 
-        self.ocr_timeout_spin = QSpinBox()
+        self.ocr_timeout_spin = ClickActivatedSpinBox()
         self.ocr_timeout_spin.setRange(5, 600)
         self.ocr_timeout_spin.setSuffix(" s")
         self.ocr_timeout_spin.setValue(self.index_options.ocr_timeout_seconds)
@@ -426,7 +451,9 @@ class SettingsPopup(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         content = QWidget()
+        content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
@@ -437,6 +464,9 @@ class SettingsPopup(QFrame):
 
         self.recognition_enabled = QCheckBox(
             "Kunden ab 2016 aus Dienstleistung/Jahr/Nachname, Ort erkennen"
+        )
+        self.recognition_enabled.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Preferred
         )
         self.recognition_enabled.setChecked(self.recognition_options.enabled)
         layout.addWidget(self.recognition_enabled)
@@ -450,20 +480,22 @@ class SettingsPopup(QFrame):
         self.preferred_document_patterns.setPlaceholderText(
             "anschreiben, angebot, auftrag, brief, vertrag"
         )
+        self.preferred_document_patterns.setMinimumWidth(0)
+        self.preferred_document_patterns.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
         layout.addWidget(self.preferred_document_patterns)
 
-        threshold_row = QHBoxLayout()
         threshold_label = QLabel("Blocklistenvorschlag ab Kundenordnern")
         threshold_label.setObjectName("PopupCaption")
-        threshold_row.addWidget(threshold_label)
-        self.frequent_value_threshold = QSpinBox()
+        threshold_label.setWordWrap(True)
+        layout.addWidget(threshold_label)
+        self.frequent_value_threshold = ClickActivatedSpinBox()
         self.frequent_value_threshold.setRange(2, 100)
         self.frequent_value_threshold.setValue(
             self.recognition_options.frequent_value_threshold
         )
-        threshold_row.addWidget(self.frequent_value_threshold)
-        threshold_row.addStretch()
-        layout.addLayout(threshold_row)
+        layout.addWidget(self.frequent_value_threshold, 0, Qt.AlignLeft)
 
         note = QLabel(
             "Manuell gepflegte Daten werden nicht überschrieben. Die folgenden Werte "
@@ -486,6 +518,8 @@ class SettingsPopup(QFrame):
             label.setObjectName("PopupCaption")
             layout.addWidget(label)
             field = QPlainTextEdit()
+            field.setMinimumWidth(0)
+            field.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             field.setMinimumHeight(max(58, self.selected_font_size * 4))
             field.setPlaceholderText(placeholder)
             field.setPlainText(str(getattr(self.recognition_options, attribute)))
@@ -503,6 +537,10 @@ class SettingsPopup(QFrame):
         suggestion_title.setObjectName("PopupCaption")
         layout.addWidget(suggestion_title)
         self.blacklist_suggestion_list = QListWidget()
+        self.blacklist_suggestion_list.setMinimumWidth(0)
+        self.blacklist_suggestion_list.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Preferred
+        )
         self.blacklist_suggestion_list.setMinimumHeight(100)
         layout.addWidget(self.blacklist_suggestion_list)
         suggestion_actions = QHBoxLayout()
@@ -773,23 +811,37 @@ class SettingsPopup(QFrame):
         contrast_label = QLabel("Kontrast")
         contrast_label.setObjectName("PopupCaption")
         contrast_row.addWidget(contrast_label)
-        self.contrast_spin = QSpinBox()
-        self.contrast_spin.setRange(70, 140)
-        self.contrast_spin.setSuffix(" %")
-        self.contrast_spin.setValue(self.selected_contrast)
-        self.contrast_spin.setToolTip("100 % entspricht dem Standardkontrast")
-        contrast_row.addWidget(self.contrast_spin)
+        self.contrast_slider = QSlider(Qt.Horizontal)
+        self.contrast_slider.setObjectName("AppearanceSlider")
+        self.contrast_slider.setRange(70, 140)
+        self.contrast_slider.setValue(self.selected_contrast)
+        self.contrast_slider.setToolTip("100 % entspricht dem Standardkontrast")
+        contrast_row.addWidget(self.contrast_slider, 1)
+        self.contrast_value_label = QLabel(f"{self.selected_contrast} %")
+        self.contrast_value_label.setObjectName("SliderValue")
+        self.contrast_value_label.setMinimumWidth(
+            max(48, self.selected_font_size * 4)
+        )
+        self.contrast_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        contrast_row.addWidget(self.contrast_value_label)
         layout.addLayout(contrast_row)
 
         font_row = QHBoxLayout()
         font_label = QLabel("Schriftgröße")
         font_label.setObjectName("PopupCaption")
         font_row.addWidget(font_label)
-        self.font_size_spin = QSpinBox()
-        self.font_size_spin.setRange(10, 20)
-        self.font_size_spin.setSuffix(" px")
-        self.font_size_spin.setValue(self.selected_font_size)
-        font_row.addWidget(self.font_size_spin)
+        self.font_size_slider = QSlider(Qt.Horizontal)
+        self.font_size_slider.setObjectName("AppearanceSlider")
+        self.font_size_slider.setRange(10, 20)
+        self.font_size_slider.setValue(self.selected_font_size)
+        font_row.addWidget(self.font_size_slider, 1)
+        self.font_size_value_label = QLabel(f"{self.selected_font_size} px")
+        self.font_size_value_label.setObjectName("SliderValue")
+        self.font_size_value_label.setMinimumWidth(
+            max(48, self.selected_font_size * 4)
+        )
+        self.font_size_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        font_row.addWidget(self.font_size_value_label)
         layout.addLayout(font_row)
 
         size_hint = QLabel(
@@ -803,8 +855,8 @@ class SettingsPopup(QFrame):
 
         self.mode_combo.currentIndexChanged.connect(self.on_value_changed)
         self.accent_combo.currentIndexChanged.connect(self.on_value_changed)
-        self.contrast_spin.valueChanged.connect(self.on_value_changed)
-        self.font_size_spin.valueChanged.connect(self.on_value_changed)
+        self.contrast_slider.valueChanged.connect(self.on_value_changed)
+        self.font_size_slider.valueChanged.connect(self.on_value_changed)
 
         self._set_combo_for_accent(self.selected_accent)
         self._update_preview()
@@ -835,8 +887,10 @@ class SettingsPopup(QFrame):
         if accent_value and accent_value != "custom":
             self.selected_accent = accent_value
         self.pick_button.setEnabled(self.accent_combo.currentData() == "custom")
-        self.selected_contrast = self.contrast_spin.value()
-        self.selected_font_size = self.font_size_spin.value()
+        self.selected_contrast = self.contrast_slider.value()
+        self.selected_font_size = self.font_size_slider.value()
+        self.contrast_value_label.setText(f"{self.selected_contrast} %")
+        self.font_size_value_label.setText(f"{self.selected_font_size} px")
         self._update_preview()
         self.appearanceChanged.emit(
             self.selected_mode,
@@ -846,17 +900,32 @@ class SettingsPopup(QFrame):
         )
 
     def pick_custom_color(self):
-        color = QColorDialog.getColor(QColor(self.selected_accent), self, "Akzentfarbe wählen")
-        if color.isValid():
-            self.selected_accent = color.name()
-            self.accent_combo.setCurrentIndex(self.accent_combo.count() - 1)
-            self._update_preview()
-            self.appearanceChanged.emit(
-                self.selected_mode,
-                self.selected_accent,
-                self.selected_contrast,
-                self.selected_font_size,
+        self._color_dialog_active = True
+        try:
+            color = QColorDialog.getColor(
+                QColor(self.selected_accent),
+                self,
+                "Akzentfarbe wählen",
+                QColorDialog.DontUseNativeDialog,
             )
+            if color.isValid():
+                self.selected_accent = color.name()
+                self.accent_combo.setCurrentIndex(self.accent_combo.count() - 1)
+                self._update_preview()
+                self.appearanceChanged.emit(
+                    self.selected_mode,
+                    self.selected_accent,
+                    self.selected_contrast,
+                    self.selected_font_size,
+                )
+        finally:
+            self._color_dialog_active = False
+
+    def closeEvent(self, event):
+        if self._color_dialog_active:
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def size_for_parent(self) -> QSize:
         """Return a comfortable size that still fits into a smaller main window."""

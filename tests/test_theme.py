@@ -45,6 +45,8 @@ class ThemeTests(unittest.TestCase):
     def test_font_size_is_applied_globally_and_bounded(self):
         stylesheet = build_stylesheet("dark", "#2db89d", 100, 18)
         self.assertIn("font-size: 18px", stylesheet)
+        self.assertIn("QSlider#AppearanceSlider::groove:horizontal", stylesheet)
+        self.assertIn("QLabel#SliderValue", stylesheet)
         self.assertIn(
             f"font-size: {ThemeManager.MAX_FONT_SIZE}px",
             build_stylesheet("dark", "#2db89d", 100, 99),
