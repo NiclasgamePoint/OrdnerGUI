@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 
 class ConfigPathTests(unittest.TestCase):
@@ -41,6 +42,32 @@ class ConfigPathTests(unittest.TestCase):
                     os.environ[key] = value
             module = importlib.import_module(module_name)
             importlib.reload(module)
+
+    def test_customer_recognition_defaults_to_enabled_without_saved_value(self):
+        from app.core import config
+
+        class SettingsWithoutSavedValue:
+            def value(self, _key, default=None):
+                return default
+
+        with patch.object(
+            config, "QSettings", return_value=SettingsWithoutSavedValue()
+        ):
+            self.assertTrue(config.load_customer_recognition_options().enabled)
+
+    def test_customer_recognition_preserves_saved_disabled_value(self):
+        from app.core import config
+
+        class SettingsWithDisabledRecognition:
+            def value(self, key, default=None):
+                if key == "customer_recognition/enabled":
+                    return False
+                return default
+
+        with patch.object(
+            config, "QSettings", return_value=SettingsWithDisabledRecognition()
+        ):
+            self.assertFalse(config.load_customer_recognition_options().enabled)
 
 
 if __name__ == "__main__":

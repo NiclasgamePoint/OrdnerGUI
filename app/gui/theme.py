@@ -501,6 +501,41 @@ def build_stylesheet(
         border-color: {accent};
     }}
 
+    QSlider#AppearanceSlider {{
+        min-height: 24px;
+        background: transparent;
+    }}
+
+    QSlider#AppearanceSlider::groove:horizontal {{
+        height: 6px;
+        background-color: {border};
+        border-radius: 3px;
+    }}
+
+    QSlider#AppearanceSlider::sub-page:horizontal {{
+        background-color: {accent};
+        border-radius: 3px;
+    }}
+
+    QSlider#AppearanceSlider::handle:horizontal {{
+        width: 18px;
+        margin: -6px 0;
+        background-color: {card};
+        border: 2px solid {accent};
+        border-radius: 9px;
+    }}
+
+    QSlider#AppearanceSlider::handle:horizontal:hover {{
+        background-color: {accent_soft};
+    }}
+
+    QLabel#SliderValue {{
+        color: {text};
+        font-weight: 600;
+        border: none;
+        background: transparent;
+    }}
+
     QSpinBox::up-button, QSpinBox::down-button {{
         background-color: {chip};
         border: none;

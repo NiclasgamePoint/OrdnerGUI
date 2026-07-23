@@ -1,9 +1,13 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 
 from app.core.customer_models import Customer
 from app.core.config import CustomerRecognitionOptions
@@ -325,8 +329,75 @@ class UiNavigationTests(unittest.TestCase):
         )
         self.assertTrue(popup.review_recognition_button.isEnabled())
         self.assertIn("2", popup.review_recognition_button.text())
-        self.assertEqual(popup.contrast_spin.value(), 100)
-        self.assertEqual(popup.font_size_spin.value(), 13)
+        self.assertEqual(popup.contrast_slider.value(), 100)
+        self.assertEqual(popup.contrast_value_label.text(), "100 %")
+        self.assertEqual(popup.font_size_slider.value(), 13)
+        self.assertEqual(popup.font_size_value_label.text(), "13 px")
+        self.assertEqual(
+            popup.stack.widget(2).findChild(QScrollArea).horizontalScrollBarPolicy(),
+            Qt.ScrollBarAlwaysOff,
+        )
+        popup.close()
+
+    def test_appearance_sliders_update_visible_values(self):
+        popup = SettingsPopup("light", "#2db89d")
+
+        popup.contrast_slider.setValue(125)
+        popup.font_size_slider.setValue(18)
+
+        self.assertEqual(popup.contrast_value_label.text(), "125 %")
+        self.assertEqual(popup.font_size_value_label.text(), "18 px")
+        popup.close()
+
+    def test_custom_accent_updates_and_cancel_keeps_previous_color(self):
+        popup = SettingsPopup("light", "#2db89d")
+        popup.accent_combo.setCurrentIndex(popup.accent_combo.count() - 1)
+
+        with patch(
+            "app.gui.settings_popup.QColorDialog.getColor",
+            return_value=QColor("#663399"),
+        ):
+            popup.pick_custom_color()
+        self.assertEqual(popup.selected_accent, "#663399")
+        self.assertFalse(popup._color_dialog_active)
+
+        with patch(
+            "app.gui.settings_popup.QColorDialog.getColor",
+            return_value=QColor(),
+        ):
+            popup.pick_custom_color()
+        self.assertEqual(popup.selected_accent, "#663399")
+        self.assertFalse(popup._color_dialog_active)
+        popup.close()
+
+    def test_index_spinbox_requires_click_before_wheel_adjustment(self):
+        popup = SettingsPopup("light", "#2db89d")
+        popup.show()
+        self.app.processEvents()
+        spinbox = popup.max_file_size_spin
+        initial_value = spinbox.value()
+
+        def wheel_event():
+            return QWheelEvent(
+                QPointF(4, 4),
+                QPointF(4, 4),
+                QPoint(),
+                QPoint(0, 120),
+                Qt.NoButton,
+                Qt.NoModifier,
+                Qt.ScrollPhase.ScrollUpdate,
+                False,
+            )
+
+        event = wheel_event()
+        spinbox.wheelEvent(event)
+        self.assertFalse(event.isAccepted())
+        self.assertEqual(spinbox.value(), initial_value)
+
+        QTest.mouseClick(spinbox, Qt.LeftButton)
+        self.assertTrue(spinbox._wheel_adjustment_enabled)
+        spinbox.wheelEvent(wheel_event())
+        self.assertEqual(spinbox.value(), initial_value + 1)
         popup.close()
 
     def test_customer_page_enables_hover_tracking_for_contact_rows(self):
