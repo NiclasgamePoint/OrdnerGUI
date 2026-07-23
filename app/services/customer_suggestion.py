@@ -557,7 +557,6 @@ class CustomerSuggestionService:
         display_name: str,
         entity_type: str,
     ) -> str:
-        label = folder_path.name.split(",", 1)[0].strip()
         if entity_type != "Privatperson":
             return ""
         candidate = display_name.strip()
