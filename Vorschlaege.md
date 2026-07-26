@@ -75,3 +75,80 @@
 - [ ] **Multi-Index-Support**: Neben dem Hauptindex (NAS) einen zweiten lokalen Index für schnelle Suche auf dem Entwicklungsrechner ermöglichen — mit synchronisierbarem FTS5-Subset.
 - [ ] **Plugin-Architektur für Dokument-Konverter**: Der `DocumentConverter` ist aktuell monolithisch (LibreOffice/catdoc). Eine kleine Plugin-Schnittstelle (`IDocumentExtractor`) würde den Austausch oder die Erweiterung von Konvertern erleichtern, ohne den Core zu ändern.
 
+## Überarching (Meine Analyse)
+
+Diese Punkte sind das Ergebnis einer vollständigen Code-Durchsicht aller Module und fokussieren auf konkrete architektonische Schwachstellen, die im laufenden Betrieb auffallen werden. Sie überschneiden sich nicht mit den bisherigen Vorschlägen.
+
+### 1. Index-Job-Zustand: Kein Timeout-Mechanismus
+
+`index_job.json` ist ein State-Machine-Dateisystem (`starting → running → ready/completed/cancelled/error`). Aktuell gibt es **keine Zeitbegrenzung** für langsame Läufe — z. B. bei einem Netzwerk-Einbruch kann `running` wochenlang stehen und der Nutzer weiß nicht, ob noch gearbeitet wird oder ob hängen geblieben ist.
+
+- [ ] **Heartbeat/Last-Updated-Markierung**: In `index_job.json` ein Feld `"last_activity"` (ISO-Timestamp) pflegen, das bei jeder Fortschrittsänderung aktualisiert wird. Die GUI zeigt "Letzte Aktivität: vor 3 Stunden" und markiert hängende Läufe visuell.
+- [ ] **Maximale Laufzeit konfigurierbar**: `IndexOptions` bekommt ein Feld `max_run_duration: Optional[timedelta]`. Wird die Grenze überschritten, wird der Job auf `"error"` mit Message `"timeout_exceeded"` gesetzt — kein manuelles Abbrechen nötig.
+
+### 2. FolderStructureClassifier: Muster sind hartkodiert und nicht erweiterbar
+
+In `folder_structure.py` ist die Erkennung von Kundendateien über fest programmierte Regex-Muster (`DIREKT_LEISTUNG`, `JAHR_NACHNAME_ORT`, etc.) implementiert. Das System funktioniert für "Dienstleistung/Jahr/Nachname, Ort" — aber jede neue Ordnerstruktur erfordert einen Code-Change + Releas.
+
+- [ ] **Konfigurierbare Klassifikationsregeln**: Eine JSON/YAML-Datei (z. B. `classifier_rules.json`) definieren, in der Regeln wie `{ "pattern": "Dienstleistung/{jahr}/{name}, {ort}", "service_type": "Baubegleitung" }` gespeichert werden. Der Classifier liest diese beim Start und ist damit ohne Code-Änderung erweiterbar.
+- [ ] **Fallback-Kategorie "Unbekannt" mit manueller Zuordnung**: Nicht klassifizierte Ordner landen in einer Pufferliste, die der Nutzer per Drag & Drop oder Dialog zuordnen kann (ähnlich wie die bestehende `customer_recognition_review`).
+
+### 3. CustomerSuggestion: Regex-Suite ist fragil bei internationalen Namen/Adressen
+
+`customer_suggestion.py` nutzt feste Regex-Muster (`EMAIL_RE`, `PHONE_RE`, `POSTAL_CITY_RE`, `STREET_RE`, `NAME_HINT_RE`, `SALUTATION_RE`). Diese sind auf deutsche Formate optimiert und brechen bei:
+- Internationalen Kunden (chinesische/eastern-european Namen)
+- Mobilnummern mit Landesvorwahl (+49, +33, etc.)
+- Adressen ohne Postleitzahl am Anfang
+
+- [ ] **Erweiterbare Matcher-Schnittstelle**: Statt harter Regex-Konstanten eine kleine Plugin-API (`IFieldExtractor`) einführen. Standardmäßig wird der deutsche Extractor geladen, aber via `settings.json` kann ein internationaler Extractor aktiviert werden.
+- [ ] **Konfidenz-Scoring mit Schwellwert**: Aktuell werden alle Erkennungen als Vorschlag angenommen. Ein minimum confidence threshold (z. B. 0.6) würde False-Positives reduzieren — der Nutzer sieht nur noch plausible Vorschläge.
+
+### 4. FileSystemMonitor: Polling-basiert, aber ohne Backoff
+
+Der `FileSystemMonitor` pollt alle ~12 Sekunden permanent — auch nachts oder am Wochenende, wenn sich nichts ändert. Das verbraucht CPU und erzeugt unnötige Datei-IO auf der NAS.
+
+- [ ] **Exponential Backoff bei inaktiv**: Wenn über mehrere Polling-Zyklen kein Change erkannt wird, die Intervalle verdoppeln (12s → 24s → 48s → max 5 Min) und bei Erkennung wieder auf 12s zurücksetzen.
+- [ ] **Alternative: OS-native File Events**: Unter Windows `ReadDirectoryChangesW` (`win32file.FindNextChangeNotification`) statt Polling nutzen, wo verfügbar. Das eliminiert CPU-Last komplett — der Monitor reagiert nur bei echten Änderungen.
+
+### 5. DocumentConverter: Fehlerbehandlung ist inkonsistent
+
+In `document_converter.py` gibt es mehrere Fehlschlag-Szenarien (LibreOffice nicht installiert, catdoc fehlschlägt, python-docx crashed), die unterschiedlich behandelt werden — manche werfen Exceptions, andere loggen und springen zurück. Das führt dazu, dass bei einem Teilverlust der Konvertierung unklar ist, welche Dateien fehlgeschlagen sind.
+
+- [ ] **Zentrales Conversion-Error-Tracking**: Alle fehlgeschlagenen Konvertierungen in einer separaten Tabelle `conversion_errors` (datei_path, fehler_typ, nachricht, datum) protokollieren und im Index-Dashboard anzeigen ("3 Dateien konnten nicht konvertiert werden").
+- [ ] **Retry-Mechanismus mit Exponential Backoff**: Einmal fehlgeschlagene Konvertierungen automatisch nach 5/15/30 Minuten erneut versuchen — besonders hilfreich bei temporären LibreOffice-Sperrkonflikten.
+
+### 6. Suchergebnisse: Keine Persistenz von "Favoriten" oder "Kürzlich"
+
+Die aktuelle Suche ist zustandslos — jeder Suchbegriff wird sofort abgearbeitet und verworfen. Es gibt keine Möglichkeit, häufig genutzte Suchen zu speichern oder kürzliche Ergebnisse schnell wiederzufinden.
+
+- [ ] **Suchhistorie lokal persistieren**: Die letzten 20 Suchbegriffe in `QSettings` (oder einer kleinen SQLite-Tabelle) ablegen mit Zeitstempel. Ein Dropdown neben dem Suchfeld zeigt "Kürzlich gesucht" an.
+- [ ] **Favoriten-Sterne für Kunden/Dateien**: In der CustomerPage und FolderPage einen Stern-Button, der Einträge in eine `favorites`-Tabelle schreibt — analog zu vielen Dateimanagern (Windows Explorer, Finder).
+
+### 7. GUI: Keine visuellen Indikatoren für Index-Fortschritt
+
+Während ein Indexierungslauf läuft (`index_job.json` state = `"running"`), gibt es **keine visuelle Rückmeldung** im UI — der Nutzer sieht nicht, wie weit der Prozess fortgeschritten ist oder welche Dateien gerade verarbeitet werden.
+
+- [ ] **Progress-Balken in der Statusleiste**: Ein `QProgressBar` oder animierter "Indexiere..."-Text mit aktuellem Fortschritt (z. B. "4.200 / 12.500 Dateien") in der Haupt-Navigation anzeigen, solange der Job läuft.
+- [ ] **Live-Log-Ausgabe**: Ein kleines Log-Fenster zeigt die aktuell verarbeiteten Pfade — besonders hilfreich bei großen Datenmengen und zur Fehlersuche.
+
+### 8. CustomerPage: Keine Möglichkeit, Kontakte zu mergen oder Duplikate aufzulösen
+
+Die Kundenerkennung kann denselben Kunden mehrmals erkennen (z. B. "Müller, Berlin" und "Müller GmbH, Berlin") und erzeugt separate Einträge. Es gibt keinen Merge-Workflow.
+
+- [ ] **Duplikatserkennung mit Merge-Vorschlag**: Beim Speichern eines neuen Kunden prüfen, ob ein ähnlicher Name/Ort existiert (ähnlich wie `fuzzy_search._token_similarity`). Falls ja: Dialog "Kunde 'Müller' existiert bereits. Zusammenführen?" anzeigen.
+- [ ] **Merge-Funktion in CustomerPage**: Zwei Kundeneinträge zusammenführen — Felder des neueren Eintrags übernehmen, alte Einträge löschen, alle zugehörigen Dateien neu verknüpfen.
+
+### 9. Theme: Kontrast-Slider ist fein granular, aber ohne Vorschau
+
+Der `contrast_slider` (70-140) verändert den Kontrast der Farben live — aber der Nutzer sieht erst das Ergebnis nach dem Schließen des Settings-Popups (weil die Anwendung restartet wird). Das macht Feintuning mühsam.
+
+- [ ] **Live-Vorschau im Settings-Dialoog**: Den Kontrast in Echtzeit auf einem Preview-Bereich anwenden (z. B. ein Miniatur-Fenster mit typischer Inhaltsansicht), bevor die Einstellungen gespeichert werden.
+- [ ] **Kontrast-Presets**: "Standard", "Hoher Kontrast" (für ältere Augen), "Augenschonend" als vorkonfigurierte Werte anbieten, statt manueller Slider-Kalibrierung.
+
+### 10. Architektur: Fehlende Integrationstests zwischen Core und GUI
+
+Der Code ist gut in Core/GUI/Services getrennt, aber es gibt **keine Tests**, die die Grenzen zwischen diesen Schichten testen — z. B. ob `IndexManager` korrekt Daten für die `SearchPage` bereitstellt oder ob `CustomerRepository` im Kontext der GUI-Konfiguration funktioniert.
+
+- [ ] **Integrationstest-Suite**: Tests, die eine vollständige Pipeline simulieren: Dateisystem → FileSystemMonitor → IndexManager → FTS5-Suche → SearchPage-Datenmodell. So wird sichergestellt, dass Refactorings in einem Layer keine anderen brechen.
+- [ ] **Test für `index_job.json` State-Machine**: Tests, die alle Zustandübergänge (`starting → running → ready/error/cancelled`) durchspielen und sicherstellen, dass der GUI-State korrekt reagiert (z. B. "Index läuft" wird angezeigt, wenn Job in `running`).
+
