@@ -19,6 +19,15 @@
 
 
 ## Patrick
+- letzter index lauf in normal datum format
+- Kundenseite Journal hinzufügen, für Telefon notizen Datum Uhrzeit
+- dokumentensuche als extra index
+- docker mit basis image, da dann disk mit daten maunten und dann index job laufen lassen
+- VorNamensliste aus GitHub um zu checken ob es Privat oder Firma ist.
+- Telefonnummer ertmal raus streichen 
+- BUGFIXING
+- Blaufilter auf den lightmode
+- 
 
 ---
 

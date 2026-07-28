@@ -119,12 +119,12 @@ def build_palette(mode: str, accent: str, contrast: int = ThemeManager.DEFAULT_C
     dark = mode.lower() == "dark"
     accent = _safe_color(accent, ThemeManager.DEFAULT_ACCENT)
     colors = {
-        "window": "#11161b" if dark else "#eaf0ef",
-        "base": "#1a222a" if dark else "#f5f8f7",
-        "alternate": "#22303b" if dark else "#f0f6f5",
+        "window": "#11161b" if dark else "#ddeaf4",
+        "base": "#1a222a" if dark else "#eef4fa",
+        "alternate": "#22303b" if dark else "#e8f1fa",
         "button": "#202b35" if dark else "#ffffff",
-        "text": "#e9f1f8" if dark else "#1d2a34",
-        "muted": "#9fb3c5" if dark else "#667b88",
+        "text": "#e9f1f8" if dark else "#1a2738",
+        "muted": "#9fb3c5" if dark else "#5a7390",
     }
     colors = {name: _apply_contrast(value, contrast) for name, value in colors.items()}
     palette = QPalette()
@@ -187,16 +187,16 @@ def build_stylesheet(
         line = "#2a3945"
         chip = "#22303b"
     else:
-        bg = "#eaf0ef"
-        surface = "#f5f8f7"
+        bg = "#ddeaf4"
+        surface = "#eef4fa"
         card = "#ffffff"
-        text = "#1d2a34"
-        muted = "#667b88"
-        border = "#d7e3e1"
-        item_hover = "#edf5f3"
+        text = "#1a2738"
+        muted = "#5a7390"
+        border = "#b8d0e4"
+        item_hover = "#e4f0f9"
         item_selected = accent_soft
-        line = "#dce8e6"
-        chip = "#f0f6f5"
+        line = "#c2d6e8"
+        chip = "#e8f1fa"
 
     bg, surface, card, text, muted, border, item_hover, item_selected, line, chip = (
         _apply_contrast(color, contrast)

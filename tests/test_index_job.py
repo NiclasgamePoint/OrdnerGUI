@@ -192,6 +192,24 @@ class DetachedIndexJobTests(unittest.TestCase):
             self.assertEqual(attempts, 3)
             self.assertEqual(read_state(state_dir).get("status"), "running")
 
+    def test_progress_writes_a_new_path_even_inside_throttle_window(self):
+        with TemporaryDirectory() as directory:
+            runner = IndexJobRunner(
+                "progress-test",
+                Path(directory) / "index.db",
+                Path(directory),
+                Path(directory) / "state",
+                True,
+                Path(directory) / "customers.db",
+            )
+
+            with patch.object(runner, "_write") as write:
+                runner._progress(100, "erste.xls")
+                runner._progress(100, "zweite.doc")
+
+            self.assertEqual(write.call_count, 2)
+            self.assertEqual(write.call_args.kwargs["current_path"], "zweite.doc")
+
     @unittest.skipUnless(sys.platform == "win32", "Windows-spezifische Prozessflags")
     def test_controller_starts_windows_job_without_console_window(self):
         with TemporaryDirectory() as directory:
