@@ -58,6 +58,7 @@ from app.gui.dialogs import (
     CustomerRecognitionReviewDialog,
     OnboardingDialog,
 )
+from app.gui.index_tray_window import IndexTrayWindow
 from app.gui.navigation import NavigationController, NavigationEntry
 from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
@@ -104,6 +105,7 @@ class MainWindow(QMainWindow):
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
         self.tray_icon: QSystemTrayIcon | None = None
+        self.index_tray_window: IndexTrayWindow | None = None
         self.source_reconnect_timer = QTimer(self)
         self.source_reconnect_timer.setInterval(10_000)
         self.source_reconnect_timer.timeout.connect(self._try_reconnect_source)
@@ -284,6 +286,9 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu(self)
         open_action = tray_menu.addAction("PapaGUI öffnen")
         open_action.triggered.connect(self._show_from_tray)
+        index_action = tray_menu.addAction("Indexierungsstatus")
+        index_action.triggered.connect(self._show_index_tray_window)
+        tray_menu.addSeparator()
         close_action = tray_menu.addAction("Beenden")
         close_action.triggered.connect(self.close)
 
@@ -293,6 +298,17 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self._on_tray_activated)
         self._update_system_tray()
         self.tray_icon.show()
+
+    def _show_index_tray_window(self):
+        if self.index_tray_window is None:
+            self.index_tray_window = IndexTrayWindow(
+                self.index_controller.state_dir,
+                parent=self,
+            )
+            self.index_tray_window.cancelRequested.connect(
+                self.cancel_background_indexing
+            )
+        self.index_tray_window.show_status()
 
     def _update_system_tray(self):
         if self.tray_icon is None:
@@ -592,6 +608,8 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             self.theme_manager.apply(app)
+        if self.index_tray_window is not None:
+            self.index_tray_window.update()
 
     def open_settings_popup(self):
         self.filter_popup.close()
@@ -1281,6 +1299,8 @@ class MainWindow(QMainWindow):
         self.index_controller.release_owner()
         if self.tray_icon is not None:
             self.tray_icon.hide()
+        if self.index_tray_window is not None:
+            self.index_tray_window.close()
         event.accept()
 
 

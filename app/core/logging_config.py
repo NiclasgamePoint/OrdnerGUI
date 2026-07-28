@@ -31,5 +31,8 @@ def configure_logging(log_file: Path = LOG_FILE) -> Path:
     file_handler.setFormatter(formatter)
     file_handler._papagui_handler = True
     root.addHandler(file_handler)
+    # Some repairable PDFs contain duplicate dictionary keys. PyPDF2 can read
+    # them, but emits one warning per duplicate and can bury actionable logs.
+    logging.getLogger("PyPDF2.generic._data_structures").setLevel(logging.ERROR)
     return log_file
 

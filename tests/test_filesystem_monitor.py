@@ -6,6 +6,14 @@ from app.services.filesystem_monitor import FileSystemMonitor
 
 
 class FileSystemMonitorTests(unittest.TestCase):
+    def test_missing_root_is_reported_instead_of_looking_like_mass_deletion(self):
+        with TemporaryDirectory() as directory:
+            missing = Path(directory) / "disconnected-drive"
+            monitor = FileSystemMonitor(missing)
+
+            with self.assertRaisesRegex(FileNotFoundError, "nicht erreichbar"):
+                monitor.build_snapshot()
+
     def test_snapshot_detects_created_modified_and_deleted_files(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

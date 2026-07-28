@@ -4,6 +4,8 @@ import os
 import time
 import unittest
 from unittest.mock import patch
+import subprocess
+import sys
 
 from PySide6.QtWidgets import QApplication
 
@@ -151,6 +153,46 @@ class DetachedIndexJobTests(unittest.TestCase):
             controller.poll()
             self.assertEqual(len(finished_states), 1)
             self.assertEqual(finished_states[0].get("status"), "completed")
+
+    def test_state_write_retries_a_temporary_windows_file_lock(self):
+        with TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            real_replace = os.replace
+            attempts = 0
+
+            def temporarily_locked(source, target):
+                nonlocal attempts
+                attempts += 1
+                if attempts < 3:
+                    raise PermissionError("temporär gesperrt")
+                return real_replace(source, target)
+
+            with patch(
+                "app.core.index_job_state.os.replace",
+                side_effect=temporarily_locked,
+            ), patch("app.core.index_job_state.time.sleep"):
+                write_state(state_dir, {"status": "running"})
+
+            self.assertEqual(attempts, 3)
+            self.assertEqual(read_state(state_dir).get("status"), "running")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-spezifische Prozessflags")
+    def test_controller_starts_windows_job_without_console_window(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            controller = IndexJobController(root / "index.db", root / "state")
+
+            with patch(
+                "app.gui.workers.index_job_controller.subprocess.Popen"
+            ) as popen:
+                popen.return_value.pid = 12345
+                self.assertTrue(controller.start(source, full_rebuild=False))
+
+            flags = popen.call_args.kwargs["creationflags"]
+            self.assertTrue(flags & subprocess.CREATE_NO_WINDOW)
+            self.assertFalse(flags & subprocess.DETACHED_PROCESS)
 
 
 if __name__ == "__main__":

@@ -103,7 +103,7 @@ class IndexJobController(QObject):
         }
         if sys.platform == "win32":
             popen_options["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
         else:
             popen_options["start_new_session"] = True
