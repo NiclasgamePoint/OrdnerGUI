@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import uuid
@@ -165,13 +164,10 @@ class IndexJobController(QObject):
     def cancel(self):
         if self.is_active():
             cancel_path(self.state_dir).touch()
-            if sys.platform == "win32":
-                pid = int(self.current_state().get("pid") or 0)
-                if pid > 0:
-                    try:
-                        os.kill(pid, signal.CTRL_BREAK_EVENT)
-                    except (OSError, AttributeError, ValueError):
-                        pass
+            # Do not send CTRL_BREAK_EVENT to CREATE_NO_WINDOW processes.
+            # CPython can terminate with a native Windows application-error
+            # dialog in that configuration. Extractors have bounded timeouts,
+            # so the cooperative cancel file is sufficient.
 
     def is_active(self) -> bool:
         state = read_state(self.state_dir)
