@@ -43,6 +43,10 @@ class FileSystemMonitor(QThread):
         self._snapshot: dict[str, tuple[int, int]] | None = None
 
     def build_snapshot(self) -> dict[str, tuple[int, int]]:
+        if not self.root_path.exists() or not self.root_path.is_dir():
+            raise FileNotFoundError(
+                f"Datenquelle nicht erreichbar: {self.root_path}"
+            )
         snapshot: dict[str, tuple[int, int]] = {}
         for current_root, directory_names, file_names in os.walk(self.root_path):
             directory_names[:] = [
@@ -59,6 +63,13 @@ class FileSystemMonitor(QThread):
                 except OSError:
                     continue
                 snapshot[f"f:{path}"] = (stat.st_size, stat.st_mtime_ns)
+        # os.walk() reports neither an error nor an incomplete result when its
+        # root disappears during a scan (notably with removable/network drives).
+        # Never turn such a transient outage into thousands of deletions.
+        if not self.root_path.exists() or not self.root_path.is_dir():
+            raise FileNotFoundError(
+                f"Datenquelle während der Prüfung nicht mehr erreichbar: {self.root_path}"
+            )
         return snapshot
 
     @staticmethod

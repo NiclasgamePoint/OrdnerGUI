@@ -4,7 +4,9 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any
+import uuid
 
 
 STATE_FILENAME = "index_job.json"
@@ -13,6 +15,8 @@ CANCEL_FILENAME = "index_job.cancel"
 ACTIVATED_FILENAME = "index_job.activated"
 ACTIVE_STATUSES = {"starting", "running", "ready"}
 TERMINAL_STATUSES = {"completed", "no_changes", "cancelled", "error"}
+STATE_REPLACE_ATTEMPTS = 8
+STATE_REPLACE_RETRY_SECONDS = 0.015
 
 
 def state_path(state_dir: Path) -> Path:
@@ -50,9 +54,22 @@ def write_state(state_dir: Path, state: dict[str, Any]):
     state = dict(state)
     state["updated_at"] = utc_now()
     path = state_path(state_dir)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        for attempt in range(STATE_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == STATE_REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(STATE_REPLACE_RETRY_SECONDS * (attempt + 1))
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def write_owner(state_dir: Path, process_id: int):
