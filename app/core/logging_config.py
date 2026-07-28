@@ -33,6 +33,6 @@ def configure_logging(log_file: Path = LOG_FILE) -> Path:
     root.addHandler(file_handler)
     # Some repairable PDFs contain duplicate dictionary keys. PyPDF2 can read
     # them, but emits one warning per duplicate and can bury actionable logs.
-    logging.getLogger("PyPDF2.generic._data_structures").setLevel(logging.ERROR)
+    logging.getLogger("PyPDF2").setLevel(logging.ERROR)
     return log_file
 
