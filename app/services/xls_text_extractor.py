@@ -6,6 +6,8 @@ import sys
 
 import xlrd
 
+from app.core.process_support import suppress_windows_crash_dialogs
+
 
 def extract_xls_text(filepath: Path, maximum_characters: int) -> str:
     """Extract legacy XLS text inside an isolatable helper process."""
@@ -33,6 +35,7 @@ def extract_xls_text(filepath: Path, maximum_characters: int) -> str:
 
 
 def main() -> int:
+    suppress_windows_crash_dialogs()
     parser = argparse.ArgumentParser()
     parser.add_argument("filepath", type=Path)
     parser.add_argument("--maximum-characters", type=int, required=True)

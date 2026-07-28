@@ -154,6 +154,22 @@ class DetachedIndexJobTests(unittest.TestCase):
             self.assertEqual(len(finished_states), 1)
             self.assertEqual(finished_states[0].get("status"), "completed")
 
+    def test_cancel_uses_control_file_without_signalling_hidden_process(self):
+        with TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            controller = IndexJobController(Path(directory) / "index.db", state_dir)
+            write_state(state_dir, {
+                "job_id": "cancel-job",
+                "pid": os.getpid(),
+                "status": "running",
+            })
+
+            with patch("app.gui.workers.index_job_controller.os.kill") as kill:
+                controller.cancel()
+
+            self.assertTrue((state_dir / "index_job.cancel").exists())
+            kill.assert_not_called()
+
     def test_state_write_retries_a_temporary_windows_file_lock(self):
         with TemporaryDirectory() as directory:
             state_dir = Path(directory)

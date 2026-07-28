@@ -35,6 +35,56 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIsNotNone(window.folder_page)
             window.close()
 
+    def test_accepted_data_path_is_saved_before_index_build_finishes(self):
+        with TemporaryDirectory() as directory:
+            selected = Path(directory).resolve()
+            with (
+                patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+                patch(
+                    "app.gui.main_window.IndexJobController.adopt_running_job",
+                    return_value=False,
+                ),
+            ):
+                window = MainWindow()
+            window.index_controller.is_active = lambda: False
+
+            with (
+                patch("app.gui.main_window.save_index_source") as save_source,
+                patch.object(window, "_start_background_indexing") as start_index,
+            ):
+                window.on_settings_data_path_changed(str(selected))
+
+            save_source.assert_called_once_with(selected)
+            self.assertEqual(window.index_source, selected)
+            self.assertEqual(window.pending_index_source, selected)
+            start_index.assert_called_once()
+            window.close()
+
+    def test_explicit_data_path_is_not_overwritten_by_stale_completed_job(self):
+        with TemporaryDirectory() as directory:
+            selected = Path(directory).resolve()
+            with (
+                patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+                patch(
+                    "app.gui.main_window.get_configured_index_source",
+                    return_value=selected,
+                ),
+                patch(
+                    "app.gui.main_window.has_configured_index_source",
+                    return_value=True,
+                ),
+                patch(
+                    "app.gui.main_window.IndexJobController.adopt_running_job",
+                    return_value=False,
+                ),
+                patch("app.gui.main_window.save_index_source") as save_source,
+            ):
+                window = MainWindow()
+
+            self.assertEqual(window.index_source, selected)
+            save_source.assert_not_called()
+            window.close()
+
     def test_main_window_opens_existing_file_with_standard_program(self):
         with TemporaryDirectory() as directory:
             document = Path(directory) / "tabelle.xlsx"

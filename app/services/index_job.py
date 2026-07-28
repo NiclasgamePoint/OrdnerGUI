@@ -26,6 +26,7 @@ from app.core.index_store import (
     validate_index,
 )
 from app.core.logging_config import configure_logging
+from app.core.process_support import suppress_windows_crash_dialogs
 from app.services.customer_recognition import CustomerRecognitionService
 
 
@@ -215,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    suppress_windows_crash_dialogs()
     arguments = build_parser().parse_args()
     configure_logging()
     return IndexJobRunner(

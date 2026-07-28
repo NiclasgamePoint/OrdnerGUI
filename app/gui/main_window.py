@@ -164,6 +164,11 @@ class MainWindow(QMainWindow):
         self._start_filesystem_monitor()
 
     def _reconcile_source_from_completed_job(self):
+        # An explicitly accepted setting is authoritative. A stale completed
+        # job must never overwrite a newer path during the next application
+        # start.
+        if has_configured_index_source():
+            return
         previous_job = self.index_controller.current_state()
         indexed_root = self.index_manager.get_metadata("index_root")
         if (
@@ -942,13 +947,17 @@ class MainWindow(QMainWindow):
                 "Bitte warten, bis die aktuelle Indexierung abgeschlossen ist.",
             )
             return
+        # Persist the validated selection immediately. Building and activating
+        # the staged index may take a long time, but restarting the application
+        # must not discard a path accepted through "Pfad übernehmen".
+        save_index_source(new_source)
         if (
             new_source == self.index_source
             and self.index_manager.has_index_for_root(new_source)
         ):
-            save_index_source(new_source)
             self.status_bar.set_text(f"Datenquelle aktiv ✓ ({new_source.name})")
             return
+        self.index_source = new_source
         self.pending_index_source = new_source
         self._start_background_indexing(
             new_source,
