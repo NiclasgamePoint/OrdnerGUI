@@ -49,6 +49,24 @@ class IndexingTests(unittest.TestCase):
         self.assertIn("XLS-Zeitlimit", error)
         manager.close()
 
+    def test_legacy_doc_timeout_is_recorded_without_blocking_index(self):
+        target = self.root / "defekt.doc"
+        target.write_bytes(b"legacy")
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+
+        with patch(
+            "app.core.index_manager.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["doc"], 20),
+        ):
+            content, status, error = manager._extract_document_with_status(
+                target, "doc"
+            )
+
+        self.assertEqual(content, "")
+        self.assertEqual(status, "timeout")
+        self.assertIn("DOC-Zeitlimit", error)
+        manager.close()
+
     def test_index_exposes_document_text_with_source_boundaries(self):
         project = self.root / "DEKRA" / "2026" / "Dokumentgrenzen, Berlin"
         project.mkdir(parents=True)

@@ -53,6 +53,7 @@ class IndexJobRunner:
         self.customer_database_path = customer_database_path.resolve()
         self.build_path: Path | None = None
         self._last_progress_write = 0.0
+        self._last_progress_path = ""
         self._base_state = {
             "job_id": job_id,
             "pid": os.getpid(),
@@ -119,8 +120,13 @@ class IndexJobRunner:
 
     def _progress(self, processed_count: int, current_path: str):
         now = time.monotonic()
-        if processed_count < 10 or now - self._last_progress_write >= 0.4:
+        if (
+            current_path != self._last_progress_path
+            or processed_count < 10
+            or now - self._last_progress_write >= 0.4
+        ):
             self._last_progress_write = now
+            self._last_progress_path = current_path
             self._write(
                 status="running",
                 processed_count=processed_count,

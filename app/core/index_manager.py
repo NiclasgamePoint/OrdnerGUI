@@ -36,8 +36,9 @@ class IndexManager:
     }
     CONTENT_INDEX_TYPES = BINARY_CONTENT_TYPES | TEXT_CONTENT_TYPES
     SCHEMA_VERSION = "4"
-    EXTRACTOR_VERSION = "4"
+    EXTRACTOR_VERSION = "5"
     LEGACY_XLS_TIMEOUT_SECONDS = 15
+    LEGACY_DOC_TIMEOUT_SECONDS = 20
     APP_VERSION = "0.2"
     _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -705,10 +706,34 @@ class IndexManager:
         return self._limit_text(result.stdout)
 
     def _extract_doc_text(self, filepath: Path) -> str:
+        command = [
+            sys.executable,
+            "-m",
+            "app.services.doc_text_extractor",
+            str(filepath),
+            "--maximum-characters",
+            str(self.options.max_extracted_characters),
+        ]
+        options = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": self.LEGACY_DOC_TIMEOUT_SECONDS,
+            "cwd": str(Path(__file__).resolve().parents[2]),
+        }
+        if sys.platform == "win32":
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
         try:
-            return self._limit_text(self._document_converter.extract_legacy_doc(filepath))
-        except Exception:
-            return ""
+            result = subprocess.run(command, **options)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                f"DOC-Zeitlimit von {self.LEGACY_DOC_TIMEOUT_SECONDS} Sekunden erreicht"
+            ) from exc
+        if result.returncode != 0:
+            message = result.stderr.strip() or "Unbekannter DOC-Lesefehler"
+            raise RuntimeError(message)
+        return self._limit_text(result.stdout)
 
     def _ocr_pdf(self, filepath: Path) -> str:
         pdftoppm = shutil.which("pdftoppm")

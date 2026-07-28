@@ -128,6 +128,7 @@ class DocumentConverter:
 
         seen = set()
         lines: list[str] = []
+        extracted_length = 0
         for chunk in utf16_chunks + ascii_chunks:
             for raw_line in chunk.splitlines():
                 line = re.sub(r"\s+", " ", raw_line).strip()
@@ -141,7 +142,8 @@ class DocumentConverter:
                     continue
                 seen.add(line)
                 lines.append(line)
-                if sum(len(item) for item in lines) >= 2_000_000:
+                extracted_length += len(line)
+                if extracted_length >= 2_000_000:
                     return "\n".join(lines)
         return "\n".join(lines)
 
