@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -13,6 +14,41 @@ from app.core.search_models import SearchFilters, SearchSort
 
 
 class IndexingTests(unittest.TestCase):
+    def test_progress_reports_file_before_extraction_starts(self):
+        target = self.root / "Blower Door" / "2026" / "Musterkunde Blower Door" / "langsam.xls"
+        target.write_bytes(b"legacy")
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+        progress = []
+
+        def inspect_progress(filepath, *_args, **_kwargs):
+            self.assertEqual(progress[-1][1], str(filepath))
+
+        with patch.object(manager, "_index_file", side_effect=inspect_progress):
+            manager.synchronize_directory(
+                self.root,
+                full_rebuild=True,
+                progress_callback=lambda count, path: progress.append((count, path)),
+            )
+        manager.close()
+
+    def test_legacy_xls_timeout_is_recorded_without_blocking_index(self):
+        target = self.root / "defekt.xls"
+        target.write_bytes(b"legacy")
+        manager = IndexManager(self.database, options=IndexOptions(ocr_enabled=False))
+
+        with patch(
+            "app.core.index_manager.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["xls"], 15),
+        ):
+            content, status, error = manager._extract_document_with_status(
+                target, "xls"
+            )
+
+        self.assertEqual(content, "")
+        self.assertEqual(status, "timeout")
+        self.assertIn("XLS-Zeitlimit", error)
+        manager.close()
+
     def test_index_exposes_document_text_with_source_boundaries(self):
         project = self.root / "DEKRA" / "2026" / "Dokumentgrenzen, Berlin"
         project.mkdir(parents=True)

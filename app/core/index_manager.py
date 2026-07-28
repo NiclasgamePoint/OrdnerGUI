@@ -17,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tempfile import TemporaryDirectory
 
 import openpyxl
-import xlrd
 from docx import Document
 from PyPDF2 import PdfReader
 from app.core.config import IndexOptions, RIPGREP_AVAILABLE
@@ -37,7 +36,8 @@ class IndexManager:
     }
     CONTENT_INDEX_TYPES = BINARY_CONTENT_TYPES | TEXT_CONTENT_TYPES
     SCHEMA_VERSION = "4"
-    EXTRACTOR_VERSION = "3"
+    EXTRACTOR_VERSION = "4"
+    LEGACY_XLS_TIMEOUT_SECONDS = 15
     APP_VERSION = "0.2"
     _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -379,6 +379,11 @@ class IndexManager:
                     continue
 
                 path_text = str(filepath)
+                # Report the file before extraction. Some damaged legacy
+                # documents can be slow, and the UI must show what is actually
+                # being processed rather than the previously completed file.
+                if progress_callback is not None:
+                    progress_callback(processed_count, path_text)
                 cursor.execute("INSERT OR IGNORE INTO seen_files(path) VALUES (?)", (path_text,))
                 existing = cursor.execute(
                     """
@@ -670,27 +675,34 @@ class IndexManager:
             workbook.close()
 
     def _extract_xls_text(self, filepath: Path) -> str:
-        workbook = xlrd.open_workbook(str(filepath), on_demand=True)
+        command = [
+            sys.executable,
+            "-m",
+            "app.services.xls_text_extractor",
+            str(filepath),
+            "--maximum-characters",
+            str(self.options.max_extracted_characters),
+        ]
+        options = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": self.LEGACY_XLS_TIMEOUT_SECONDS,
+            "cwd": str(Path(__file__).resolve().parents[2]),
+        }
+        if sys.platform == "win32":
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
         try:
-            parts = []
-            length = 0
-            for worksheet in workbook.sheets():
-                parts.append(worksheet.name)
-                for row_index in range(worksheet.nrows):
-                    values = [
-                        str(worksheet.cell_value(row_index, column_index))
-                        for column_index in range(worksheet.ncols)
-                        if worksheet.cell_value(row_index, column_index) != ""
-                    ]
-                    if values:
-                        line = "\t".join(values)
-                        parts.append(line)
-                        length += len(line)
-                    if length >= self.options.max_extracted_characters:
-                        return self._limit_text("\n".join(parts))
-            return self._limit_text("\n".join(parts))
-        finally:
-            workbook.release_resources()
+            result = subprocess.run(command, **options)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                f"XLS-Zeitlimit von {self.LEGACY_XLS_TIMEOUT_SECONDS} Sekunden erreicht"
+            ) from exc
+        if result.returncode != 0:
+            message = result.stderr.strip() or "Unbekannter XLS-Lesefehler"
+            raise RuntimeError(message)
+        return self._limit_text(result.stdout)
 
     def _extract_doc_text(self, filepath: Path) -> str:
         try:
