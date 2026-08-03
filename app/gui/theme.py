@@ -433,6 +433,11 @@ def build_stylesheet(
         placeholder-text-color: {muted};
     }}
 
+    QTableWidget QLineEdit {{
+        padding: 2px 6px;
+        border-radius: 6px;
+    }}
+
     QPlainTextEdit:read-only, QTextEdit:read-only {{
         background-color: {surface};
         color: {text};

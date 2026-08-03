@@ -206,6 +206,20 @@ class UiNavigationTests(unittest.TestCase):
             dialog.close()
             repository.close()
 
+    def test_customer_editor_contacts_table_uses_editable_row_height(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = CustomerRepository(root / "customers.db")
+            dialog = CustomerEditorDialog(repository, suggested_name="Muster")
+
+            self.assertGreaterEqual(
+                dialog.contacts_table.verticalHeader().defaultSectionSize(),
+                34,
+            )
+
+            dialog.close()
+            repository.close()
+
     def test_customer_page_lists_services_by_newest_project_first(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
