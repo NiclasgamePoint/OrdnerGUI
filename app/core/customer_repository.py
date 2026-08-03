@@ -12,6 +12,7 @@ from app.core.customer_models import (
     Contact,
     Customer,
     CustomerDataSuggestion,
+    CustomerJournalEntry,
     CustomerProject,
     ServiceType,
 )
@@ -145,6 +146,13 @@ class CustomerRepository:
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
                 body TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS customer_journal_entries (
+                id INTEGER PRIMARY KEY,
+                customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS tags (
                 id INTEGER PRIMARY KEY,
@@ -359,6 +367,61 @@ class CustomerRepository:
             "SELECT name FROM customer_types ORDER BY name COLLATE NOCASE"
         ).fetchall()
         return [str(row[0]) for row in rows]
+
+    def list_journal_entries(self, customer_id: int) -> list[CustomerJournalEntry]:
+        rows = self.connection.execute(
+            """
+            SELECT id, customer_id, body, created_at, updated_at
+            FROM customer_journal_entries
+            WHERE customer_id=?
+            ORDER BY datetime(created_at) DESC, id DESC
+            """,
+            (customer_id,),
+        ).fetchall()
+        return [
+            CustomerJournalEntry(
+                id=int(row["id"]),
+                customer_id=int(row["customer_id"]),
+                body=str(row["body"] or ""),
+                created_at=str(row["created_at"] or ""),
+                updated_at=str(row["updated_at"] or ""),
+            )
+            for row in rows
+        ]
+
+    def add_journal_entry(self, customer_id: int, body: str) -> CustomerJournalEntry | None:
+        text = str(body or "").strip()
+        if not text:
+            return None
+        exists = self.connection.execute(
+            "SELECT 1 FROM customers WHERE id=? LIMIT 1",
+            (customer_id,),
+        ).fetchone()
+        if exists is None:
+            raise ValueError("Der ausgewählte Kunde existiert nicht mehr.")
+        with self.connection:
+            cursor = self.connection.execute(
+                """
+                INSERT INTO customer_journal_entries (customer_id, body)
+                VALUES (?, ?)
+                """,
+                (customer_id, text),
+            )
+        row = self.connection.execute(
+            """
+            SELECT id, customer_id, body, created_at, updated_at
+            FROM customer_journal_entries
+            WHERE id=?
+            """,
+            (int(cursor.lastrowid),),
+        ).fetchone()
+        return CustomerJournalEntry(
+            id=int(row["id"]),
+            customer_id=int(row["customer_id"]),
+            body=str(row["body"] or ""),
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
 
     def upsert_service_type(self, name: str) -> ServiceType:
         cleaned = " ".join(str(name or "").split())
@@ -2223,6 +2286,10 @@ class CustomerRepository:
                 "UPDATE recognition_decisions SET customer_id=? WHERE customer_id=?",
                 (survivor_id, absorbed_id),
             )
+            self.connection.execute(
+                "UPDATE customer_journal_entries SET customer_id=? WHERE customer_id=?",
+                (survivor_id, absorbed_id),
+            )
 
         for table in (
             "contacts",
@@ -2559,6 +2626,7 @@ class CustomerRepository:
                 "extracted_value_observations",
                 "blacklist_suggestions",
                 "customer_merge_log",
+                "customer_journal_entries",
                 "customer_tags",
                 "tags",
                 "notes",

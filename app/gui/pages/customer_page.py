@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSplitter,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -45,6 +46,7 @@ class CustomerPage(QWidget):
         self.repository = repository
         self.index_path = index_path
         self.customer: Customer | None = None
+        self._notes_sync_in_progress = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -123,15 +125,10 @@ class CustomerPage(QWidget):
         )
         form_layout.addWidget(self.contacts_table)
 
-        notes_title = QLabel("Notizen")
-        notes_title.setObjectName("SectionTitle")
-        form_layout.addWidget(notes_title)
-        self.notes = QPlainTextEdit()
-        self.notes.setReadOnly(True)
-        self.notes.setMinimumHeight(120)
-        self.notes.setPlaceholderText("Keine Notiz hinterlegt")
-        self.notes.setAccessibleName("Kundennotizen")
-        form_layout.addWidget(self.notes)
+        self.customer_tabs = QTabWidget()
+        self.customer_tabs.addTab(self._build_notes_tab(), "Notizen")
+        self.customer_tabs.addTab(self._build_journal_tab(), "Journal")
+        form_layout.addWidget(self.customer_tabs)
         form_layout.addStretch(1)
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
@@ -149,6 +146,63 @@ class CustomerPage(QWidget):
         button_row.addWidget(self.review_button, 1)
         layout.addLayout(button_row)
         return card
+
+    def _build_notes_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self.notes = QPlainTextEdit()
+        self.notes.setReadOnly(False)
+        self.notes.setMinimumHeight(120)
+        self.notes.setPlaceholderText("Notizen zum Kunden …")
+        self.notes.setAccessibleName("Kundennotizen")
+        layout.addWidget(self.notes, 1)
+
+        actions = QHBoxLayout()
+        self.notes_status = QLabel("")
+        self.notes_status.setObjectName("PopupCaption")
+        actions.addWidget(self.notes_status)
+        actions.addStretch(1)
+        self.save_notes_button = AppButton("Notizen speichern", AppButton.SECONDARY)
+        self.save_notes_button.clicked.connect(self._save_notes)
+        actions.addWidget(self.save_notes_button)
+        layout.addLayout(actions)
+        return page
+
+    def _build_journal_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.journal_input = QPlainTextEdit()
+        self.journal_input.setPlaceholderText("Neuen Journal-Eintrag schreiben …")
+        self.journal_input.setMinimumHeight(90)
+        self.journal_input.setAccessibleName("Neuer Journal-Eintrag")
+        layout.addWidget(self.journal_input)
+
+        actions = QHBoxLayout()
+        self.journal_status = QLabel("")
+        self.journal_status.setObjectName("PopupCaption")
+        actions.addWidget(self.journal_status)
+        actions.addStretch(1)
+        self.add_journal_button = AppButton("Journal-Eintrag speichern", AppButton.SECONDARY)
+        self.add_journal_button.clicked.connect(self._add_journal_entry)
+        actions.addWidget(self.add_journal_button)
+        layout.addLayout(actions)
+
+        self.journal_table = QTableWidget(0, 2)
+        self.journal_table.setHorizontalHeaderLabels(["Zeitpunkt", "Eintrag"])
+        self.journal_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.journal_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.journal_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.journal_table.horizontalHeader().setStretchLastSection(True)
+        self.journal_table.verticalHeader().setVisible(False)
+        self.journal_table.setMinimumHeight(170)
+        self.journal_table.setAccessibleName("Journal des Kunden")
+        layout.addWidget(self.journal_table, 1)
+        return page
 
     def _build_folder_card(self) -> QWidget:
         card = QWidget()
@@ -219,9 +273,63 @@ class CustomerPage(QWidget):
             self.contacts_table.setItem(row, 1, QTableWidgetItem(contact.role))
             self.contacts_table.setItem(row, 2, QTableWidgetItem(contact.email))
             self.contacts_table.setItem(row, 3, QTableWidgetItem(contact.phone))
+        self._notes_sync_in_progress = True
         self.notes.setPlainText("\n\n".join(customer.notes))
+        self.notes_status.setText("")
+        self.journal_status.setText("")
+        self._notes_sync_in_progress = False
+        self._reload_journal_entries()
         self._refresh_suggestion_count()
         self._set_projects(customer, folder_summaries or {})
+
+    def _save_notes(self):
+        if self.customer is None or self.customer.id is None or self._notes_sync_in_progress:
+            return
+        text = self.notes.toPlainText().strip()
+        self.customer.notes = [text] if text else []
+        updated = self.repository.save(self.customer)
+        self.customer = updated
+        self.notes_status.setText("Notizen gespeichert")
+        self.customerChanged.emit(int(updated.id))
+
+    def _add_journal_entry(self):
+        if self.customer is None or self.customer.id is None:
+            return
+        entry = self.repository.add_journal_entry(
+            int(self.customer.id),
+            self.journal_input.toPlainText(),
+        )
+        if entry is None:
+            self.journal_status.setText("Bitte zuerst einen Text eingeben")
+            return
+        self.journal_input.clear()
+        self.journal_status.setText("Journal-Eintrag gespeichert")
+        self._reload_journal_entries()
+
+    def _reload_journal_entries(self):
+        self.journal_table.setRowCount(0)
+        if self.customer is None or self.customer.id is None:
+            return
+        entries = self.repository.list_journal_entries(int(self.customer.id))
+        for entry in entries:
+            row = self.journal_table.rowCount()
+            self.journal_table.insertRow(row)
+            self.journal_table.setItem(
+                row,
+                0,
+                QTableWidgetItem(self._format_journal_date(entry.created_at)),
+            )
+            self.journal_table.setItem(row, 1, QTableWidgetItem(entry.body))
+
+    @staticmethod
+    def _format_journal_date(value: str) -> str:
+        if not value:
+            return "-"
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized).strftime("%d.%m.%Y %H:%M")
+        except ValueError:
+            return value
 
     def _set_projects(self, customer: Customer, summaries: dict[str, dict]):
         for row in self._folder_rows:

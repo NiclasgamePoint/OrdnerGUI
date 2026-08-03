@@ -471,6 +471,27 @@ class CustomerRepositoryTests(unittest.TestCase):
             self.assertIsNone(repository.get(updated.id))
             repository.close()
 
+    def test_customer_journal_entries_are_persisted_per_customer(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "customers.db"
+            repository = CustomerRepository(database)
+            first = repository.save(Customer(display_name="Alpha GmbH", company="Alpha GmbH"))
+            second = repository.save(Customer(display_name="Beta GmbH", company="Beta GmbH"))
+
+            created = repository.add_journal_entry(int(first.id), "Telefonnotiz: Termin bestätigt")
+            self.assertIsNotNone(created)
+            self.assertEqual(created.customer_id, int(first.id))
+
+            first_entries = repository.list_journal_entries(int(first.id))
+            second_entries = repository.list_journal_entries(int(second.id))
+            self.assertEqual(len(first_entries), 1)
+            self.assertEqual(first_entries[0].body, "Telefonnotiz: Termin bestätigt")
+            self.assertEqual(second_entries, [])
+
+            repository.delete(int(first.id))
+            self.assertEqual(repository.list_journal_entries(int(first.id)), [])
+            repository.close()
+
     def test_clear_all_customer_data_keeps_schema_and_removes_customer_owned_data(self):
         with TemporaryDirectory() as directory:
             database = Path(directory) / "customers.db"

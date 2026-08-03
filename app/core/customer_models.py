@@ -66,6 +66,15 @@ class CustomerDataSuggestion:
 
 
 @dataclass
+class CustomerJournalEntry:
+    id: int | None = None
+    customer_id: int | None = None
+    body: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class Customer:
     id: int | None = None
     folder_path: str = ""

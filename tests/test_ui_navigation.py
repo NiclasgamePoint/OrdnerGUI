@@ -591,6 +591,38 @@ class UiNavigationTests(unittest.TestCase):
             page.close()
             repository.close()
 
+    def test_customer_page_supports_notes_and_journal_tabs(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(Customer(
+                display_name="Muster",
+                company="Muster",
+                notes=["Bestehende Notiz"],
+            ))
+            page = CustomerPage(repository)
+            page.set_customer(customer)
+
+            self.assertEqual(page.customer_tabs.tabText(0), "Notizen")
+            self.assertEqual(page.customer_tabs.tabText(1), "Journal")
+            self.assertFalse(page.notes.isReadOnly())
+
+            page.notes.setPlainText("Aktualisierte Notiz")
+            page._save_notes()
+            self.assertEqual(
+                repository.get(int(customer.id)).notes,
+                ["Aktualisierte Notiz"],
+            )
+
+            page.journal_input.setPlainText("Telefonnotiz am Empfang hinterlegt")
+            page._add_journal_entry()
+            entries = repository.list_journal_entries(int(customer.id))
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].body, "Telefonnotiz am Empfang hinterlegt")
+            self.assertEqual(page.journal_table.rowCount(), 1)
+
+            page.close()
+            repository.close()
+
     def test_customer_editor_excludes_pre_2016_folder_from_selection(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
