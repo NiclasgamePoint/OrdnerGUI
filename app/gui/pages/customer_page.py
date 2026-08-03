@@ -4,11 +4,19 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QScrollArea,
     QSplitter,
@@ -19,12 +27,84 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.customer_models import Customer, CustomerProject
+from app.core.customer_models import Customer, CustomerJournalEntry, CustomerProject
 from app.core.config import DB_FILE, load_customer_recognition_options
 from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs import CustomerDataSuggestionsDialog, CustomerEditorDialog
 from app.gui.widgets.buttons import AppButton, CountBadgeButton
 from app.gui.widgets.result_row import ResultRow
+
+
+class _JournalEntryEditorDialog(QDialog):
+    def __init__(
+        self,
+        title: str,
+        body: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Journal-Eintrag bearbeiten")
+        self.setModal(True)
+        self.resize(560, 340)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        self.title_input = QLineEdit(title)
+        self.title_input.setPlaceholderText("Titel (optional)")
+        layout.addWidget(self.title_input)
+
+        self.body_input = QPlainTextEdit()
+        self.body_input.setPlaceholderText("Eintrag …")
+        self.body_input.setPlainText(body)
+        layout.addWidget(self.body_input, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.Save
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> tuple[str, str]:
+        return self.title_input.text().strip(), self.body_input.toPlainText().strip()
+
+
+class _JournalEntryCard(QWidget):
+    def __init__(self, entry: CustomerJournalEntry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setObjectName("JournalEntryCard")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        number_label = QLabel(f"#{entry.entry_number}")
+        number_label.setObjectName("SectionTitle")
+        top_row.addWidget(number_label)
+        top_row.addStretch(1)
+
+        timestamp = QLabel(CustomerPage._format_journal_date(entry.created_at))
+        faded = QColor(self.palette().text().color())
+        faded.setAlpha(160)
+        timestamp.setStyleSheet(f"color: {faded.name(QColor.NameFormat.HexArgb)};")
+        top_row.addWidget(timestamp)
+        layout.addLayout(top_row)
+
+        if entry.title.strip():
+            title_label = QLabel(entry.title)
+            title_label.setObjectName("PopupSectionTitle")
+            layout.addWidget(title_label)
+
+        body_label = QLabel(entry.body)
+        body_label.setWordWrap(True)
+        body_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(body_label)
 
 
 class CustomerPage(QWidget):
@@ -47,6 +127,7 @@ class CustomerPage(QWidget):
         self.index_path = index_path
         self.customer: Customer | None = None
         self._notes_sync_in_progress = False
+        self._journal_entries_by_id: dict[int, CustomerJournalEntry] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -176,6 +257,11 @@ class CustomerPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
+        self.journal_title_input = QLineEdit()
+        self.journal_title_input.setPlaceholderText("Titel (optional)")
+        self.journal_title_input.setAccessibleName("Titel für Journal-Eintrag")
+        layout.addWidget(self.journal_title_input)
+
         self.journal_input = QPlainTextEdit()
         self.journal_input.setPlaceholderText("Neuen Journal-Eintrag schreiben …")
         self.journal_input.setMinimumHeight(90)
@@ -192,16 +278,14 @@ class CustomerPage(QWidget):
         actions.addWidget(self.add_journal_button)
         layout.addLayout(actions)
 
-        self.journal_table = QTableWidget(0, 2)
-        self.journal_table.setHorizontalHeaderLabels(["Zeitpunkt", "Eintrag"])
-        self.journal_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.journal_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.journal_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.journal_table.horizontalHeader().setStretchLastSection(True)
-        self.journal_table.verticalHeader().setVisible(False)
-        self.journal_table.setMinimumHeight(170)
-        self.journal_table.setAccessibleName("Journal des Kunden")
-        layout.addWidget(self.journal_table, 1)
+        self.journal_list = QListWidget()
+        self.journal_list.setObjectName("JournalEntryList")
+        self.journal_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.journal_list.customContextMenuRequested.connect(self._open_journal_context_menu)
+        self.journal_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.journal_list.setMinimumHeight(190)
+        self.journal_list.setAccessibleName("Journal des Kunden")
+        layout.addWidget(self.journal_list, 1)
         return page
 
     def _build_folder_card(self) -> QWidget:
@@ -298,28 +382,87 @@ class CustomerPage(QWidget):
         entry = self.repository.add_journal_entry(
             int(self.customer.id),
             self.journal_input.toPlainText(),
+            self.journal_title_input.text(),
         )
         if entry is None:
             self.journal_status.setText("Bitte zuerst einen Text eingeben")
             return
+        self.journal_title_input.clear()
         self.journal_input.clear()
         self.journal_status.setText("Journal-Eintrag gespeichert")
         self._reload_journal_entries()
 
     def _reload_journal_entries(self):
-        self.journal_table.setRowCount(0)
+        self.journal_list.clear()
+        self._journal_entries_by_id.clear()
         if self.customer is None or self.customer.id is None:
             return
         entries = self.repository.list_journal_entries(int(self.customer.id))
         for entry in entries:
-            row = self.journal_table.rowCount()
-            self.journal_table.insertRow(row)
-            self.journal_table.setItem(
-                row,
-                0,
-                QTableWidgetItem(self._format_journal_date(entry.created_at)),
-            )
-            self.journal_table.setItem(row, 1, QTableWidgetItem(entry.body))
+            self._journal_entries_by_id[int(entry.id)] = entry
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, int(entry.id))
+            card = _JournalEntryCard(entry, self.journal_list)
+            item.setSizeHint(card.sizeHint())
+            self.journal_list.addItem(item)
+            self.journal_list.setItemWidget(item, card)
+
+    def _open_journal_context_menu(self, position):
+        item = self.journal_list.itemAt(position)
+        if item is None:
+            return
+        entry_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+        entry = self._journal_entries_by_id.get(entry_id)
+        if entry is None:
+            return
+
+        menu = QMenu(self)
+        edit_action = menu.addAction("Bearbeiten")
+        delete_action = menu.addAction("Löschen")
+        selected = menu.exec(self.journal_list.viewport().mapToGlobal(position))
+        if selected == edit_action:
+            self._edit_journal_entry(entry)
+        elif selected == delete_action:
+            self._delete_journal_entry(entry)
+
+    def _edit_journal_entry(self, entry: CustomerJournalEntry):
+        if self.customer is None or self.customer.id is None or entry.id is None:
+            return
+        dialog = _JournalEntryEditorDialog(entry.title, entry.body, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        title, body = dialog.values()
+        updated = self.repository.update_journal_entry(
+            int(self.customer.id),
+            int(entry.id),
+            body,
+            title,
+        )
+        if updated is None:
+            self.journal_status.setText("Eintrag konnte nicht gespeichert werden")
+            return
+        self.journal_status.setText("Journal-Eintrag aktualisiert")
+        self._reload_journal_entries()
+
+    def _delete_journal_entry(self, entry: CustomerJournalEntry):
+        if self.customer is None or self.customer.id is None or entry.id is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Journal-Eintrag löschen",
+            "Soll dieser Journal-Eintrag wirklich gelöscht werden?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        deleted = self.repository.delete_journal_entry(
+            int(self.customer.id),
+            int(entry.id),
+        )
+        if not deleted:
+            self.journal_status.setText("Eintrag konnte nicht gelöscht werden")
+            return
+        self.journal_status.setText("Journal-Eintrag gelöscht")
+        self._reload_journal_entries()
 
     @staticmethod
     def _format_journal_date(value: str) -> str:

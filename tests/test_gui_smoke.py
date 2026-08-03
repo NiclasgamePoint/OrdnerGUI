@@ -6,7 +6,7 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox
 
-from app.core.config import CustomerRecognitionOptions
+from app.core.config import CustomerRecognitionOptions, forced_fullscreen
 from app.core.customer_models import Customer
 from app.core.customer_recognition_models import (
     ContactScanStats,
@@ -34,6 +34,12 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIsNotNone(window.customer_page)
             self.assertIsNotNone(window.folder_page)
             window.close()
+
+    def test_forced_fullscreen_is_enabled_only_when_vnc_flag_is_set(self):
+        with patch.dict("os.environ", {"PAPAGUI_FORCE_FULLSCREEN": "1"}, clear=False):
+            self.assertTrue(forced_fullscreen())
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(forced_fullscreen())
 
     def test_accepted_data_path_is_saved_before_index_build_finishes(self):
         with TemporaryDirectory() as directory:

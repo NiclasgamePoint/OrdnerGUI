@@ -478,15 +478,44 @@ class CustomerRepositoryTests(unittest.TestCase):
             first = repository.save(Customer(display_name="Alpha GmbH", company="Alpha GmbH"))
             second = repository.save(Customer(display_name="Beta GmbH", company="Beta GmbH"))
 
-            created = repository.add_journal_entry(int(first.id), "Telefonnotiz: Termin bestätigt")
+            created = repository.add_journal_entry(
+                int(first.id),
+                "Telefonnotiz: Termin bestätigt",
+                "Erstkontakt",
+            )
             self.assertIsNotNone(created)
             self.assertEqual(created.customer_id, int(first.id))
+            self.assertEqual(created.entry_number, 1)
+            self.assertEqual(created.title, "Erstkontakt")
+
+            second_entry = repository.add_journal_entry(
+                int(first.id),
+                "Angebot nachgereicht",
+            )
+            self.assertEqual(second_entry.entry_number, 2)
 
             first_entries = repository.list_journal_entries(int(first.id))
             second_entries = repository.list_journal_entries(int(second.id))
-            self.assertEqual(len(first_entries), 1)
+            self.assertEqual(len(first_entries), 2)
             self.assertEqual(first_entries[0].body, "Telefonnotiz: Termin bestätigt")
+            self.assertEqual(first_entries[1].body, "Angebot nachgereicht")
             self.assertEqual(second_entries, [])
+
+            updated = repository.update_journal_entry(
+                int(first.id),
+                int(created.id),
+                "Telefontermin final bestätigt",
+                "Abschluss",
+            )
+            self.assertIsNotNone(updated)
+            self.assertEqual(updated.title, "Abschluss")
+            self.assertEqual(updated.body, "Telefontermin final bestätigt")
+
+            removed = repository.delete_journal_entry(int(first.id), int(created.id))
+            self.assertTrue(removed)
+            remaining = repository.list_journal_entries(int(first.id))
+            self.assertEqual(len(remaining), 1)
+            self.assertEqual(remaining[0].entry_number, 1)
 
             repository.delete(int(first.id))
             self.assertEqual(repository.list_journal_entries(int(first.id)), [])

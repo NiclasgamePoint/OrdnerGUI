@@ -69,6 +69,8 @@ class CustomerDataSuggestion:
 class CustomerJournalEntry:
     id: int | None = None
     customer_id: int | None = None
+    entry_number: int = 0
+    title: str = ""
     body: str = ""
     created_at: str = ""
     updated_at: str = ""
