@@ -76,17 +76,6 @@ class _JournalEntryCard(QFrame):
         super().__init__(parent)
         self.entry = entry
         self.setObjectName("JournalEntryCard")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
-        self.setStyleSheet(
-            """
-            QWidget#JournalEntryCard {
-                background-color: rgba(255, 255, 255, 0.07);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 10px;
-            }
-            """
-        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)

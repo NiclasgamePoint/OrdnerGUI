@@ -625,6 +625,7 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(entries[0].body, "Telefonnotiz am Empfang hinterlegt")
             self.assertEqual(entries[0].title, "Telefon")
             self.assertEqual(len(page._journal_cards), 1)
+            self.assertEqual(page._journal_cards[0].styleSheet(), "")
 
             page.close()
             repository.close()

@@ -109,11 +109,17 @@ class GuiSmokeTests(unittest.TestCase):
 
             with (
                 patch("app.gui.main_window.save_index_source") as save_source,
+                patch.object(window.folder_page, "cleanup") as cleanup,
+                patch.object(window.search_page, "reset") as search_reset,
+                patch.object(window.navigator, "reset") as navigator_reset,
                 patch.object(window, "_start_background_indexing") as start_index,
             ):
                 window.on_settings_data_path_changed(str(selected))
 
             save_source.assert_called_once_with(selected)
+            cleanup.assert_called_once()
+            search_reset.assert_called_once()
+            navigator_reset.assert_called_once_with("search")
             self.assertEqual(window.index_source, selected)
             self.assertEqual(window.pending_index_source, selected)
             start_index.assert_called_once()
