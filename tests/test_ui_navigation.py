@@ -605,6 +605,7 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(page.customer_tabs.tabText(0), "Notizen")
             self.assertEqual(page.customer_tabs.tabText(1), "Journal")
             self.assertFalse(page.notes.isReadOnly())
+            self.assertEqual(page.notes.height(), 196)
             self.assertFalse(page.journal_entries_section.isVisible())
 
             page.notes.setPlainText("Aktualisierte Notiz")
@@ -616,15 +617,25 @@ class UiNavigationTests(unittest.TestCase):
             page.customer_tabs.setCurrentIndex(1)
             page.show()
             self.app.processEvents()
+            journal_layout = page.customer_tabs.currentWidget().layout()
+            self.assertEqual(journal_layout.spacing(), 8)
             self.assertTrue(page.journal_entries_section.isVisible())
             page.journal_input.setPlainText("Telefonnotiz am Empfang hinterlegt")
             page.journal_title_input.setText("Telefon")
             page._add_journal_entry()
+            page.journal_input.setPlainText("Rückruf erfolgreich")
+            page.journal_title_input.setText("Follow-up")
+            page._add_journal_entry()
             entries = repository.list_journal_entries(int(customer.id))
-            self.assertEqual(len(entries), 1)
+            self.assertEqual(len(entries), 2)
             self.assertEqual(entries[0].body, "Telefonnotiz am Empfang hinterlegt")
-            self.assertEqual(entries[0].title, "Telefon")
-            self.assertEqual(len(page._journal_cards), 1)
+            self.assertEqual(entries[1].body, "Rückruf erfolgreich")
+            self.assertEqual(len(page._journal_cards), 2)
+            self.assertEqual(page._journal_cards[0].entry.title, "Follow-up")
+            self.assertEqual(
+                page._journal_cards[0].entry.body,
+                "Rückruf erfolgreich",
+            )
             self.assertEqual(page._journal_cards[0].styleSheet(), "")
 
             page.close()
