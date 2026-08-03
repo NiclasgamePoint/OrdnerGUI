@@ -614,11 +614,13 @@ class UiNavigationTests(unittest.TestCase):
             )
 
             page.journal_input.setPlainText("Telefonnotiz am Empfang hinterlegt")
+            page.journal_title_input.setText("Telefon")
             page._add_journal_entry()
             entries = repository.list_journal_entries(int(customer.id))
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].body, "Telefonnotiz am Empfang hinterlegt")
-            self.assertEqual(page.journal_table.rowCount(), 1)
+            self.assertEqual(entries[0].title, "Telefon")
+            self.assertEqual(page.journal_list.count(), 1)
 
             page.close()
             repository.close()

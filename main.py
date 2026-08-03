@@ -2,6 +2,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
+from app.core.config import forced_fullscreen
 from app.core.logging_config import configure_logging
 from app.gui.main_window import MainWindow
 
@@ -13,7 +14,10 @@ def main():
     )
     app = QApplication(sys.argv)
     window = MainWindow()
-    window.show()
+    if forced_fullscreen():
+        window.showFullScreen()
+    else:
+        window.show()
     sys.exit(app.exec())
 
 

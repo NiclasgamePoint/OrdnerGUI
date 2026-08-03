@@ -33,6 +33,11 @@ WINDOW_TITLE = "PapaGUI - Kundenmanagement System"
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
+
+def forced_fullscreen() -> bool:
+    value = os.getenv("PAPAGUI_FORCE_FULLSCREEN", "").strip().casefold()
+    return value in {"1", "true", "yes", "on"}
+
 RIPGREP_AVAILABLE = shutil.which("rg") is not None
 
 SETTINGS_ORG = "PapaGUI"

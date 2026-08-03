@@ -150,6 +150,8 @@ class CustomerRepository:
             CREATE TABLE IF NOT EXISTS customer_journal_entries (
                 id INTEGER PRIMARY KEY,
                 customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                entry_number INTEGER NOT NULL DEFAULT 0,
+                title TEXT NOT NULL DEFAULT '',
                 body TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -237,6 +239,7 @@ class CustomerRepository:
             """
         )
         self._migrate_data_suggestions()
+        self._migrate_journal_entries()
         self.connection.executemany(
             "INSERT OR IGNORE INTO customer_types (name) VALUES (?)",
             [("Unternehmen",), ("Privatperson",), ("Organisation",)],
@@ -368,13 +371,49 @@ class CustomerRepository:
         ).fetchall()
         return [str(row[0]) for row in rows]
 
+    def _migrate_journal_entries(self):
+        columns = {
+            str(row["name"]) for row in self.connection.execute(
+                "PRAGMA table_info(customer_journal_entries)"
+            )
+        }
+        if "entry_number" not in columns:
+            self.connection.execute(
+                "ALTER TABLE customer_journal_entries "
+                "ADD COLUMN entry_number INTEGER NOT NULL DEFAULT 0"
+            )
+        if "title" not in columns:
+            self.connection.execute(
+                "ALTER TABLE customer_journal_entries "
+                "ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+            )
+
+        customer_rows = self.connection.execute(
+            "SELECT DISTINCT customer_id FROM customer_journal_entries"
+        ).fetchall()
+        for customer_row in customer_rows:
+            customer_id = int(customer_row["customer_id"])
+            rows = self.connection.execute(
+                """
+                SELECT id FROM customer_journal_entries
+                WHERE customer_id=?
+                ORDER BY datetime(created_at) ASC, id ASC
+                """,
+                (customer_id,),
+            ).fetchall()
+            for index, row in enumerate(rows, start=1):
+                self.connection.execute(
+                    "UPDATE customer_journal_entries SET entry_number=? WHERE id=?",
+                    (index, int(row["id"])),
+                )
+
     def list_journal_entries(self, customer_id: int) -> list[CustomerJournalEntry]:
         rows = self.connection.execute(
             """
-            SELECT id, customer_id, body, created_at, updated_at
+            SELECT id, customer_id, entry_number, title, body, created_at, updated_at
             FROM customer_journal_entries
             WHERE customer_id=?
-            ORDER BY datetime(created_at) DESC, id DESC
+            ORDER BY entry_number ASC, id ASC
             """,
             (customer_id,),
         ).fetchall()
@@ -382,6 +421,8 @@ class CustomerRepository:
             CustomerJournalEntry(
                 id=int(row["id"]),
                 customer_id=int(row["customer_id"]),
+                entry_number=int(row["entry_number"] or 0),
+                title=str(row["title"] or ""),
                 body=str(row["body"] or ""),
                 created_at=str(row["created_at"] or ""),
                 updated_at=str(row["updated_at"] or ""),
@@ -389,10 +430,16 @@ class CustomerRepository:
             for row in rows
         ]
 
-    def add_journal_entry(self, customer_id: int, body: str) -> CustomerJournalEntry | None:
+    def add_journal_entry(
+        self,
+        customer_id: int,
+        body: str,
+        title: str = "",
+    ) -> CustomerJournalEntry | None:
         text = str(body or "").strip()
         if not text:
             return None
+        clean_title = str(title or "").strip()
         exists = self.connection.execute(
             "SELECT 1 FROM customers WHERE id=? LIMIT 1",
             (customer_id,),
@@ -400,16 +447,21 @@ class CustomerRepository:
         if exists is None:
             raise ValueError("Der ausgewählte Kunde existiert nicht mehr.")
         with self.connection:
+            next_number = int(self.connection.execute(
+                "SELECT COALESCE(MAX(entry_number), 0) + 1 "
+                "FROM customer_journal_entries WHERE customer_id=?",
+                (customer_id,),
+            ).fetchone()[0])
             cursor = self.connection.execute(
                 """
-                INSERT INTO customer_journal_entries (customer_id, body)
-                VALUES (?, ?)
+                INSERT INTO customer_journal_entries (customer_id, entry_number, title, body)
+                VALUES (?, ?, ?, ?)
                 """,
-                (customer_id, text),
+                (customer_id, next_number, clean_title, text),
             )
         row = self.connection.execute(
             """
-            SELECT id, customer_id, body, created_at, updated_at
+            SELECT id, customer_id, entry_number, title, body, created_at, updated_at
             FROM customer_journal_entries
             WHERE id=?
             """,
@@ -418,10 +470,76 @@ class CustomerRepository:
         return CustomerJournalEntry(
             id=int(row["id"]),
             customer_id=int(row["customer_id"]),
+            entry_number=int(row["entry_number"] or 0),
+            title=str(row["title"] or ""),
             body=str(row["body"] or ""),
             created_at=str(row["created_at"] or ""),
             updated_at=str(row["updated_at"] or ""),
         )
+
+    def update_journal_entry(
+        self,
+        customer_id: int,
+        entry_id: int,
+        body: str,
+        title: str = "",
+    ) -> CustomerJournalEntry | None:
+        text = str(body or "").strip()
+        if not text:
+            return None
+        clean_title = str(title or "").strip()
+        with self.connection:
+            self.connection.execute(
+                """
+                UPDATE customer_journal_entries
+                SET title=?, body=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=? AND customer_id=?
+                """,
+                (clean_title, text, entry_id, customer_id),
+            )
+        row = self.connection.execute(
+            """
+            SELECT id, customer_id, entry_number, title, body, created_at, updated_at
+            FROM customer_journal_entries
+            WHERE id=? AND customer_id=?
+            """,
+            (entry_id, customer_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return CustomerJournalEntry(
+            id=int(row["id"]),
+            customer_id=int(row["customer_id"]),
+            entry_number=int(row["entry_number"] or 0),
+            title=str(row["title"] or ""),
+            body=str(row["body"] or ""),
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    def delete_journal_entry(self, customer_id: int, entry_id: int) -> bool:
+        with self.connection:
+            cursor = self.connection.execute(
+                "DELETE FROM customer_journal_entries WHERE id=? AND customer_id=?",
+                (entry_id, customer_id),
+            )
+            if cursor.rowcount <= 0:
+                return False
+
+            rows = self.connection.execute(
+                """
+                SELECT id FROM customer_journal_entries
+                WHERE customer_id=?
+                ORDER BY datetime(created_at) ASC, id ASC
+                """,
+                (customer_id,),
+            ).fetchall()
+            for index, row in enumerate(rows, start=1):
+                self.connection.execute(
+                    "UPDATE customer_journal_entries SET entry_number=? WHERE id=?",
+                    (index, int(row["id"])),
+                )
+        return True
 
     def upsert_service_type(self, name: str) -> ServiceType:
         cleaned = " ".join(str(name or "").split())

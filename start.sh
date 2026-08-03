@@ -16,6 +16,7 @@ fi
 # Virtuellen Display starten (falls kein echter Display vorhanden)
 if [ -z "$DISPLAY" ]; then
 	export DISPLAY=:99
+	export PAPAGUI_FORCE_FULLSCREEN=1
 	Xvfb :99 -screen 0 1920x1080x24 &
 	XVFB_PID=$!
 	echo "Virtueller Display gestartet (PID $XVFB_PID)"
