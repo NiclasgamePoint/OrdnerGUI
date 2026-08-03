@@ -951,6 +951,7 @@ class MainWindow(QMainWindow):
         # the staged index may take a long time, but restarting the application
         # must not discard a path accepted through "Pfad übernehmen".
         save_index_source(new_source)
+        self._reset_views_for_source_change()
         if (
             new_source == self.index_source
             and self.index_manager.has_index_for_root(new_source)
@@ -964,6 +965,12 @@ class MainWindow(QMainWindow):
             full_rebuild=True,
             status_text=f"Baue Index für {new_source} neu auf …",
         )
+
+    def _reset_views_for_source_change(self):
+        # Drop stale preview state before the rebuilt index can provide fresh paths.
+        self.folder_page.cleanup()
+        self.search_page.reset()
+        self.navigator.reset("search")
 
     def on_settings_reindex_requested(self):
         if self.index_controller.is_active():

@@ -266,6 +266,18 @@ def build_stylesheet(
         border-radius: 11px;
     }}
 
+    QFrame#JournalEntryCard {{
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 10px;
+    }}
+
+    QFrame#JournalEntryCard QLabel {{
+        background: transparent;
+        border: none;
+        color: {text};
+    }}
+
     QFrame#ResultRow:hover,
     QFrame#DocumentResultRow:hover {{
         background-color: {item_hover};
