@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout
 
 from app.core.statistics import ApplicationStatistics
@@ -68,7 +70,7 @@ class StatisticsWidget(QFrame):
                 (
                     "last_indexed_at",
                     "Letzter Indexlauf",
-                    statistics.last_indexed_at or "Noch nicht ausgeführt",
+                    self._format_timestamp(statistics.last_indexed_at),
                 ),
                 (
                     "last_index_duration_seconds",
@@ -109,3 +111,13 @@ class StatisticsWidget(QFrame):
         if size >= 1024:
             return f"{size / 1024:.1f} KB"
         return f"{size} B"
+
+    @staticmethod
+    def _format_timestamp(value: str) -> str:
+        if not value:
+            return "Noch nicht ausgeführt"
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized).strftime("%d.%m.%Y %H:%M")
+        except ValueError:
+            return value
