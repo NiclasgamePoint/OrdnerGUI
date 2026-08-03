@@ -19,6 +19,7 @@ from app.gui.dialogs.customer_data_suggestions import CustomerDataSuggestionsDia
 from app.gui.main_window import MainWindow
 from app.gui.settings_popup import SettingsPopup
 from app.services.customer_recognition import CustomerRecognitionService
+from main import show_main_window
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -40,6 +41,58 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(forced_fullscreen())
         with patch.dict("os.environ", {}, clear=True):
             self.assertFalse(forced_fullscreen())
+
+    def test_show_main_window_expands_to_screen_geometry_when_forced(self):
+        class FakeGeometry:
+            def __init__(self):
+                self._top_left = (0, 0)
+                self._size = (1920, 1080)
+
+            def topLeft(self):
+                return self._top_left
+
+            def size(self):
+                return self._size
+
+        class FakeScreen:
+            def availableGeometry(self):
+                return FakeGeometry()
+
+        class FakeApp:
+            def primaryScreen(self):
+                return FakeScreen()
+
+        class FakeWindow:
+            def __init__(self):
+                self.calls = []
+
+            def screen(self):
+                return None
+
+            def setGeometry(self, geometry):
+                self.calls.append(("setGeometry", geometry))
+
+            def show(self):
+                self.calls.append(("show",))
+
+            def move(self, point):
+                self.calls.append(("move", point))
+
+            def resize(self, size):
+                self.calls.append(("resize", size))
+
+            def showFullScreen(self):
+                self.calls.append(("showFullScreen",))
+
+        with patch.dict("os.environ", {"PAPAGUI_FORCE_FULLSCREEN": "1"}, clear=False):
+            window = FakeWindow()
+            show_main_window(FakeApp(), window)
+
+        self.assertEqual(window.calls[0][0], "setGeometry")
+        self.assertEqual(window.calls[1], ("show",))
+        self.assertEqual(window.calls[2][0], "move")
+        self.assertEqual(window.calls[3][0], "resize")
+        self.assertEqual(window.calls[4], ("showFullScreen",))
 
     def test_accepted_data_path_is_saved_before_index_build_finishes(self):
         with TemporaryDirectory() as directory:
