@@ -267,6 +267,8 @@ class CustomerEditorDialog(CenteredPopupDialog):
         layout = QVBoxLayout(page)
         self.contacts_table = QTableWidget(0, 3)
         self.contacts_table.setHorizontalHeaderLabels(["Name", "E-Mail", "Telefon"])
+        self.contacts_table.verticalHeader().setDefaultSectionSize(34)
+        self.contacts_table.verticalHeader().setMinimumSectionSize(30)
         self.contacts_table.horizontalHeader().setStretchLastSection(True)
         for contact in self.customer.contacts:
             self._append_contact(contact)
