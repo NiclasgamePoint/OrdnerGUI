@@ -257,7 +257,7 @@ class CustomerPage(QWidget):
         layout.setSpacing(8)
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(False)
-        self.notes.setFixedHeight(148)
+        self.notes.setFixedHeight(196)
         self.notes.setPlaceholderText("Notizen zum Kunden …")
         self.notes.setAccessibleName("Kundennotizen")
         self.notes.textChanged.connect(self._save_notes)
@@ -288,9 +288,10 @@ class CustomerPage(QWidget):
         self.journal_input.setFixedHeight(112)
         self.journal_input.setAccessibleName("Neuer Journal-Eintrag")
         layout.addWidget(self.journal_input)
+        layout.addSpacing(8)
 
         actions = QHBoxLayout()
-        actions.setContentsMargins(0, 2, 0, 2)
+        actions.setContentsMargins(0, 0, 0, 0)
         self.journal_status = QLabel("")
         self.journal_status.setObjectName("PopupCaption")
         actions.addWidget(self.journal_status)
@@ -428,7 +429,7 @@ class CustomerPage(QWidget):
         if self.customer is None or self.customer.id is None:
             return
         entries = self.repository.list_journal_entries(int(self.customer.id))
-        for entry in entries:
+        for entry in reversed(entries):
             self._journal_entries_by_id[int(entry.id)] = entry
             card = _JournalEntryCard(entry, self.journal_entries_container)
             card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
