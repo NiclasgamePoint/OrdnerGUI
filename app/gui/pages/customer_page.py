@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
@@ -128,6 +126,7 @@ class CustomerPage(QWidget):
         self.customer: Customer | None = None
         self._notes_sync_in_progress = False
         self._journal_entries_by_id: dict[int, CustomerJournalEntry] = {}
+        self._journal_cards: list[_JournalEntryCard] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -235,19 +234,18 @@ class CustomerPage(QWidget):
         layout.setSpacing(8)
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(False)
-        self.notes.setMinimumHeight(120)
+        self.notes.setFixedHeight(150)
         self.notes.setPlaceholderText("Notizen zum Kunden …")
         self.notes.setAccessibleName("Kundennotizen")
+        self.notes.textChanged.connect(self._save_notes)
         layout.addWidget(self.notes, 1)
 
         actions = QHBoxLayout()
         self.notes_status = QLabel("")
         self.notes_status.setObjectName("PopupCaption")
+        self._apply_subtle_hint_style(self.notes_status)
         actions.addWidget(self.notes_status)
         actions.addStretch(1)
-        self.save_notes_button = AppButton("Notizen speichern", AppButton.SECONDARY)
-        self.save_notes_button.clicked.connect(self._save_notes)
-        actions.addWidget(self.save_notes_button)
         layout.addLayout(actions)
         return page
 
@@ -264,7 +262,7 @@ class CustomerPage(QWidget):
 
         self.journal_input = QPlainTextEdit()
         self.journal_input.setPlaceholderText("Neuen Journal-Eintrag schreiben …")
-        self.journal_input.setMinimumHeight(90)
+        self.journal_input.setFixedHeight(96)
         self.journal_input.setAccessibleName("Neuer Journal-Eintrag")
         layout.addWidget(self.journal_input)
 
@@ -278,14 +276,13 @@ class CustomerPage(QWidget):
         actions.addWidget(self.add_journal_button)
         layout.addLayout(actions)
 
-        self.journal_list = QListWidget()
-        self.journal_list.setObjectName("JournalEntryList")
-        self.journal_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.journal_list.customContextMenuRequested.connect(self._open_journal_context_menu)
-        self.journal_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.journal_list.setMinimumHeight(190)
-        self.journal_list.setAccessibleName("Journal des Kunden")
-        layout.addWidget(self.journal_list, 1)
+        self.journal_entries_container = QWidget()
+        self.journal_entries_layout = QVBoxLayout(self.journal_entries_container)
+        self.journal_entries_layout.setContentsMargins(0, 0, 0, 0)
+        self.journal_entries_layout.setSpacing(10)
+        self.journal_entries_layout.addStretch(1)
+        self.journal_entries_container.setAccessibleName("Journal des Kunden")
+        layout.addWidget(self.journal_entries_container)
         return page
 
     def _build_folder_card(self) -> QWidget:
@@ -321,6 +318,14 @@ class CustomerPage(QWidget):
         label.setObjectName("CustomerValue")
         label.setWordWrap(True)
         return label
+
+    def _apply_subtle_hint_style(self, label: QLabel):
+        font = QFont(label.font())
+        font.setPointSize(max(font.pointSize() - 1, 9))
+        label.setFont(font)
+        faded = QColor(label.palette().text().color())
+        faded.setAlpha(115)
+        label.setStyleSheet(f"color: {faded.name(QColor.NameFormat.HexArgb)};")
 
     def set_customer(
         self,
@@ -370,11 +375,13 @@ class CustomerPage(QWidget):
         if self.customer is None or self.customer.id is None or self._notes_sync_in_progress:
             return
         text = self.notes.toPlainText().strip()
-        self.customer.notes = [text] if text else []
+        next_notes = [text] if text else []
+        if self.customer.notes == next_notes:
+            return
+        self.customer.notes = next_notes
         updated = self.repository.save(self.customer)
         self.customer = updated
-        self.notes_status.setText("Notizen gespeichert")
-        self.customerChanged.emit(int(updated.id))
+        self.notes_status.setText("Automatisch gespeichert")
 
     def _add_journal_entry(self):
         if self.customer is None or self.customer.id is None:
@@ -393,33 +400,40 @@ class CustomerPage(QWidget):
         self._reload_journal_entries()
 
     def _reload_journal_entries(self):
-        self.journal_list.clear()
+        while self.journal_entries_layout.count() > 1:
+            item = self.journal_entries_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
         self._journal_entries_by_id.clear()
+        self._journal_cards.clear()
         if self.customer is None or self.customer.id is None:
             return
         entries = self.repository.list_journal_entries(int(self.customer.id))
         for entry in entries:
             self._journal_entries_by_id[int(entry.id)] = entry
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, int(entry.id))
-            card = _JournalEntryCard(entry, self.journal_list)
-            item.setSizeHint(card.sizeHint())
-            self.journal_list.addItem(item)
-            self.journal_list.setItemWidget(item, card)
+            card = _JournalEntryCard(entry, self.journal_entries_container)
+            card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            card.customContextMenuRequested.connect(
+                lambda position, current=entry, source=card: self._open_journal_context_menu(
+                    current,
+                    source.mapToGlobal(position),
+                )
+            )
+            self.journal_entries_layout.insertWidget(
+                self.journal_entries_layout.count() - 1,
+                card,
+            )
+            self._journal_cards.append(card)
 
-    def _open_journal_context_menu(self, position):
-        item = self.journal_list.itemAt(position)
-        if item is None:
-            return
-        entry_id = int(item.data(Qt.ItemDataRole.UserRole) or 0)
-        entry = self._journal_entries_by_id.get(entry_id)
-        if entry is None:
+    def _open_journal_context_menu(self, entry: CustomerJournalEntry, global_position):
+        if entry.id is None:
             return
 
         menu = QMenu(self)
         edit_action = menu.addAction("Bearbeiten")
         delete_action = menu.addAction("Löschen")
-        selected = menu.exec(self.journal_list.viewport().mapToGlobal(position))
+        selected = menu.exec(global_position)
         if selected == edit_action:
             self._edit_journal_entry(entry)
         elif selected == delete_action:
