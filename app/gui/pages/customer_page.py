@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QTabWidget,
+    QFrame,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -70,15 +71,26 @@ class _JournalEntryEditorDialog(QDialog):
         return self.title_input.text().strip(), self.body_input.toPlainText().strip()
 
 
-class _JournalEntryCard(QWidget):
+class _JournalEntryCard(QFrame):
     def __init__(self, entry: CustomerJournalEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
         self.setObjectName("JournalEntryCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
+        self.setStyleSheet(
+            """
+            QWidget#JournalEntryCard {
+                background-color: rgba(255, 255, 255, 0.07);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                border-radius: 10px;
+            }
+            """
+        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(7)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -208,7 +220,29 @@ class CustomerPage(QWidget):
         self.customer_tabs = QTabWidget()
         self.customer_tabs.addTab(self._build_notes_tab(), "Notizen")
         self.customer_tabs.addTab(self._build_journal_tab(), "Journal")
+        self.customer_tabs.currentChanged.connect(
+            self._update_journal_entries_visibility
+        )
         form_layout.addWidget(self.customer_tabs)
+
+        self.journal_entries_section = QWidget()
+        self.journal_entries_section.setObjectName("JournalEntriesSection")
+        journal_entries_layout = QVBoxLayout(self.journal_entries_section)
+        journal_entries_layout.setContentsMargins(0, 0, 0, 0)
+        journal_entries_layout.setSpacing(8)
+        self.journal_entries_title = QLabel("Bisherige Einträge")
+        self.journal_entries_title.setObjectName("SectionTitle")
+        journal_entries_layout.addWidget(self.journal_entries_title)
+
+        self.journal_entries_container = QWidget()
+        self.journal_entries_layout = QVBoxLayout(self.journal_entries_container)
+        self.journal_entries_layout.setContentsMargins(0, 0, 0, 0)
+        self.journal_entries_layout.setSpacing(10)
+        self.journal_entries_layout.addStretch(1)
+        self.journal_entries_container.setAccessibleName("Journal des Kunden")
+        journal_entries_layout.addWidget(self.journal_entries_container)
+        self.journal_entries_section.setVisible(False)
+        form_layout.addWidget(self.journal_entries_section)
         form_layout.addStretch(1)
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
@@ -234,7 +268,7 @@ class CustomerPage(QWidget):
         layout.setSpacing(8)
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(False)
-        self.notes.setFixedHeight(150)
+        self.notes.setFixedHeight(148)
         self.notes.setPlaceholderText("Notizen zum Kunden …")
         self.notes.setAccessibleName("Kundennotizen")
         self.notes.textChanged.connect(self._save_notes)
@@ -262,11 +296,12 @@ class CustomerPage(QWidget):
 
         self.journal_input = QPlainTextEdit()
         self.journal_input.setPlaceholderText("Neuen Journal-Eintrag schreiben …")
-        self.journal_input.setFixedHeight(96)
+        self.journal_input.setFixedHeight(112)
         self.journal_input.setAccessibleName("Neuer Journal-Eintrag")
         layout.addWidget(self.journal_input)
 
         actions = QHBoxLayout()
+        actions.setContentsMargins(0, 2, 0, 2)
         self.journal_status = QLabel("")
         self.journal_status.setObjectName("PopupCaption")
         actions.addWidget(self.journal_status)
@@ -276,13 +311,7 @@ class CustomerPage(QWidget):
         actions.addWidget(self.add_journal_button)
         layout.addLayout(actions)
 
-        self.journal_entries_container = QWidget()
-        self.journal_entries_layout = QVBoxLayout(self.journal_entries_container)
-        self.journal_entries_layout.setContentsMargins(0, 0, 0, 0)
-        self.journal_entries_layout.setSpacing(10)
-        self.journal_entries_layout.addStretch(1)
-        self.journal_entries_container.setAccessibleName("Journal des Kunden")
-        layout.addWidget(self.journal_entries_container)
+        # The journal entries container is now added in the customer card
         return page
 
     def _build_folder_card(self) -> QWidget:
@@ -425,6 +454,9 @@ class CustomerPage(QWidget):
                 card,
             )
             self._journal_cards.append(card)
+
+    def _update_journal_entries_visibility(self, current_index: int):
+        self.journal_entries_section.setVisible(current_index == 1)
 
     def _open_journal_context_menu(self, entry: CustomerJournalEntry, global_position):
         if entry.id is None:

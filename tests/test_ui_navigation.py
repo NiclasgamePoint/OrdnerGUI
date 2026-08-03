@@ -605,6 +605,7 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(page.customer_tabs.tabText(0), "Notizen")
             self.assertEqual(page.customer_tabs.tabText(1), "Journal")
             self.assertFalse(page.notes.isReadOnly())
+            self.assertFalse(page.journal_entries_section.isVisible())
 
             page.notes.setPlainText("Aktualisierte Notiz")
             self.assertEqual(
@@ -612,6 +613,10 @@ class UiNavigationTests(unittest.TestCase):
                 ["Aktualisierte Notiz"],
             )
 
+            page.customer_tabs.setCurrentIndex(1)
+            page.show()
+            self.app.processEvents()
+            self.assertTrue(page.journal_entries_section.isVisible())
             page.journal_input.setPlainText("Telefonnotiz am Empfang hinterlegt")
             page.journal_title_input.setText("Telefon")
             page._add_journal_entry()
