@@ -607,7 +607,6 @@ class UiNavigationTests(unittest.TestCase):
             self.assertFalse(page.notes.isReadOnly())
 
             page.notes.setPlainText("Aktualisierte Notiz")
-            page._save_notes()
             self.assertEqual(
                 repository.get(int(customer.id)).notes,
                 ["Aktualisierte Notiz"],
@@ -620,7 +619,7 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].body, "Telefonnotiz am Empfang hinterlegt")
             self.assertEqual(entries[0].title, "Telefon")
-            self.assertEqual(page.journal_list.count(), 1)
+            self.assertEqual(len(page._journal_cards), 1)
 
             page.close()
             repository.close()
