@@ -482,6 +482,19 @@ class UiNavigationTests(unittest.TestCase):
         )
         popup.close()
 
+    def test_statistics_page_formats_last_index_run_date(self):
+        popup = SettingsPopup("light", "#2db89d")
+
+        popup.set_statistics(ApplicationStatistics(
+            last_indexed_at="2026-08-03T14:05:30",
+        ))
+
+        self.assertEqual(
+            popup.statistics_widget._value_labels["last_indexed_at"].text(),
+            "03.08.2026 14:05",
+        )
+        popup.close()
+
     def test_appearance_sliders_update_visible_values(self):
         popup = SettingsPopup("light", "#2db89d")
 
