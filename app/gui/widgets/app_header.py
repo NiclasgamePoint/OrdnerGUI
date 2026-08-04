@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from app.core.config import DOCUMENT_SEARCH_ENABLED
-
 from app.gui.widgets.buttons import AppButton
 
 
@@ -23,7 +21,12 @@ class AppHeader(QFrame):
     filterRequested = Signal()
     settingsRequested = Signal()
 
-    def __init__(self, history: list[str] | None = None, parent=None):
+    def __init__(
+        self,
+        history: list[str] | None = None,
+        parent=None,
+        document_search_enabled: bool = False,
+    ):
         super().__init__(parent)
         self.setObjectName("AppHeader")
         self.setMinimumHeight(56)
@@ -34,16 +37,13 @@ class AppHeader(QFrame):
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("GlobalSearchInput")
-        self.search_input.setPlaceholderText(
-            "Kunden, Ordner oder Dokumentinhalte durchsuchen …"
-            if DOCUMENT_SEARCH_ENABLED
-            else "Kunden oder Ordner durchsuchen …"
-        )
+        self.document_search_enabled = bool(document_search_enabled)
+        self._update_search_description()
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setAccessibleName("Globale Suche")
         self.search_input.setAccessibleDescription(
             "Durchsucht Kunden, Ordnernamen und extrahierte Dokumentinhalte."
-            if DOCUMENT_SEARCH_ENABLED
+            if self.document_search_enabled
             else "Durchsucht Kunden und Ordnernamen."
         )
         self.search_input.textChanged.connect(self.queryChanged.emit)
@@ -83,6 +83,22 @@ class AppHeader(QFrame):
         layout.addWidget(self.search_button)
         layout.addWidget(self.filter_button)
         layout.addWidget(self.settings_button)
+
+    def set_document_search_enabled(self, enabled: bool):
+        self.document_search_enabled = bool(enabled)
+        self._update_search_description()
+
+    def _update_search_description(self):
+        self.search_input.setPlaceholderText(
+            "Kunden, Ordner oder Dokumentinhalte durchsuchen …"
+            if self.document_search_enabled
+            else "Kunden oder Ordner durchsuchen …"
+        )
+        self.search_input.setAccessibleDescription(
+            "Durchsucht Kunden, Ordnernamen und extrahierte Dokumentinhalte."
+            if self.document_search_enabled
+            else "Durchsucht Kunden und Ordnernamen."
+        )
 
     def query(self) -> str:
         return self.search_input.text().strip()

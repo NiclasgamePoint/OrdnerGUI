@@ -18,6 +18,8 @@ class IndexDiagnostics:
     folder_count: int = 0
     changed_count: int = 0
     content_count: int = 0
+    content_database_size: int = 0
+    shard_count: int = 0
     status_counts: dict[str, int] = field(default_factory=dict)
     errors: list[dict[str, str]] = field(default_factory=list)
 
@@ -41,6 +43,15 @@ class IndexDiagnosticsService:
             content_count, status_counts, errors = self._content_diagnostics(
                 connection, content_state_path
             )
+            shard_paths = (
+                list((content_state_path.parent / "shards").glob("*.db"))
+                if content_state_path is not None else []
+            )
+            content_size = sum(
+                path.stat().st_size for path in shard_paths if path.is_file()
+            )
+            if content_state_path is not None and content_state_path.exists():
+                content_size += content_state_path.stat().st_size
             return IndexDiagnostics(
                 database_path=str(database_path),
                 database_size=database_path.stat().st_size,
@@ -53,6 +64,8 @@ class IndexDiagnosticsService:
                 folder_count=int(connection.execute("SELECT COUNT(*) FROM folders").fetchone()[0]),
                 changed_count=int(metadata.get("changed_count", "0") or 0),
                 content_count=content_count,
+                content_database_size=content_size,
+                shard_count=len(shard_paths),
                 status_counts=status_counts,
                 errors=errors,
             )

@@ -13,6 +13,7 @@ STATE_FILENAME = "index_job.json"
 OWNER_FILENAME = "index_job.owner"
 CANCEL_FILENAME = "index_job.cancel"
 ACTIVATED_FILENAME = "index_job.activated"
+PAUSE_FILENAME = "index_job.paused"
 ACTIVE_STATUSES = {"starting", "running", "ready"}
 TERMINAL_STATUSES = {"completed", "no_changes", "cancelled", "error"}
 STATE_REPLACE_ATTEMPTS = 8
@@ -33,6 +34,10 @@ def cancel_path(state_dir: Path) -> Path:
 
 def activated_path(state_dir: Path) -> Path:
     return state_dir / ACTIVATED_FILENAME
+
+
+def pause_path(state_dir: Path) -> Path:
+    return state_dir / PAUSE_FILENAME
 
 
 def utc_now() -> str:

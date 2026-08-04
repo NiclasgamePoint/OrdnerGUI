@@ -233,10 +233,18 @@ class CatalogIndexManager(IndexManager):
         state: ContentStateRepository,
         shards: ShardRepository,
         preferred_patterns: list[str],
+        priority_documents_per_project: int = 24,
+        newest_years_first: bool = True,
     ):
         generation = self.get_metadata("catalog_generation")
         project_document_counts: dict[str, int] = {}
-        for row in self.content_candidates():
+        candidates = self.content_candidates()
+        if not newest_years_first:
+            candidates = sorted(
+                candidates,
+                key=lambda row: (int(row["partition_year"] or 0), str(row["path"]).casefold()),
+            )
+        for row in candidates:
             filename = str(row["filename"] or "").casefold()
             project_document = bool(row["project_root_path"])
             preferred = project_document and any(
@@ -245,7 +253,8 @@ class CatalogIndexManager(IndexManager):
             project_path = str(row["project_root_path"] or "")
             selected_for_enrichment = (
                 project_document
-                and project_document_counts.get(project_path, 0) < 24
+                and project_document_counts.get(project_path, 0)
+                < max(1, int(priority_documents_per_project))
             )
             if selected_for_enrichment:
                 project_document_counts[project_path] = (

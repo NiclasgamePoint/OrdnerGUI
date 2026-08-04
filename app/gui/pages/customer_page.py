@@ -150,13 +150,13 @@ class CustomerPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        back_button = AppButton("←", AppButton.SECONDARY, minimum_width=48)
-        back_button.setObjectName("BackButton")
-        back_button.setToolTip("Zur vorherigen Seite")
-        back_button.clicked.connect(self.backRequested.emit)
+        self.back_button = AppButton("←", AppButton.SECONDARY, minimum_width=48)
+        self.back_button.setObjectName("BackButton")
+        self.back_button.setToolTip("Zur vorherigen Seite")
+        self.back_button.clicked.connect(self.backRequested.emit)
         self.customer_title = QLabel("Kundendaten")
         self.customer_title.setObjectName("PageTitle")
-        header.addWidget(back_button)
+        header.addWidget(self.back_button)
         header.addWidget(self.customer_title)
         header.addStretch(1)
         layout.addLayout(header)
@@ -205,6 +205,7 @@ class CustomerPage(QWidget):
         form_layout.addWidget(self.contacts_table)
 
         self.customer_tabs = QTabWidget()
+        self.customer_tabs.setObjectName("InsetContentTabs")
         self.customer_tabs.addTab(self._build_notes_tab(), "Notizen")
         self.customer_tabs.addTab(self._build_journal_tab(), "Journal")
         self.customer_tabs.currentChanged.connect(

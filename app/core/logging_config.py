@@ -9,6 +9,15 @@ from app.core.config import DATA_DIR
 
 LOG_DIR = DATA_DIR / "logs"
 LOG_FILE = LOG_DIR / "papagui.log"
+CONTENT_PROCESS_LOG_FILE = LOG_DIR / "content-index-process.log"
+
+
+def open_content_process_log():
+    """Open the durable stream used for detached content-worker output."""
+    CONTENT_PROCESS_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    return CONTENT_PROCESS_LOG_FILE.open(
+        "a", encoding="utf-8", errors="replace", buffering=1
+    )
 
 
 def configure_logging(log_file: Path = LOG_FILE) -> Path:
@@ -35,4 +44,3 @@ def configure_logging(log_file: Path = LOG_FILE) -> Path:
     # them, but emits one warning per duplicate and can bury actionable logs.
     logging.getLogger("PyPDF2").setLevel(logging.ERROR)
     return log_file
-

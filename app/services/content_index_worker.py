@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Callable, Protocol
 
 from app.core.content_index import (
@@ -37,11 +38,15 @@ class ContentIndexWorker:
         *,
         shard_target_bytes: int,
         maximum_attempts: int = 3,
+        pause_seconds: float = 0.0,
+        newest_years_first: bool = True,
     ):
         self.layout = layout
         self.extractor = extractor
         self.shard_target_bytes = shard_target_bytes
         self.maximum_attempts = maximum_attempts
+        self.pause_seconds = max(0.0, float(pause_seconds))
+        self.newest_years_first = bool(newest_years_first)
 
     def run(
         self,
@@ -62,12 +67,16 @@ class ContentIndexWorker:
                     cancelled = True
                     break
                 task = state.acquire_next(
-                    self.maximum_attempts, maximum_priority=maximum_priority
+                    self.maximum_attempts,
+                    maximum_priority=maximum_priority,
+                    newest_years_first=self.newest_years_first,
                 )
                 if task is None:
                     break
                 if progress_callback is not None:
                     progress_callback(state.progress(), task.path)
+                if self.pause_seconds:
+                    time.sleep(self.pause_seconds)
                 try:
                     text, status, error = self.extractor.extract(Path(task.path))
                     if error and status in {"error", "timeout"}:

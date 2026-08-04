@@ -14,6 +14,7 @@ from app.core.content_index import ContentStateRepository, ShardRepository
 from app.core.index_job_state import (
     activated_path,
     cancel_path,
+    pause_path,
     process_is_alive,
     read_state,
     read_owner,
@@ -22,6 +23,7 @@ from app.core.index_job_state import (
 )
 from app.core.index_manager import IndexManager
 from app.core.index_layout import IndexLayout
+from app.core.logging_config import open_content_process_log
 from app.core.index_store import (
     activate_index,
     create_build_path,
@@ -252,10 +254,13 @@ class IndexJobRunner:
         try:
             with ContentStateRepository.open_recoverable(self.index_layout) as state:
                 shards = ShardRepository(self.index_layout, state)
+                options = load_index_options()
                 manager.reconcile_content_state(
                     state,
                     shards,
-                    load_customer_recognition_options().preferred_patterns,
+                    options.preferred_patterns,
+                    options.priority_documents_per_project,
+                    options.newest_years_first,
                 )
         finally:
             manager.close()
@@ -265,6 +270,11 @@ class IndexJobRunner:
             return
         state_dir = self.index_layout.jobs_dir / "content"
         state_dir.mkdir(parents=True, exist_ok=True)
+        if (
+            pause_path(state_dir).exists()
+            or not load_index_options().content_indexing_enabled
+        ):
+            return
         current = read_state(state_dir)
         if current.get("status") == "running" and process_is_alive(
             int(current.get("pid") or 0)
@@ -273,6 +283,7 @@ class IndexJobRunner:
         cancel_path(state_dir).unlink(missing_ok=True)
         command = [
             sys.executable,
+            "-u",
             "-m",
             "app.services.content_index_job",
             "--index-root",
@@ -285,8 +296,7 @@ class IndexJobRunner:
         options = {
             "cwd": str(Path(__file__).resolve().parents[2]),
             "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
+            "stderr": subprocess.STDOUT,
             "close_fds": True,
         }
         if sys.platform == "win32":
@@ -295,7 +305,12 @@ class IndexJobRunner:
             )
         else:
             options["start_new_session"] = True
-        subprocess.Popen(command, **options)
+        process_log = open_content_process_log()
+        options["stdout"] = process_log
+        try:
+            subprocess.Popen(command, **options)
+        finally:
+            process_log.close()
 
     def _archive_legacy_index(self):
         if self.index_layout is None:

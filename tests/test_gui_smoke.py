@@ -4,9 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox
 
-from app.core.config import CustomerRecognitionOptions, forced_fullscreen
+from app.core.config import CustomerRecognitionOptions, IndexOptions, forced_fullscreen
 from app.core.customer_models import Customer
 from app.core.customer_recognition_models import (
     ContactScanStats,
@@ -56,10 +56,65 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertNotIn("Dokumente", window.status_bar.status_label.text())
         window.close()
 
+    def test_automatic_monitoring_can_be_disabled(self):
+        options = IndexOptions(
+            automatic_monitoring_enabled=False,
+            content_indexing_enabled=False,
+        )
+        with (
+            patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+            patch("app.gui.main_window.load_index_options", return_value=options),
+            patch("app.gui.main_window.FileSystemMonitor") as monitor,
+        ):
+            window = MainWindow()
+            window._start_filesystem_monitor()
+        monitor.assert_not_called()
+        self.assertFalse(window.catalog_reconciliation_timer.isActive())
+        window.close()
+
+    def test_daily_reconciliation_toggle_controls_timer(self):
+        with TemporaryDirectory() as directory:
+            options = IndexOptions(
+                automatic_monitoring_enabled=True,
+                daily_reconciliation_enabled=False,
+                content_indexing_enabled=False,
+            )
+            with (
+                patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+                patch("app.gui.main_window.load_index_options", return_value=options),
+                patch("app.gui.main_window.FileSystemMonitor") as monitor,
+            ):
+                window = MainWindow()
+                window.index_source = Path(directory)
+                window._start_filesystem_monitor()
+            monitor.assert_called_once()
+            self.assertFalse(window.catalog_reconciliation_timer.isActive())
+            window.close()
+
+    def test_content_index_toggle_gates_background_worker(self):
+        with patch.object(MainWindow, "_initialize_data_source", lambda self: None):
+            window = MainWindow()
+        window.index_options = IndexOptions(content_indexing_enabled=False)
+        with patch.object(
+            window.content_job_controller, "start_or_adopt"
+        ) as start_content:
+            self.assertFalse(window._start_content_indexing_if_enabled())
+            start_content.assert_not_called()
+        window.index_options = IndexOptions(content_indexing_enabled=True)
+        with patch.object(
+            window.content_job_controller, "start_or_adopt", return_value=True
+        ) as start_content:
+            self.assertTrue(window._start_content_indexing_if_enabled())
+            start_content.assert_called_once()
+        window.close()
+
     def test_document_worker_can_be_reenabled_with_the_feature_flag(self):
         with (
             patch.object(MainWindow, "_initialize_data_source", lambda self: None),
-            patch("app.gui.main_window.DOCUMENT_SEARCH_ENABLED", True),
+            patch(
+                "app.gui.main_window.load_index_options",
+                return_value=IndexOptions(content_search_enabled=True),
+            ),
             patch("app.gui.main_window.SearchWorker") as worker_class,
         ):
             window = MainWindow()
@@ -428,9 +483,84 @@ class GuiSmokeTests(unittest.TestCase):
 
     def test_settings_popup_smoke(self):
         popup = SettingsPopup("light", "#2db89d")
-        self.assertEqual(popup.nav_list.count(), 5)
+        self.assertEqual(popup.nav_list.count(), 6)
         self.assertIsNotNone(popup.statistics_widget)
+        self.assertTrue(popup.content_indexing_checkbox.isChecked())
+        self.assertEqual(popup.resource_profile_combo.currentData(), "balanced")
         popup.close()
+
+    def test_index_apply_button_persists_changes_and_keeps_settings_open(self):
+        with (
+            patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+            patch.object(MainWindow, "_refresh_settings_popup_data", lambda self: None),
+            patch.object(MainWindow, "_start_filesystem_monitor") as restart_monitor,
+            patch("app.gui.main_window.save_index_options") as save_options,
+            patch("app.gui.settings_popup.persist_index_options") as popup_save,
+        ):
+            window = MainWindow()
+            window.open_settings_popup()
+            popup = window.settings_popup
+            self.assertIsNotNone(popup)
+            popup.automatic_monitoring_checkbox.setChecked(False)
+            popup.save_index_options_button.click()
+            self.app.processEvents()
+
+        save_options.assert_called_once()
+        popup_save.assert_called_once()
+        saved = save_options.call_args.args[0]
+        self.assertFalse(saved.automatic_monitoring_enabled)
+        restart_monitor.assert_called_once()
+        self.assertIs(window.settings_popup, popup)
+        self.assertTrue(popup.isVisible())
+        popup.close()
+        window.close()
+
+    def test_clear_content_confirmation_keeps_settings_open(self):
+        with (
+            patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+            patch.object(MainWindow, "_refresh_settings_popup_data", lambda self: None),
+        ):
+            window = MainWindow()
+            window.open_settings_popup()
+        popup = window.settings_popup
+        self.assertIsNotNone(popup)
+
+        def close_popup_then_confirm(*_args, **_kwargs):
+            popup.close()
+            return QMessageBox.StandardButton.Yes
+
+        with (
+            patch(
+                "app.gui.main_window.QMessageBox.question",
+                side_effect=close_popup_then_confirm,
+            ),
+            patch.object(window, "_start_content_maintenance") as maintenance,
+        ):
+            window.confirm_clear_content_index()
+        self.app.processEvents()
+
+        maintenance.assert_called_once_with("clear")
+        self.assertTrue(popup.isVisible())
+        popup.close()
+        window.close()
+
+    def test_clear_content_waits_for_running_worker_to_pause(self):
+        with patch.object(MainWindow, "_initialize_data_source", lambda self: None):
+            window = MainWindow()
+        with (
+            patch.object(window.content_job_controller, "is_active", return_value=True),
+            patch.object(window.content_job_controller, "pause") as pause,
+        ):
+            window._start_content_maintenance("clear")
+        pause.assert_called_once()
+        self.assertEqual(window.pending_content_maintenance, "clear")
+
+        with patch.object(window, "_start_content_maintenance") as maintenance:
+            window._on_content_finished({"status": "cancelled"})
+            self.app.processEvents()
+        maintenance.assert_called_once_with("clear")
+        self.assertIsNone(window.pending_content_maintenance)
+        window.close()
 
 
 if __name__ == "__main__":

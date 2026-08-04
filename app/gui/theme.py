@@ -729,6 +729,10 @@ def build_stylesheet(
         border-color: {accent};
     }}
 
+    QTabWidget#InsetContentTabs::tab-bar {{
+        left: 8px;
+    }}
+
     QSplitter::handle {{
         background-color: {line};
         width: 2px;
