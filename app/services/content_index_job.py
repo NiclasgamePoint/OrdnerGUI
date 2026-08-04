@@ -21,6 +21,7 @@ from app.core.logging_config import CONTENT_PROCESS_LOG_FILE, configure_logging
 from app.core.process_support import suppress_windows_crash_dialogs
 from app.services.content_index_worker import ContentIndexWorker, ContentWorkerResult
 from app.services.document_text_indexer import DocumentTextIndexer
+from app.services.index_resource_policy import IndexResourcePolicy
 from app.services.customer_recognition import CustomerRecognitionService
 
 
@@ -53,16 +54,26 @@ class ContentIndexJobRunner:
         try:
             options = load_index_options()
             self._reconcile_queue()
+            resource_policy = IndexResourcePolicy()
+            worker_limit = resource_policy.worker_limit(options.resource_profile)
+            self._write(
+                resource_profile=options.resource_profile,
+                worker_limit=worker_limit,
+            )
             worker = ContentIndexWorker(
                 self.layout,
                 DocumentTextIndexer(options),
                 shard_target_bytes=self.shard_target_bytes,
                 pause_seconds=options.document_pause_seconds,
                 newest_years_first=options.newest_years_first,
+                maximum_workers=worker_limit,
+                resource_policy=resource_policy,
+                resource_profile=options.resource_profile,
             )
             priority_result = worker.run(
                 should_cancel=lambda: cancel_path(self.state_dir).exists(),
                 progress_callback=self._progress,
+                activity_callback=self._activity,
                 maximum_priority=10,
             )
             if priority_result.cancelled:
@@ -72,6 +83,7 @@ class ContentIndexJobRunner:
                 result = worker.run(
                     should_cancel=lambda: cancel_path(self.state_dir).exists(),
                     progress_callback=self._progress,
+                    activity_callback=self._activity,
                 )
                 result = ContentWorkerResult(
                     processed=priority_result.processed + result.processed,
@@ -88,6 +100,7 @@ class ContentIndexJobRunner:
                     recovery = worker.run(
                         should_cancel=lambda: cancel_path(self.state_dir).exists(),
                         progress_callback=self._progress,
+                        activity_callback=self._activity,
                     )
                     result = ContentWorkerResult(
                         processed=result.processed + recovery.processed,
@@ -154,6 +167,12 @@ class ContentIndexJobRunner:
             **self._progress_values(progress),
         })
 
+    def _activity(self, assignments: list[dict[str, object]]):
+        self._write(
+            active_workers=len(assignments),
+            worker_assignments=assignments,
+        )
+
     def _write(self, **changes):
         """Persist one complete snapshot while retaining the job identity."""
         self._job_state.update(changes)
@@ -173,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     suppress_windows_crash_dialogs()
-    configure_logging()
+    configure_logging(CONTENT_PROCESS_LOG_FILE)
     arguments = build_parser().parse_args()
     return ContentIndexJobRunner(
         IndexLayout(arguments.index_root.resolve()),

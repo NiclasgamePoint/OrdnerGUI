@@ -65,7 +65,10 @@ class IndexOptions:
     result_limit: int = 200
     ocr_enabled: bool = True
     ocr_max_pages: int = 5
+    ocr_extended_max_pages: int = 25
+    ocr_extension_threshold: int = 500
     ocr_timeout_seconds: int = 10
+    pdf_text_timeout_seconds: int = 45
     content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
     excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
     resource_profile: str = "balanced"
@@ -107,9 +110,9 @@ class IndexOptions:
 
     @property
     def ocr_workers(self) -> int:
-        return {"gentle": 1, "balanced": 2, "fast": 4}.get(
-            self.resource_profile, 2
-        )
+        # Document-level concurrency owns the resource budget.  Nested OCR
+        # pools would multiply that budget and make profile limits ineffective.
+        return 1
 
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True)
@@ -129,7 +132,10 @@ class IndexOptions:
             "max_extracted_characters": self.max_extracted_characters,
             "ocr_enabled": self.ocr_enabled,
             "ocr_max_pages": self.ocr_max_pages,
+            "ocr_extended_max_pages": self.ocr_extended_max_pages,
+            "ocr_extension_threshold": self.ocr_extension_threshold,
             "ocr_timeout_seconds": self.ocr_timeout_seconds,
+            "pdf_text_timeout_seconds": self.pdf_text_timeout_seconds,
             "content_extensions": sorted(self.indexed_content_types),
         }
         encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True)
@@ -242,9 +248,18 @@ def load_index_options() -> IndexOptions:
         result_limit=int(settings.value("search/result_limit", defaults.result_limit)),
         ocr_enabled=_setting_bool(settings, "index/ocr_enabled", defaults.ocr_enabled),
         ocr_max_pages=int(settings.value("index/ocr_max_pages", defaults.ocr_max_pages)),
+        ocr_extended_max_pages=int(settings.value(
+            "index/ocr_extended_max_pages", defaults.ocr_extended_max_pages
+        )),
+        ocr_extension_threshold=int(settings.value(
+            "index/ocr_extension_threshold", defaults.ocr_extension_threshold
+        )),
         ocr_timeout_seconds=int(
             settings.value("index/ocr_timeout_seconds", defaults.ocr_timeout_seconds)
         ),
+        pdf_text_timeout_seconds=int(settings.value(
+            "index/pdf_text_timeout_seconds", defaults.pdf_text_timeout_seconds
+        )),
         content_extensions=str(
             settings.value("index/content_extensions", defaults.content_extensions)
         ),
@@ -295,7 +310,16 @@ def save_index_options(options: IndexOptions):
     settings.setValue("search/result_limit", values["result_limit"])
     settings.setValue("index/ocr_enabled", values["ocr_enabled"])
     settings.setValue("index/ocr_max_pages", values["ocr_max_pages"])
+    settings.setValue(
+        "index/ocr_extended_max_pages", values["ocr_extended_max_pages"]
+    )
+    settings.setValue(
+        "index/ocr_extension_threshold", values["ocr_extension_threshold"]
+    )
     settings.setValue("index/ocr_timeout_seconds", values["ocr_timeout_seconds"])
+    settings.setValue(
+        "index/pdf_text_timeout_seconds", values["pdf_text_timeout_seconds"]
+    )
     settings.setValue("index/content_extensions", values["content_extensions"])
     settings.setValue("index/excluded_folders", values["excluded_folders"])
     settings.setValue("index/resource_profile", values["resource_profile"])

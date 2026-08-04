@@ -494,6 +494,10 @@ class SettingsPopup(QFrame):
         self.resource_profile_combo.addItem("Schonend", "gentle")
         self.resource_profile_combo.addItem("Ausgewogen", "balanced")
         self.resource_profile_combo.addItem("Schnell", "fast")
+        self.resource_profile_combo.setToolTip(
+            "Workerbudget nach logischen CPUs: Schonend 15 %, Ausgewogen 25 %, "
+            "Schnell 60 %. Zusätzlich durch freien Arbeitsspeicher begrenzt."
+        )
         self.resource_profile_combo.setCurrentIndex(max(
             0, self.resource_profile_combo.findData(self.index_options.resource_profile)
         ))
@@ -542,12 +546,44 @@ class SettingsPopup(QFrame):
         self.ocr_pages_spin = ClickActivatedSpinBox()
         self.ocr_pages_spin.setRange(1, 1_000)
         self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
-        ocr_form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
+        ocr_form.addRow(self._form_label("OCR-Seiten (erste Stufe)"), self.ocr_pages_spin)
+
+        self.ocr_extended_pages_spin = ClickActivatedSpinBox()
+        self.ocr_extended_pages_spin.setRange(1, 1_000)
+        self.ocr_extended_pages_spin.setValue(
+            self.index_options.ocr_extended_max_pages
+        )
+        ocr_form.addRow(
+            self._form_label("OCR-Seiten (erweiterte Stufe)"),
+            self.ocr_extended_pages_spin,
+        )
+
+        self.ocr_threshold_spin = ClickActivatedSpinBox()
+        self.ocr_threshold_spin.setRange(0, 100_000)
+        self.ocr_threshold_spin.setValue(
+            self.index_options.ocr_extension_threshold
+        )
+        self.ocr_threshold_spin.setSuffix(" Zeichen")
+        ocr_form.addRow(
+            self._form_label("Erweiterung bei weniger als"),
+            self.ocr_threshold_spin,
+        )
 
         self.ocr_timeout_spin = ClickActivatedSpinBox()
         self.ocr_timeout_spin.setRange(5, 600)
         self.ocr_timeout_spin.setSuffix(" s")
         self.ocr_timeout_spin.setValue(self.index_options.ocr_timeout_seconds)
+
+        self.pdf_timeout_spin = ClickActivatedSpinBox()
+        self.pdf_timeout_spin.setRange(5, 600)
+        self.pdf_timeout_spin.setSuffix(" s")
+        self.pdf_timeout_spin.setValue(
+            self.index_options.pdf_text_timeout_seconds
+        )
+        ocr_form.addRow(
+            self._form_label("PDF-Texterkennung Zeitlimit"),
+            self.pdf_timeout_spin,
+        )
         ocr_form.addRow(self._form_label("OCR-Zeitlimit pro PDF"), self.ocr_timeout_spin)
 
         capability = self.index_capabilities
@@ -1037,7 +1073,10 @@ class SettingsPopup(QFrame):
             result_limit=self.result_limit_spin.value(),
             ocr_enabled=self.ocr_checkbox.isChecked(),
             ocr_max_pages=self.ocr_pages_spin.value(),
+            ocr_extended_max_pages=self.ocr_extended_pages_spin.value(),
+            ocr_extension_threshold=self.ocr_threshold_spin.value(),
             ocr_timeout_seconds=self.ocr_timeout_spin.value(),
+            pdf_text_timeout_seconds=self.pdf_timeout_spin.value(),
             content_extensions=",".join(sorted(extensions)),
             excluded_folders=self.excluded_folders_input.text().strip(),
             resource_profile=str(self.resource_profile_combo.currentData() or "balanced"),
@@ -1053,9 +1092,14 @@ class SettingsPopup(QFrame):
             != new_options.content_fingerprint()
         )
         if requires_reindex and self.isVisible():
+            # A Qt.Popup may be closed by the window system as soon as a modal
+            # child takes focus.  Parent the confirmation to the owning window
+            # instead, while keeping the popup alive for the remainder of the
+            # save operation.
+            dialog_parent = self.parentWidget() or self
             answer = self._run_modal_preserving_popup(
                 lambda: QMessageBox.question(
-                    self,
+                    dialog_parent,
                     "Erneute Indexierung erforderlich",
                     "Diese Änderungen erfordern eine erneute Indexierung. Der vorhandene "
                     "Katalog bleibt verfügbar, während Dokumentinhalte neu aufgebaut werden. "

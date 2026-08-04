@@ -7,3 +7,4 @@ PyPDF2
 pycryptodome
 olefile
 watchdog
+psutil

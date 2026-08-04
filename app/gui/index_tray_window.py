@@ -37,8 +37,8 @@ class IndexTrayWindow(QDialog):
         self.log_file = log_file
         self.setWindowTitle("PapaGUI · Indexierung")
         self.setWindowFlag(Qt.WindowType.Tool, True)
-        self.setMinimumSize(620, 430)
-        self.resize(720, 520)
+        self.setMinimumSize(620, 520)
+        self.resize(760, 640)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 16)
@@ -86,6 +86,17 @@ class IndexTrayWindow(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.content_detail_label)
+
+        self.worker_summary_label = QLabel("Keine aktiven Dokument-Worker")
+        self.worker_summary_label.setObjectName("PopupCaption")
+        layout.addWidget(self.worker_summary_label)
+
+        self.worker_output = QPlainTextEdit()
+        self.worker_output.setReadOnly(True)
+        self.worker_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.worker_output.setMaximumHeight(130)
+        self.worker_output.setPlaceholderText("Derzeit bearbeitet kein Worker eine Datei.")
+        layout.addWidget(self.worker_output)
 
         log_title = QLabel("Letzte 5 Logzeilen")
         log_title.setObjectName("PopupSectionTitle")
@@ -149,7 +160,8 @@ class IndexTrayWindow(QDialog):
         if processed:
             details.append(f"{processed} Dateien geprüft")
         current_path = str(state.get("current_path") or "")
-        if current_path:
+        assignments = state.get("worker_assignments") or []
+        if current_path and not assignments:
             details.append(f"Aktuell: {current_path}")
         error = str(state.get("error") or "")
         if error:
@@ -200,7 +212,44 @@ class IndexTrayWindow(QDialog):
         if error:
             details.append(f"Fehler: {error}")
         self.content_detail_label.setText("\n".join(details))
+        self._refresh_worker_state(state, active)
         return active
+
+    def _refresh_worker_state(self, state: dict, active: bool):
+        has_worker_telemetry = "worker_assignments" in state
+        assignments = state.get("worker_assignments") or []
+        if not isinstance(assignments, list):
+            assignments = []
+        active_workers = len(assignments)
+        worker_limit = max(active_workers, int(state.get("worker_limit") or 0))
+        if active and not has_worker_telemetry:
+            summary = "Index arbeitet · Workerdetails nach Neustart des Indexlaufs verfügbar"
+        elif active:
+            summary = f"{active_workers} von {worker_limit or '?'} Workern aktiv"
+            profile = str(state.get("resource_profile") or "")
+            if profile:
+                profile_labels = {
+                    "gentle": "Schonend", "balanced": "Ausgewogen", "fast": "Schnell"
+                }
+                summary += f" · Profil {profile_labels.get(profile, profile)}"
+        else:
+            summary = "Keine aktiven Dokument-Worker"
+        self.worker_summary_label.setText(summary)
+        lines = []
+        for assignment in assignments:
+            if not isinstance(assignment, dict):
+                continue
+            worker = int(assignment.get("worker") or 0)
+            path = str(assignment.get("path") or "")
+            if path:
+                lines.append(f"Worker {worker}: {path}")
+        if active and not has_worker_telemetry:
+            current_path = str(state.get("current_path") or "")
+            text = f"Zuletzt gemeldet: {current_path}" if current_path else ""
+        else:
+            text = "\n".join(lines)
+        if text != self.worker_output.toPlainText():
+            self.worker_output.setPlainText(text)
 
     def _refresh_log(self):
         try:

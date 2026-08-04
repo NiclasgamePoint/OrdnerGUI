@@ -11,8 +11,9 @@
 - Filter nach Fachthema, Jahr/Vorlagen und Dateityp
 - Relevanzranking, hervorgehobene Treffer, getrennte Pagination und Suchverlauf
 - Sofort nutzbarer SQLite-Katalog und progressive, jahresbasierte FTS5-Inhaltsshards
-- Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
-- Optionaler OCR-Fallback für gescannte PDFs
+- Parallele Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
+- Poppler-`pdftotext` mit isoliertem PyPDF2-Fallback und festem Zeitlimit
+- Zweistufiger OCR-Fallback für gescannte PDFs
 - Fortsetzbare Dokumentextraktion in einem unabhängigen Hintergrundprozess
 - Indexläufe laufen als eigener Prozess auch nach dem Schließen der GUI weiter
 - Sicherer Katalogaufbau, atomarer Wechsel und drei kleine Katalogsicherungen
@@ -47,8 +48,9 @@ app/
 ├── services/
 │   ├── filesystem_monitor.py     Hintergrundüberwachung der Datenquelle
 │   ├── content_index_job.py      Fortsetzbarer Inhaltsindexprozess
-│   ├── content_index_worker.py   Sequenzielle Extraktionspipeline
-│   ├── document_text_indexer.py  Formatunabhängige Textextraktion
+│   ├── content_index_worker.py   Parallele Extraktion, serieller Shard-Writer
+│   ├── document_text_indexer.py  Formatstrategien, PDF-Fallback und OCR
+│   ├── index_resource_policy.py  CPU-/RAM-basierte Workerbegrenzung
 │   ├── customer_recognition.py   Sichere automatische Kundenzuordnung
 │   └── document_converter.py     Optionale Legacy-Konvertierung
 └── gui/
@@ -80,6 +82,34 @@ Diagnose und Wartungsaktionen betreffen ausschließlich rekonstruierbare
 Indexdaten. Suchtrefferlimit, Dokumentinhaltssuche und parallele Shard-Suche
 befinden sich getrennt unter „Einstellungen → Suche“.
 
+Neue Installationen starten mit maximal 100 MB Dokumentgröße und fünf
+OCR-Seiten in der ersten Stufe. Liefert diese Stufe weniger als 500 Zeichen,
+werden bei Bedarf bis zu 25 Seiten verarbeitet. `pdftotext` wird für PDFs
+bevorzugt; liefert es keinen Text, läuft PyPDF2 in einem isolierten Prozess als
+Fallback. Für die PDF-Texterkennung gilt standardmäßig ein hartes Zeitlimit von
+45 Sekunden. Ein Timeout wird im normalen Lauf nicht sofort wiederholt. Solche
+Dokumente können später gezielt über „Fehler erneut versuchen“ freigegeben
+werden.
+
+Die Ressourcenprofile vergeben ungefähr 15 % (Schonend), 25 % (Ausgewogen)
+oder 60 % (Schnell) der logischen CPUs an Dokument-Worker. Zusätzlich bleiben
+mindestens 2 GB beziehungsweise 25 % des gesamten Arbeitsspeichers frei; pro
+Worker werden 256 MB eingeplant und insgesamt höchstens 20 Worker gestartet.
+Extraktionen laufen parallel, sämtliche SQLite-/FTS-Schreibvorgänge dagegen
+über einen einzelnen Writer. Dadurch können schwierige Dokumente andere
+Extraktionen nicht blockieren, ohne konkurrierende Schreibzugriffe auf einen
+Jahres-Shard zu erzeugen.
+
+Das rotierende Log `data/logs/content-index-process.log` enthält pro Dokument
+Dateityp, Größe, Seitenzahl, Parser, Status, Zeichenanzahl, Gesamt-/Parser-/OCR-
+Dauer und OCR-Seiten. Am Ende eines Laufabschnitts folgen Durchsatz,
+Parserverteilung, Timeout-Anzahl und die zehn langsamsten Dokumente; extrahierte
+Dokumenttexte werden nicht protokolliert.
+
+Das Index-Trayfenster zeigt während des Inhaltsaufbaus zusätzlich das aktive
+Ressourcenprofil, belegte und maximal verfügbare Worker sowie für jeden
+logischen Worker den aktuell bearbeiteten, kopierbaren Dateipfad.
+
 Nur der Katalog besitzt drei rotierende Sicherungen. Inhaltsshards sind
 rekonstruierbar. Beim ersten erfolgreichen Wechsel wird der alte v0.2-Index nach
 `data/index/legacy-v0.2/` verschoben. `data/customers.db` bleibt davon getrennt
@@ -108,9 +138,13 @@ Alternative Startskripte:
 - Windows CMD: `start.bat`
 - Windows PowerShell: `start.ps1`
 
-Optionale Systemprogramme:
+Werkzeuge:
 
-- Tesseract und Poppler für OCR
+- Release-Builds enthalten Poppler (`pdftotext` und `pdftoppm`) für Windows x64,
+  macOS ARM64/x64 und Linux x64. Ein Quellstart nutzt alternativ eine vorhandene
+  Poppler-Installation und fällt für PDF-Text auf PyPDF2 zurück.
+- Tesseract bleibt für OCR erforderlich; ohne Tesseract funktioniert die
+  normale PDF-Texterkennung weiterhin.
 - LibreOffice sowie `catdoc` oder `antiword` für alte Office-Dateien
 
 Fehlende optionale Programme verhindern den normalen Start nicht.
@@ -125,7 +159,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
 
 Die Tests prüfen unter anderem Katalogaktivierung, Queue-Fortsetzung,
 Jahres-Shard-Rollover, progressive Mehr-Shard-Suche, inkrementelle Indexierung,
-Diagnosewerte, Dateisystemänderungen, Viewer und Kunden-CRUD.
+Ressourcenprofile, parallele Extraktion, Timeout-Reparatur, PDF-Fallback,
+stufenweise OCR, Diagnosewerte, Dateisystemänderungen, Viewer und Kunden-CRUD.
 
 ## Kundenvorschläge und Kundenübersicht
 
