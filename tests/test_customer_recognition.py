@@ -185,6 +185,7 @@ class CustomerRecognitionTests(unittest.TestCase):
         options = CustomerRecognitionOptions(
             enabled=True,
             email_blacklist="ICH@EXAMPLE.DE",
+            phone_blacklist="040 / 12 34 56",
             name_blacklist="Eigener Name",
             address_blacklist="Eigenweg 7 12345 Hamburg",
             text_blacklist="internes kennwort",
@@ -205,7 +206,7 @@ class CustomerRecognitionTests(unittest.TestCase):
         filtered = RecognitionBlacklist(options).filter_suggestion(suggestion)
 
         self.assertEqual(filtered.email, "")
-        self.assertEqual(filtered.phone, "040-123456")
+        self.assertEqual(filtered.phone, "")
         self.assertEqual(filtered.street, "")
         self.assertEqual(filtered.postal_code, "")
         self.assertEqual(len(filtered.contacts), 1)
