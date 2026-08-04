@@ -45,6 +45,7 @@ from app.core.customer_repository import CustomerRepository
 from app.core.catalog_index import CatalogIndexManager, CatalogStore
 from app.core.content_index import ContentStateRepository, ShardRepository
 from app.core.index_manager import IndexManager
+from app.core.index_job_state import read_state
 from app.core.search_models import (
     RecentCustomerHistory,
     SearchFilters,
@@ -360,6 +361,7 @@ class MainWindow(QMainWindow):
             self.index_tray_window = IndexTrayWindow(
                 self.index_controller.state_dir,
                 parent=self,
+                content_state_dir=self.content_job_controller.state_dir,
             )
             self.index_tray_window.cancelRequested.connect(
                 self.cancel_background_indexing
@@ -1107,6 +1109,10 @@ class MainWindow(QMainWindow):
         if self.index_controller.is_active():
             self.index_controller.cancel()
             self.status_bar.set_text("Indexierung wird abgebrochen …")
+        content_state = read_state(self.content_job_controller.state_dir)
+        if str(content_state.get("status") or "") == "running":
+            self.content_job_controller.cancel()
+            self.status_bar.set_text("Dateiindizierung wird abgebrochen …")
 
     def check_and_index(self):
         if self.index_controller.is_active():
