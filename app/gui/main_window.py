@@ -662,7 +662,7 @@ class MainWindow(QMainWindow):
             return
         configurations = (
             (self.domain_filter, "Alle Themen", facets.get("domains", [])),
-            (self.year_filter, "Alle Jahre/Vorlagen", facets.get("years", [])),
+            (self.year_filter, "Alle Jahre", facets.get("years", [])),
             (self.file_type_filter, "Alle Dateitypen", facets.get("file_types", [])),
         )
         for combo, empty_label, values in configurations:

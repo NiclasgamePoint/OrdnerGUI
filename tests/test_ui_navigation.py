@@ -19,6 +19,7 @@ from app.gui.dialogs.customer_editor import CustomerEditorDialog
 from app.gui.navigation import NavigationController
 from app.gui.pages import CustomerPage, FolderPage, SearchPage
 from app.gui.settings_popup import SettingsPopup
+from app.gui.widgets.search_filter_popup import SearchFilterPopup
 
 
 class UiNavigationTests(unittest.TestCase):
@@ -39,6 +40,12 @@ class UiNavigationTests(unittest.TestCase):
         navigator.back()
         self.assertEqual(navigator.current.page, "search")
         self.assertFalse(navigator.can_go_back)
+
+    def test_search_filter_labels_year_filter_without_templates(self):
+        popup = SearchFilterPopup()
+        self.assertEqual(popup.year_combo.accessibleName(), "Jahre")
+        self.assertNotIn("Vorlagen", popup.year_combo.accessibleDescription())
+        popup.close()
 
     def test_folder_page_path_key_normalizes_pathlib_variants(self):
         with TemporaryDirectory() as directory:
