@@ -1,7 +1,9 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+from app.services import customer_suggestion as customer_suggestion_module
 from app.core.customer_models import Contact
 from app.core.customer_recognition_models import ExtractionEvidence
 from app.services.customer_suggestion import (
@@ -11,6 +13,103 @@ from app.services.customer_suggestion import (
 
 
 class CustomerSuggestionTests(unittest.TestCase):
+    def test_first_name_in_customer_field_sets_automatic_private_person(self):
+        suggestion = CustomerSuggestionService().suggest_from_text(
+            Path("/tmp/Müller, Berlin"),
+            "Müller",
+            "Kunde: MAX Müller",
+        )
+
+        entity_evidence = next(
+            item for item in suggestion.evidence if item.field_name == "entity_type"
+        )
+        self.assertEqual(suggestion.entity_type, "Privatperson")
+        self.assertTrue(entity_evidence.automatic)
+        self.assertEqual(entity_evidence.rule, "Vornamenliste")
+
+    def test_unicode_hyphenated_and_multiple_first_names_match_exactly(self):
+        service = CustomerSuggestionService()
+        for customer_name in (
+            "ÄNEAS Müller",
+            "Jean-Pierre Müller",
+            "Max Paul Müller",
+        ):
+            with self.subTest(customer_name=customer_name):
+                suggestion = service.suggest_from_text(
+                    Path("/tmp/Müller, Berlin"),
+                    "Müller",
+                    f"Auftraggeber: {customer_name}",
+                )
+                entity_evidence = next(
+                    item for item in suggestion.evidence
+                    if item.field_name == "entity_type"
+                )
+                self.assertEqual(entity_evidence.rule, "Vornamenliste")
+
+    def test_first_name_substrings_and_contact_people_do_not_use_name_list(self):
+        service = CustomerSuggestionService()
+        partial = service.suggest_from_text(
+            Path("/tmp/Müller, Berlin"),
+            "Müller",
+            "Kunde: Maximander Müller",
+        )
+        contact = service.suggest_from_text(
+            Path("/tmp/Musterbetrieb, Berlin"),
+            "Musterbetrieb",
+            "Ansprechpartner: Herr Max Müller",
+        )
+
+        for suggestion in (partial, contact):
+            entity_evidence = next(
+                item for item in suggestion.evidence
+                if item.field_name == "entity_type"
+            )
+            self.assertNotEqual(entity_evidence.rule, "Vornamenliste")
+
+    def test_legal_form_and_organization_take_precedence_over_first_name(self):
+        service = CustomerSuggestionService()
+        company = service.suggest_from_text(
+            Path("/tmp/Max Müller GmbH, Berlin"),
+            "Max Müller GmbH",
+            "Kunde: Max Müller",
+        )
+        organization = service.suggest_from_text(
+            Path("/tmp/Kita Max, Berlin"),
+            "Kita Max",
+            "Kunde: Max Müller",
+        )
+
+        self.assertEqual(company.entity_type, "Unternehmen")
+        self.assertEqual(organization.entity_type, "Organisation")
+        self.assertTrue(all(
+            item.rule != "Vornamenliste"
+            for suggestion in (company, organization)
+            for item in suggestion.evidence
+            if item.field_name == "entity_type"
+        ))
+
+    def test_missing_first_name_resource_falls_back_without_error(self):
+        customer_suggestion_module.load_first_names.cache_clear()
+        try:
+            with patch.object(
+                customer_suggestion_module,
+                "FIRST_NAMES_PATH",
+                Path("/definitely/missing/vornamen.txt"),
+            ):
+                suggestion = CustomerSuggestionService().suggest_from_text(
+                    Path("/tmp/Müller, Berlin"),
+                    "Müller",
+                    "Kunde: Max Müller",
+                )
+            entity_evidence = next(
+                item for item in suggestion.evidence
+                if item.field_name == "entity_type"
+            )
+            self.assertEqual(suggestion.entity_type, "Privatperson")
+            self.assertEqual(entity_evidence.rule, "Kundentyp-Regeln")
+        finally:
+            customer_suggestion_module.load_first_names.cache_clear()
+
     def test_address_fields_from_different_blocks_are_not_combined(self):
         service = CustomerSuggestionService()
         suggestion = CustomerSuggestion()

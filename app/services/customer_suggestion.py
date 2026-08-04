@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -104,6 +105,28 @@ GENERIC_EMAIL_NAMES = {
     "architekturbuero",
     "architekturbüro",
 }
+
+FIRST_NAMES_PATH = Path(__file__).resolve().parent.parent / "resources" / "vornamen.txt"
+CUSTOMER_NAME_RULES = {
+    "persönliche Empfängeranrede",
+    "kundenseitige Vertragsrolle",
+    "Kundenname aus Dokumentfeld",
+    "Name im frühen Empfängeradressblock",
+}
+NAME_WORD_RE = re.compile(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", re.UNICODE)
+
+
+@lru_cache(maxsize=1)
+def load_first_names() -> frozenset[str]:
+    """Load the bundled name list once; recognition still works if it is absent."""
+    try:
+        return frozenset(
+            line.strip().casefold()
+            for line in FIRST_NAMES_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    except (OSError, UnicodeError):
+        return frozenset()
 
 
 def normalize_name_part(value: str) -> str:
@@ -225,10 +248,12 @@ class CustomerSuggestionService:
         (
             suggestion.entity_type,
             entity_type_confidence,
+            entity_type_rule,
         ) = self._infer_entity_type_with_confidence(
             suggestion.display_name,
             folder_path.name,
             "\n".join(str(item.get("content") or "")[:4_000] for item in eligible),
+            suggestion.evidence,
         )
         if entity_type_confidence >= 0.9 and not any(
             item.field_name == "contact_name" and item.automatic
@@ -268,7 +293,7 @@ class CustomerSuggestionService:
         suggestion.evidence.extend([
             self._evidence(
                 "entity_type", suggestion.entity_type, identity_source,
-                folder_path.name, 0, "Kundentyp-Regeln",
+                folder_path.name, 0, entity_type_rule,
                 entity_type_confidence,
             ),
             self._evidence(
@@ -368,8 +393,14 @@ class CustomerSuggestionService:
                 hinted = NAME_HINT_RE.match(line)
                 if hinted:
                     name = self._clean_name_candidate(hinted.group(1))
+                    if name:
+                        name_rule = "Kundenname aus Dokumentfeld"
+                        name_confidence = 0.95
             if not name and RECIPIENT_CONTEXT_RE.search(line) and index + 1 < len(lines):
                 name = self._clean_name_candidate(lines[index + 1])
+                if name:
+                    name_rule = "Kundenname aus Dokumentfeld"
+                    name_confidence = 0.94
             if excluded_name_context and not salutation and not role_match:
                 name = ""
             email_match = EMAIL_RE.search(line)
@@ -695,6 +726,7 @@ class CustomerSuggestionService:
             display_name,
             project_label,
             document_text,
+            [],
         )[0]
 
     def _infer_entity_type_with_confidence(
@@ -702,21 +734,41 @@ class CustomerSuggestionService:
         display_name: str,
         project_label: str = "",
         document_text: str = "",
-    ) -> tuple[str, float]:
+        name_evidence: list[ExtractionEvidence] | None = None,
+    ) -> tuple[str, float, str]:
         label_name = project_label.split(",", 1)[0].strip() if project_label else ""
         name_scope = label_name or display_name
         lowered = name_scope.casefold()
         if self._contains_company_form(lowered):
-            return "Unternehmen", 0.98
+            return "Unternehmen", 0.98, "Kundentyp-Regeln"
         if any(marker in lowered for marker in ORGANIZATION_MARKERS):
-            return "Organisation", 0.96
+            return "Organisation", 0.96, "Kundentyp-Regeln"
+        if self._firstname_in_customer_name_evidence(name_evidence or []):
+            return "Privatperson", 0.97, "Vornamenliste"
         hinted_name = NAME_HINT_RE.search(document_text)
         if PERSON_HINT_RE.search(document_text) or (
             hinted_name is not None
             and bool(self._clean_name_candidate(hinted_name.group(1)))
         ):
-            return "Privatperson", 0.95
-        return "Privatperson", 0.55
+            return "Privatperson", 0.95, "Kundentyp-Regeln"
+        return "Privatperson", 0.55, "Kundentyp-Regeln"
+
+    @staticmethod
+    def _firstname_in_customer_name_evidence(
+        evidence: list[ExtractionEvidence],
+    ) -> bool:
+        first_names = load_first_names()
+        if not first_names:
+            return False
+        return any(
+            item.field_name == "contact_name"
+            and item.rule in CUSTOMER_NAME_RULES
+            and any(
+                word.casefold() in first_names
+                for word in NAME_WORD_RE.findall(item.value)
+            )
+            for item in evidence
+        )
 
     def _clean_phone_candidate(self, value: str, line: str) -> str:
         if (
