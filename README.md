@@ -10,13 +10,13 @@
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
 - Filter nach Fachthema, Jahr/Vorlagen und Dateityp
 - Relevanzranking, hervorgehobene Treffer, getrennte Pagination und Suchverlauf
-- SQLite-Metadatenindex und FTS5-Volltextindex
+- Sofort nutzbarer SQLite-Katalog und progressive, jahresbasierte FTS5-Inhaltsshards
 - Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
 - Optionaler OCR-Fallback für gescannte PDFs
-- Inkrementelle Indexierung im Hintergrund
+- Fortsetzbare Dokumentextraktion in einem unabhängigen Hintergrundprozess
 - Indexläufe laufen als eigener Prozess auch nach dem Schließen der GUI weiter
-- Sicherer Indexaufbau in einer temporären Datenbank, atomarer Wechsel und drei Sicherungen
-- Automatische, plattformübergreifende Überwachung der Datenquelle
+- Sicherer Katalogaufbau, atomarer Wechsel und drei kleine Katalogsicherungen
+- Native Dateisystemüberwachung plus täglicher vollständiger Sicherheitsabgleich
 - Indexdiagnose mit Integrität, Laufzeit, Datei-/Ordnerzahlen und Extraktionsfehlern
 - Optionale automatische Kundenerkennung für `Dienstleistung/Jahr/Nachname, Ort` ab 2016
 - Persistente Blacklists und Prüfwarteschlange für mehrdeutige Kundenzuordnungen
@@ -34,8 +34,11 @@
 app/
 ├── core/
 │   ├── config.py                 Konfiguration und persistente Optionen
-│   ├── index_manager.py          Indexierung, Extraktion und Suche
-│   ├── index_store.py            Staging, Validierung und Indexgenerationen
+│   ├── index_manager.py          Gemeinsame Metadaten- und Legacy-Suchoperationen
+│   ├── catalog_index.py          Schneller Katalogaufbau und Kataloggenerationen
+│   ├── content_index.py          Queue, komprimierte FTS-Shards und Wartung
+│   ├── content_search.py         Progressive globale Mehr-Shard-Suche
+│   ├── index_layout.py           Zentrale Pfade der geteilten Indexstruktur
 │   ├── index_diagnostics.py      Lesbare Index-Zustandsberichte
 │   ├── search_models.py          Filter, Seitenmodell und Suchverlauf
 │   ├── customer_models.py        Kunden- und Kontaktmodelle
@@ -43,6 +46,9 @@ app/
 │   └── customer_repository.py    Separate Kunden-Datenbank
 ├── services/
 │   ├── filesystem_monitor.py     Hintergrundüberwachung der Datenquelle
+│   ├── content_index_job.py      Fortsetzbarer Inhaltsindexprozess
+│   ├── content_index_worker.py   Sequenzielle Extraktionspipeline
+│   ├── document_text_indexer.py  Formatunabhängige Textextraktion
 │   ├── customer_recognition.py   Sichere automatische Kundenzuordnung
 │   └── document_converter.py     Optionale Legacy-Konvertierung
 └── gui/
@@ -58,7 +64,24 @@ app/
     └── theme.py
 ```
 
-`data/index.db` ist austauschbar und kann jederzeit neu erzeugt werden. `data/customers.db` enthält die dauerhaften Kundendaten. Bei deaktivierter Kundenerkennung bleibt sie durch Indexläufe unverändert; bei aktivierter Erkennung werden ausschließlich leere Felder, Dienstleistungen und Projektordner ergänzt. Manuell gepflegte Werte werden nicht überschrieben.
+Die abgeleiteten Indexdaten liegen unter `data/index/`: `catalog/active.db`
+enthält ausschließlich Datei-, Ordner- und Projektmetadaten. Extrahierte Texte
+liegen zlib-komprimiert in höchstens ungefähr 1 GiB großen Jahres-Shards unter
+`content/shards/`; `content/state.db` hält die fortsetzbare Warteschlange. Der
+Katalog wird zuerst aktiviert, sodass Datei- und Ordnersuche sofort verfügbar
+sind. Die Dokumentinhaltssuche zeigt während des Hintergrundaufbaus ihren
+Abdeckungsgrad und liefert Treffer aus allen bereits fertigen Shards.
+
+Nur der Katalog besitzt drei rotierende Sicherungen. Inhaltsshards sind
+rekonstruierbar. Beim ersten erfolgreichen Wechsel wird der alte v0.2-Index nach
+`data/index/legacy-v0.2/` verschoben. `data/customers.db` bleibt davon getrennt
+und enthält die dauerhaften Kundendaten. Manuell gepflegte Werte werden durch
+die zweistufige Kundenerkennung nicht überschrieben.
+
+Der Git-Tag `v0.2` markiert den unveränderten Stand vor der Indexaufteilung.
+Für eine Rückkehr sollte die Anwendung auf diesen Tag zurückgesetzt und der
+archivierte `index.db` aus `data/index/legacy-v0.2/` wieder nach `data/` kopiert
+werden; die Kundendatenbank ist davon nicht betroffen.
 
 ## Start
 
@@ -79,7 +102,6 @@ Alternative Startskripte:
 
 Optionale Systemprogramme:
 
-- `ripgrep` als Textsuch-Fallback
 - Tesseract und Poppler für OCR
 - LibreOffice sowie `catdoc` oder `antiword` für alte Office-Dateien
 
@@ -93,7 +115,9 @@ Für reproduzierbare Builds steht zusätzlich `requirements-lock.txt` mit exakt 
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Die Tests prüfen unter anderem generische Fachthemen, inkrementelle Indexierung, Diagnosewerte, Filter/Pagination, Dateisystemänderungen, Viewer und Kunden-CRUD.
+Die Tests prüfen unter anderem Katalogaktivierung, Queue-Fortsetzung,
+Jahres-Shard-Rollover, progressive Mehr-Shard-Suche, inkrementelle Indexierung,
+Diagnosewerte, Dateisystemänderungen, Viewer und Kunden-CRUD.
 
 ## Kundenvorschläge und Kundenübersicht
 

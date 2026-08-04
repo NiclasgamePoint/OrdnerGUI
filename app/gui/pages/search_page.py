@@ -66,6 +66,10 @@ class _ResultSection(QWidget):
                 row.openPathRequested.connect(self.openPathRequested.emit)
             self._layout.addWidget(row)
 
+    def set_note(self, message: str):
+        self._message.setText(message)
+        self._message.setVisible(bool(message))
+
     def _clear_rows(self):
         for row in self._rows:
             self._layout.removeWidget(row)
@@ -242,3 +246,20 @@ class SearchPage(QWidget):
             for document in documents
         ]
         self.document_section.set_rows(rows, total)
+
+    def set_document_coverage(self, coverage):
+        if coverage is None or coverage.complete:
+            self.document_section.set_note("")
+            return
+        percentage = (
+            round(coverage.completed_documents * 100 / coverage.total_documents)
+            if coverage.total_documents else 0
+        )
+        suffix = (
+            f" · {coverage.unavailable_shards} Shards vorübergehend nicht verfügbar"
+            if coverage.unavailable_shards else ""
+        )
+        self.document_section.set_note(
+            f"Dokumentinhalte zu {percentage} % indexiert – "
+            f"Ergebnisse können unvollständig sein{suffix}."
+        )

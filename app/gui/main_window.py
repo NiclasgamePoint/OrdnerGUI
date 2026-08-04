@@ -25,8 +25,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import (
+    CATALOG_DB_FILE,
     CUSTOMER_DB_FILE,
     DB_FILE,
+    INDEX_LAYOUT,
     WINDOW_HEIGHT,
     WINDOW_TITLE,
     WINDOW_WIDTH,
@@ -39,13 +41,9 @@ from app.core.config import (
     save_index_source,
 )
 from app.core.customer_repository import CustomerRepository
-from app.core.index_diagnostics import IndexDiagnosticsService
+from app.core.catalog_index import CatalogIndexManager, CatalogStore
+from app.core.content_index import ContentStateRepository, ShardRepository
 from app.core.index_manager import IndexManager
-from app.core.index_store import (
-    activate_index,
-    create_restore_build,
-    validate_index,
-)
 from app.core.search_models import (
     RecentCustomerHistory,
     SearchFilters,
@@ -66,6 +64,7 @@ from app.gui.theme import ThemeManager
 from app.gui.widgets import AppHeader, IndexStatusBar, SearchFilterPopup
 from app.gui.workers import (
     BlacklistCleanupWorker,
+    ContentJobController,
     IndexJobController,
     SearchWorker,
     SettingsDataWorker,
@@ -81,6 +80,14 @@ LOGGER = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """Application shell coordinating pages, search, settings and background jobs."""
 
+    def _open_active_index(self):
+        if CATALOG_DB_FILE.exists():
+            return CatalogIndexManager(
+                CATALOG_DB_FILE,
+                options=self.index_options,
+            )
+        return IndexManager(DB_FILE, options=self.index_options)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
@@ -89,14 +96,22 @@ class MainWindow(QMainWindow):
 
         self.index_options = load_index_options()
         self.recognition_options = load_customer_recognition_options()
-        self.index_controller = IndexJobController(DB_FILE, parent=self)
+        self.catalog_store = CatalogStore(INDEX_LAYOUT)
+        self.index_controller = IndexJobController(
+            CATALOG_DB_FILE,
+            state_dir=INDEX_LAYOUT.jobs_dir / "catalog",
+            customer_database_path=CUSTOMER_DB_FILE,
+            parent=self,
+        )
         self.index_controller.adopt_running_job()
-        self.index_manager = IndexManager(DB_FILE, options=self.index_options)
+        self.content_job_controller = ContentJobController(
+            INDEX_LAYOUT, CUSTOMER_DB_FILE, parent=self
+        )
+        self.index_manager = self._open_active_index()
         self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
         self.index_source = get_configured_index_source()
         self.pending_index_source: Path | None = None
         self.theme_manager = ThemeManager()
-        self.diagnostics_service = IndexDiagnosticsService()
         self.settings_popup: SettingsPopup | None = None
         self.settings_data_worker: SettingsDataWorker | None = None
         self.statistics_worker: StatisticsWorker | None = None
@@ -109,6 +124,11 @@ class MainWindow(QMainWindow):
         self.source_reconnect_timer = QTimer(self)
         self.source_reconnect_timer.setInterval(10_000)
         self.source_reconnect_timer.timeout.connect(self._try_reconnect_source)
+        self.catalog_reconciliation_timer = QTimer(self)
+        self.catalog_reconciliation_timer.setInterval(24 * 60 * 60 * 1000)
+        self.catalog_reconciliation_timer.timeout.connect(
+            self._start_daily_catalog_reconciliation
+        )
 
         self.search_generation = 0
         self.search_workers: set[SearchWorker] = set()
@@ -117,6 +137,7 @@ class MainWindow(QMainWindow):
             "folders": None,
             "text": None,
         }
+        self.content_search_coverage = None
         self.search_history = SearchHistory()
         self.search_preferences = SearchPreferences()
         self.recent_customer_history = RecentCustomerHistory(maximum=5)
@@ -133,12 +154,41 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._init_system_tray()
         self._connect_signals()
+        self.content_job_controller.progress.connect(self._on_content_progress)
+        self.content_job_controller.finished.connect(self._on_content_finished)
         self._refresh_search_facets()
         self.apply_theme()
         self.navigator.reset("search")
         self._show_initial_customers()
         self._refresh_statistics()
+        if CATALOG_DB_FILE.exists():
+            self.content_job_controller.start_or_adopt()
         self.initialization_timer.start(0)
+
+    def _on_content_progress(self, state: dict):
+        if str(state.get("status") or "") != "running":
+            return
+        completed = int(state.get("completed_documents") or 0)
+        total = int(state.get("total_documents") or 0)
+        percentage = round(completed * 100 / total) if total else 0
+        self.status_bar.set_text(
+            f"Katalog aktiv ✓ · Dokumentinhalte werden indexiert: {percentage} %"
+        )
+
+    def _on_content_finished(self, state: dict):
+        status = str(state.get("status") or "")
+        if status == "completed":
+            failed = int(state.get("failed_documents") or 0)
+            self.status_bar.set_text(
+                "Dokumentinhaltsindex vollständig ✓"
+                + (f" · {failed} Fehler" if failed else "")
+            )
+            self._refresh_statistics()
+            self._refresh_customer_results_only()
+        elif status == "error":
+            self.status_bar.set_text(
+                f"Katalog aktiv ✓ · Inhaltsindexfehler: {state.get('error') or 'unbekannt'}"
+            )
 
     def _initialize_data_source(self):
         if not has_configured_index_source():
@@ -436,6 +486,7 @@ class MainWindow(QMainWindow):
         self.navigator.navigate("search")
         query = text.strip()
         self.search_counts = {"customers": None, "folders": None, "text": None}
+        self.content_search_coverage = None
         if not query:
             self._show_initial_customers()
             return
@@ -465,6 +516,7 @@ class MainWindow(QMainWindow):
         self.navigator.navigate("search")
         self.header.set_history(self.search_history.add(query))
         self.search_counts = {"customers": None, "folders": None, "text": None}
+        self.content_search_coverage = None
         self.search_page.prepare_search()
         self.status_bar.set_text("Durchsuche Kunden und Ordner parallel …")
         self._launch_visible_searches(query, self.search_generation)
@@ -472,7 +524,7 @@ class MainWindow(QMainWindow):
     def _launch_visible_searches(self, query: str, generation: int):
         for category in ("customers", "folders", "text"):
             worker = SearchWorker(
-                DB_FILE,
+                self.index_manager.db_path,
                 generation,
                 category,
                 query,
@@ -481,6 +533,7 @@ class MainWindow(QMainWindow):
                 1,
                 self.index_options.result_limit,
                 CUSTOMER_DB_FILE,
+                index_layout=(INDEX_LAYOUT if CATALOG_DB_FILE.exists() else None),
             )
             worker.completed.connect(self._on_search_completed)
             worker.finished.connect(
@@ -520,6 +573,8 @@ class MainWindow(QMainWindow):
                 self.search_page.set_folders(page.items, page.total)
             elif category == "text":
                 self.search_page.set_documents(page.items, page.total)
+                self.content_search_coverage = page.coverage
+                self.search_page.set_document_coverage(page.coverage)
         self._update_search_status()
 
     def _update_search_status(self):
@@ -532,7 +587,17 @@ class MainWindow(QMainWindow):
         self.status_bar.set_text(
             f"Kunden: {customer_text} · Ordner: {folder_text} · "
             f"Dokumente: {document_text}"
+            + self._content_coverage_status()
         )
+
+    def _content_coverage_status(self) -> str:
+        coverage = self.content_search_coverage
+        if coverage is None or coverage.complete or not coverage.total_documents:
+            return ""
+        percentage = round(
+            coverage.completed_documents * 100 / coverage.total_documents
+        )
+        return f" · Inhaltsindex: {percentage} %"
 
     def _cancel_outdated_searches(self):
         for worker in tuple(self.search_workers):
@@ -692,8 +757,9 @@ class MainWindow(QMainWindow):
             self.settings_data_worker.requestInterruption()
             self.settings_data_worker.wait()
         self.settings_data_worker = SettingsDataWorker(
-            DB_FILE,
+            self.index_manager.db_path,
             CUSTOMER_DB_FILE,
+            INDEX_LAYOUT if CATALOG_DB_FILE.exists() else None,
             parent=self,
         )
         self.settings_data_worker.completed.connect(self._on_settings_data_loaded)
@@ -718,7 +784,12 @@ class MainWindow(QMainWindow):
             return
         self.statistics_refresh_pending = False
         self.search_page.set_statistics(None)
-        worker = StatisticsWorker(DB_FILE, CUSTOMER_DB_FILE, parent=self)
+        worker = StatisticsWorker(
+            self.index_manager.db_path,
+            CUSTOMER_DB_FILE,
+            INDEX_LAYOUT.content_state_path if CATALOG_DB_FILE.exists() else None,
+            parent=self,
+        )
         worker.completed.connect(self.search_page.set_statistics)
         worker.finished.connect(self._release_statistics_worker)
         self.statistics_worker = worker
@@ -881,7 +952,7 @@ class MainWindow(QMainWindow):
         if self.settings_popup is not None:
             self.settings_popup.close()
         dialog = CustomerRecognitionReviewDialog(
-            DB_FILE,
+            self.index_manager.db_path,
             CUSTOMER_DB_FILE,
             self.recognition_options,
             parent=self,
@@ -1139,6 +1210,7 @@ class MainWindow(QMainWindow):
             self._show_customer_recognition_result(state)
             if self.settings_popup is not None:
                 self._refresh_settings_popup_data()
+            self.content_job_controller.start_or_adopt()
         if status in {"completed", "no_changes"} and self.settings_popup is not None:
             if status == "no_changes":
                 self._refresh_settings_popup_data()
@@ -1173,14 +1245,23 @@ class MainWindow(QMainWindow):
             search_worker.wait()
         self.index_manager.close()
         try:
-            activate_index(DB_FILE, build_path)
+            self.catalog_store.activate(build_path)
         finally:
-            self.index_manager = IndexManager(
-                DB_FILE,
-                options=self.index_options,
-            )
+            self.index_manager = self._open_active_index()
+            self.customer_page.index_path = self.index_manager.db_path
+        self._reconcile_content_queue()
         self._refresh_search_facets()
         self._refresh_statistics()
+
+    def _reconcile_content_queue(self):
+        if not isinstance(self.index_manager, CatalogIndexManager):
+            return
+        with ContentStateRepository.open_recoverable(INDEX_LAYOUT) as state:
+            self.index_manager.reconcile_content_state(
+                state,
+                ShardRepository(INDEX_LAYOUT, state),
+                self.recognition_options.preferred_patterns,
+            )
 
     def _reload_active_index(self):
         self.search_generation += 1
@@ -1188,7 +1269,8 @@ class MainWindow(QMainWindow):
         for search_worker in tuple(self.search_workers):
             search_worker.wait()
         self.index_manager.close()
-        self.index_manager = IndexManager(DB_FILE, options=self.index_options)
+        self.index_manager = self._open_active_index()
+        self.customer_page.index_path = self.index_manager.db_path
         self._refresh_search_facets()
         self._refresh_statistics()
 
@@ -1214,6 +1296,13 @@ class MainWindow(QMainWindow):
             )
         )
         self.filesystem_monitor.start()
+        self.catalog_reconciliation_timer.start()
+
+    def _start_daily_catalog_reconciliation(self):
+        if self.index_controller.is_active() or not self.index_source.exists():
+            return
+        self.status_bar.set_text("Täglicher Katalogabgleich wird gestartet …")
+        self._start_incremental_filesystem_sync()
 
     def _on_filesystem_changes(self, changes):
         if self.index_controller.is_active():
@@ -1235,11 +1324,17 @@ class MainWindow(QMainWindow):
         )
 
     def on_index_options_changed(self, options):
+        indexing_contract_changed = (
+            self.index_options.catalog_fingerprint() != options.catalog_fingerprint()
+            or self.index_options.content_fingerprint() != options.content_fingerprint()
+        )
         self.index_options = options
         self.index_manager.options = options
         save_index_options(options)
         self.status_bar.set_text("Indexeinstellungen gespeichert")
         self._start_filesystem_monitor()
+        if indexing_contract_changed:
+            self._start_incremental_filesystem_sync()
 
     def on_load_backup_requested(self, backup_path_value: str):
         if self.index_controller.is_active():
@@ -1250,12 +1345,19 @@ class MainWindow(QMainWindow):
             )
             return
         try:
-            build_path = create_restore_build(
-                DB_FILE,
-                Path(backup_path_value),
+            build_path = self.catalog_store.create_restore_build(
+                Path(backup_path_value)
             )
-            metadata = validate_index(build_path)
+            metadata = {}
+            connection = CatalogIndexManager(build_path, initialize=False)
+            try:
+                metadata = dict(
+                    connection.conn.execute("SELECT key,value FROM index_metadata")
+                )
+            finally:
+                connection.close()
             self._activate_built_index(build_path)
+            self.content_job_controller.start_or_adopt()
             restored_root = metadata.get("index_root", "")
             if restored_root:
                 self.index_source = Path(restored_root)

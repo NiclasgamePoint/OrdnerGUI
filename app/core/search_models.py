@@ -64,10 +64,21 @@ class SearchPage:
     total: int
     page: int
     page_size: int
+    coverage: "SearchCoverage | None" = None
 
     @property
     def page_count(self) -> int:
         return max(1, (self.total + self.page_size - 1) // self.page_size)
+
+
+@dataclass(frozen=True)
+class SearchCoverage:
+    completed_documents: int
+    total_documents: int
+    completed_bytes: int
+    total_bytes: int
+    complete: bool
+    unavailable_shards: int = 0
 
 
 class SearchHistory:

@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
+import sqlite3
 import time
 import unittest
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from app.core.index_job_state import read_state, write_state
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
 from app.core.index_manager import IndexManager
+from app.core.index_layout import IndexLayout
 from app.gui.workers.index_job_controller import IndexJobController
 from app.services.index_job import IndexJobRunner
 
@@ -52,6 +54,77 @@ class DetachedIndexJobTests(unittest.TestCase):
             manager = IndexManager(active, initialize=False)
             self.assertEqual(manager.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 2)
             manager.close()
+
+    def test_split_job_activates_catalog_then_prepares_content_queue(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            project = source / "DEKRA" / "2026" / "Muster"
+            project.mkdir(parents=True)
+            (project / "Angebot.txt").write_text("Dokumentinhalt", encoding="utf-8")
+            layout = IndexLayout(root / "data" / "index")
+            runner = IndexJobRunner(
+                "split-test",
+                layout.catalog_path,
+                source,
+                layout.jobs_dir / "catalog",
+                True,
+                root / "data" / "customers.db",
+            )
+
+            with patch.object(runner, "_start_content_job"):
+                result = runner.run()
+
+            self.assertEqual(result, 0)
+            self.assertTrue(layout.catalog_path.exists())
+            self.assertTrue(layout.content_state_path.exists())
+            connection = sqlite3.connect(layout.catalog_path)
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            connection.close()
+            self.assertNotIn("file_content_fts", tables)
+            state = sqlite3.connect(layout.content_state_path)
+            self.assertEqual(
+                state.execute("SELECT COUNT(*) FROM documents").fetchone()[0], 1
+            )
+            state.close()
+
+    def test_split_job_archives_legacy_indexes_only_after_new_catalog_exists(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            layout = IndexLayout(root / "data" / "index")
+            layout.ensure_directories()
+            legacy = root / "data" / "index.db"
+            backup = root / "data" / "index.backup.1.db"
+            legacy.write_bytes(b"legacy")
+            backup.write_bytes(b"backup")
+            runner = IndexJobRunner(
+                "archive-test",
+                layout.catalog_path,
+                root,
+                layout.jobs_dir / "catalog",
+                True,
+                root / "data" / "customers.db",
+            )
+
+            runner._archive_legacy_index()
+            self.assertTrue(legacy.exists())
+            layout.catalog_path.parent.mkdir(parents=True, exist_ok=True)
+            layout.catalog_path.write_bytes(b"catalog")
+            runner._archive_legacy_index()
+
+            self.assertFalse(legacy.exists())
+            self.assertFalse(backup.exists())
+            self.assertEqual(
+                (layout.legacy_dir / "index.db").read_bytes(), b"legacy"
+            )
+            self.assertEqual(
+                (layout.legacy_dir / "index.backup.1.db").read_bytes(), b"backup"
+            )
 
     def test_detached_runner_recognizes_customers_after_activation(self):
         with TemporaryDirectory() as directory:

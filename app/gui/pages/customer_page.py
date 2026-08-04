@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.customer_models import Customer, CustomerJournalEntry, CustomerProject
-from app.core.config import DB_FILE, load_customer_recognition_options
+from app.core.config import get_current_index_path, load_customer_recognition_options
 from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs import CustomerDataSuggestionsDialog, CustomerEditorDialog
 from app.gui.widgets.buttons import AppButton, CountBadgeButton
@@ -118,12 +118,12 @@ class CustomerPage(QWidget):
         self,
         repository: CustomerRepository,
         parent=None,
-        index_path: Path = DB_FILE,
+        index_path: Path | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("CustomerPage")
         self.repository = repository
-        self.index_path = index_path
+        self.index_path = index_path or get_current_index_path()
         self.customer: Customer | None = None
         self._notes_sync_in_progress = False
         self._journal_entries_by_id: dict[int, CustomerJournalEntry] = {}

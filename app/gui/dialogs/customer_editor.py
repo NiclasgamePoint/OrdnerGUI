@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QVBoxLayout, QWidget,
 )
 
-from app.core.config import DB_FILE
+from app.core.config import get_current_index_path
 from app.core.customer_models import Contact, Customer
 from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
@@ -510,7 +510,7 @@ class CustomerEditorDialog(CenteredPopupDialog):
         results: list[str] = []
         manager = None
         try:
-            manager = IndexManager(DB_FILE, initialize=False)
+            manager = IndexManager(get_current_index_path(), initialize=False)
             filters = SearchFilters()
             for query in normalized_queries:
                 page = manager.search_folders_page(query, filters, page=1, page_size=200)

@@ -26,9 +26,10 @@ class StatisticsService:
         self,
         index_path: Path,
         customer_database_path: Path,
+        content_state_path: Path | None = None,
     ) -> ApplicationStatistics:
         customer_values = self._customer_statistics(customer_database_path)
-        index_values = self._index_statistics(index_path)
+        index_values = self._index_statistics(index_path, content_state_path)
         return ApplicationStatistics(**customer_values, **index_values)
 
     @staticmethod
@@ -62,7 +63,9 @@ class StatisticsService:
         finally:
             connection.close()
 
-    def _index_statistics(self, path: Path) -> dict:
+    def _index_statistics(
+        self, path: Path, content_state_path: Path | None = None
+    ) -> dict:
         values = {
             "project_count": 0,
             "file_count": 0,
@@ -90,11 +93,7 @@ class StatisticsService:
                     ).fetchone()[0]
                 ),
                 "total_file_size": int(file_row["size"]),
-                "content_count": int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM file_content_fts"
-                    ).fetchone()[0]
-                ),
+                "content_count": self._content_count(connection, content_state_path),
                 "last_indexed_at": str(metadata.get("built_at") or ""),
                 "last_index_duration_seconds": float(
                     metadata.get("duration_seconds") or 0
@@ -103,3 +102,23 @@ class StatisticsService:
             return values
         finally:
             connection.close()
+
+    @staticmethod
+    def _content_count(
+        catalog_connection: sqlite3.Connection,
+        content_state_path: Path | None,
+    ) -> int:
+        if content_state_path is not None and content_state_path.exists():
+            state = StatisticsService._readonly_connection(content_state_path)
+            try:
+                return int(state.execute(
+                    "SELECT COUNT(*) FROM documents WHERE status='completed'"
+                ).fetchone()[0])
+            finally:
+                state.close()
+        table = catalog_connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='file_content_fts'"
+        ).fetchone()
+        return int(
+            catalog_connection.execute("SELECT COUNT(*) FROM file_content_fts").fetchone()[0]
+        ) if table is not None else 0

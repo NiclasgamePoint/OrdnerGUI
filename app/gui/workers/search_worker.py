@@ -3,6 +3,8 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from app.core.customer_repository import CustomerRepository
+from app.core.content_search import ContentSearchService
+from app.core.index_layout import IndexLayout
 from app.core.index_manager import IndexManager
 from app.core.search_models import SearchFilters, SearchPage
 
@@ -23,6 +25,7 @@ class SearchWorker(QThread):
         page: int,
         page_size: int,
         customer_db_path: Path,
+        index_layout: IndexLayout | None = None,
     ):
         super().__init__()
         self.db_path = db_path
@@ -34,35 +37,51 @@ class SearchWorker(QThread):
         self.page = page
         self.page_size = page_size
         self.customer_db_path = customer_db_path
+        self.index_layout = index_layout
 
     def run(self):
         try:
             if self.category == "customers":
                 results = self._search_customers()
             else:
-                with IndexManager(self.db_path, initialize=False) as manager:
-                    if self.category == "folders":
-                        results = manager.search_folders_page(
-                            self.query, self.filters, self.page, self.page_size
-                        )
-                    elif self.category == "files":
-                        results = manager.search_files_page(
-                            self.query, self.filters, self.page, self.page_size
-                        )
-                    elif self.category == "text":
-                        results = manager.search_text_page(
-                            self.query,
-                            self.filters,
-                            self.page,
-                            self.page_size,
-                            maximum=self.result_limit,
-                            should_cancel=self.isInterruptionRequested,
-                        )
-                    else:
-                        raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
+                if self.category == "text" and self.index_layout is not None:
+                    results = ContentSearchService(
+                        self.index_layout, self.db_path
+                    ).search_page(
+                        self.query,
+                        self.filters,
+                        self.page,
+                        self.page_size,
+                        maximum=self.result_limit,
+                    )
+                else:
+                    with IndexManager(self.db_path, initialize=False) as manager:
+                        results = self._search_index(manager)
             self.completed.emit(self.generation, self.category, results, "")
         except Exception as exc:
             self.completed.emit(self.generation, self.category, [], str(exc))
+
+    def _search_index(self, manager: IndexManager) -> SearchPage:
+        if self.category == "folders":
+            results = manager.search_folders_page(
+                self.query, self.filters, self.page, self.page_size
+            )
+        elif self.category == "files":
+            results = manager.search_files_page(
+                self.query, self.filters, self.page, self.page_size
+            )
+        elif self.category == "text":
+            results = manager.search_text_page(
+                self.query,
+                self.filters,
+                self.page,
+                self.page_size,
+                maximum=self.result_limit,
+                should_cancel=self.isInterruptionRequested,
+            )
+        else:
+            raise ValueError(f"Unbekannte Suchkategorie: {self.category}")
+        return results
 
     def _search_customers(self) -> SearchPage:
         if not self.customer_db_path.exists():

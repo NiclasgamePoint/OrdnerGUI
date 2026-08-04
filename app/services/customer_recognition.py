@@ -5,7 +5,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 import re
 
-from app.core.config import CustomerRecognitionOptions
+from app.core.config import CATALOG_DB_FILE, INDEX_LAYOUT, CustomerRecognitionOptions
+from app.core.content_index import ContentDocumentRepository
+from app.core.index_layout import IndexLayout
 from app.core.customer_models import Contact, Customer
 from app.core.customer_recognition_models import (
     ContactScanStats,
@@ -117,10 +119,18 @@ class CustomerRecognitionService:
         index_path: Path,
         customer_database_path: Path,
         options: CustomerRecognitionOptions,
+        content_layout: IndexLayout | None = None,
     ):
         self.index_path = index_path
         self.customer_database_path = customer_database_path
         self.options = options
+        resolved_layout = content_layout or (
+            INDEX_LAYOUT if index_path.resolve() == CATALOG_DB_FILE.resolve() else None
+        )
+        self._content_documents = (
+            ContentDocumentRepository(resolved_layout, index_path)
+            if resolved_layout is not None else None
+        )
         self._suggestions = CustomerSuggestionService()
         self._blacklist = RecognitionBlacklist(options)
 
@@ -148,7 +158,9 @@ class CustomerRecognitionService:
             services: list[str] = []
             years: list[int] = []
             for project in projects:
-                documents = manager.indexed_documents_for_folder(project.folder_path)
+                documents = self._documents_for_folder(
+                    manager, project.folder_path
+                )
                 if not documents:
                     continue
                 suggestion = self._suggestions.suggest_from_documents(
@@ -165,6 +177,16 @@ class CustomerRecognitionService:
                 if project.year is not None:
                     years.append(project.year)
             if not scanned_paths:
+                if self._content_documents is not None and any(
+                    self._content_documents.has_pending_documents(
+                        project.folder_path
+                    )
+                    for project in projects
+                ):
+                    raise ValueError(
+                        "Die Dokumentinhalte dieses Kunden werden noch indexiert. "
+                        "Bitte den Kontaktdaten-Scan später erneut starten."
+                    )
                 raise ValueError(
                     "Für diesen Kunden wurden im aktuellen Suchindex keine "
                     "durchsuchbaren Dokumente gefunden."
@@ -199,7 +221,7 @@ class CustomerRecognitionService:
             manager.close()
             repository.close()
 
-    def synchronize(self) -> RecognitionStats:
+    def synchronize(self, include_documents: bool = True) -> RecognitionStats:
         stats = RecognitionStats()
         if not self.options.enabled:
             return stats
@@ -207,7 +229,7 @@ class CustomerRecognitionService:
         manager = IndexManager(self.index_path, initialize=False)
         repository = CustomerRepository(self.customer_database_path)
         try:
-            candidates = self._load_candidates(manager)
+            candidates = self._load_candidates(manager, include_documents=include_documents)
             repository.record_extraction_observations(
                 candidates, self.options.frequent_value_threshold
             )
@@ -308,12 +330,19 @@ class CustomerRecognitionService:
         finally:
             repository.close()
 
-    def _load_candidates(self, manager: IndexManager) -> list[RecognitionCandidate]:
+    def _load_candidates(
+        self,
+        manager: IndexManager,
+        include_documents: bool = True,
+    ) -> list[RecognitionCandidate]:
         individual: list[RecognitionCandidate] = []
         for root in manager.list_project_roots():
             if int(root["year"]) < self.options.minimum_year:
                 continue
-            documents = manager.indexed_documents_for_folder(str(root["path"]))
+            documents = (
+                self._documents_for_folder(manager, str(root["path"]))
+                if include_documents else []
+            )
             suggestion = self._suggestions.suggest_from_documents(
                 Path(str(root["path"])),
                 str(root["customer_name"]),
@@ -346,6 +375,15 @@ class CustomerRecognitionService:
                 continue
             grouped[candidate.recognition_key].append(candidate)
         return [self._merge_candidates(group) for group in grouped.values()]
+
+    def _documents_for_folder(
+        self,
+        manager: IndexManager,
+        folder_path: str,
+    ) -> list[dict]:
+        if self._content_documents is not None:
+            return self._content_documents.documents_for_folder(folder_path)
+        return manager.indexed_documents_for_folder(folder_path)
 
     def _merge_candidates(
         self, candidates: list[RecognitionCandidate]

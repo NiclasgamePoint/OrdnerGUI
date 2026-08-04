@@ -25,7 +25,11 @@ class IndexDiagnostics:
 class IndexDiagnosticsService:
     """Read-only health report for an index database."""
 
-    def inspect(self, database_path: Path) -> IndexDiagnostics:
+    def inspect(
+        self,
+        database_path: Path,
+        content_state_path: Path | None = None,
+    ) -> IndexDiagnostics:
         if not database_path.exists():
             return IndexDiagnostics(database_path=str(database_path), integrity="fehlt")
 
@@ -34,26 +38,9 @@ class IndexDiagnosticsService:
         try:
             integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
             metadata = dict(connection.execute("SELECT key, value FROM index_metadata"))
-            status_counts = {
-                str(row["content_status"] or "unbekannt"): int(row["amount"])
-                for row in connection.execute(
-                    """
-                    SELECT content_status, COUNT(*) AS amount
-                    FROM files GROUP BY content_status
-                    """
-                )
-            }
-            errors = [
-                dict(row)
-                for row in connection.execute(
-                    """
-                    SELECT path, content_error AS error
-                    FROM files
-                    WHERE COALESCE(content_error, '') <> ''
-                    ORDER BY path LIMIT 25
-                    """
-                )
-            ]
+            content_count, status_counts, errors = self._content_diagnostics(
+                connection, content_state_path
+            )
             return IndexDiagnostics(
                 database_path=str(database_path),
                 database_size=database_path.stat().st_size,
@@ -65,11 +52,59 @@ class IndexDiagnosticsService:
                 file_count=int(connection.execute("SELECT COUNT(*) FROM files").fetchone()[0]),
                 folder_count=int(connection.execute("SELECT COUNT(*) FROM folders").fetchone()[0]),
                 changed_count=int(metadata.get("changed_count", "0") or 0),
-                content_count=int(
-                    connection.execute("SELECT COUNT(*) FROM file_content_fts").fetchone()[0]
-                ),
+                content_count=content_count,
                 status_counts=status_counts,
                 errors=errors,
             )
         finally:
             connection.close()
+
+    def _content_diagnostics(
+        self,
+        catalog: sqlite3.Connection,
+        state_path: Path | None,
+    ) -> tuple[int, dict[str, int], list[dict[str, str]]]:
+        if state_path is not None and state_path.exists():
+            state = sqlite3.connect(f"file:{state_path}?mode=ro", uri=True)
+            state.row_factory = sqlite3.Row
+            try:
+                statuses = {
+                    str(row["content_status"] or row["status"]): int(row["amount"])
+                    for row in state.execute(
+                        "SELECT status,content_status,COUNT(*) amount FROM documents "
+                        "GROUP BY status,content_status"
+                    )
+                }
+                errors = [
+                    {"path": str(row["path"]), "error": str(row["content_error"])}
+                    for row in state.execute(
+                        "SELECT path,content_error FROM documents "
+                        "WHERE content_error<>'' ORDER BY path LIMIT 25"
+                    )
+                ]
+                count = int(state.execute(
+                    "SELECT COUNT(*) FROM documents WHERE status='completed'"
+                ).fetchone()[0])
+                return count, statuses, errors
+            finally:
+                state.close()
+        table = catalog.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='file_content_fts'"
+        ).fetchone()
+        if table is None:
+            return 0, {}, []
+        statuses = {
+            str(row["content_status"] or "unbekannt"): int(row["amount"])
+            for row in catalog.execute(
+                "SELECT content_status,COUNT(*) amount FROM files GROUP BY content_status"
+            )
+        }
+        errors = [
+            dict(row)
+            for row in catalog.execute(
+                "SELECT path,content_error error FROM files "
+                "WHERE COALESCE(content_error,'')<>'' ORDER BY path LIMIT 25"
+            )
+        ]
+        count = int(catalog.execute("SELECT COUNT(*) FROM file_content_fts").fetchone()[0]) if table else 0
+        return count, statuses, errors

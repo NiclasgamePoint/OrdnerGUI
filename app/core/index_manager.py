@@ -7,22 +7,15 @@ import subprocess
 import shutil
 import time
 import re
-import sys
 import json
 import hashlib
 import importlib.util
 import logging
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tempfile import TemporaryDirectory
-
-import openpyxl
-from docx import Document
-from PyPDF2 import PdfReader
 from app.core.config import IndexOptions, RIPGREP_AVAILABLE
 from app.core.folder_structure import FolderStructureClassifier
 from app.core.search_models import SearchFilters, SearchPage
-from app.services.document_converter import DocumentConverter
+from app.services.document_text_indexer import DocumentTextIndexer
 
 
 logger = logging.getLogger(__name__)
@@ -47,12 +40,16 @@ class IndexManager:
         db_path: Path,
         initialize: bool = True,
         options: Optional[IndexOptions] = None,
+        content_enabled: bool = True,
     ):
         self.db_path = db_path
         self.conn = None
         self.options = options or IndexOptions()
+        self.content_enabled = content_enabled
         self._folder_classifier = FolderStructureClassifier()
-        self._document_converter = DocumentConverter()
+        self._content_extractor = (
+            DocumentTextIndexer(self.options) if content_enabled else None
+        )
         self._ocr_language = None
         if initialize:
             self.init_db()
@@ -127,13 +124,14 @@ class IndexManager:
             )
         """)
 
-        cursor.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS file_content_fts USING fts5(
-                path UNINDEXED,
-                content,
-                tokenize = 'unicode61 remove_diacritics 2'
-            )
-        """)
+        if self.content_enabled:
+            cursor.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS file_content_fts USING fts5(
+                    path UNINDEXED,
+                    content,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+            """)
 
         self._ensure_column(cursor, "files", "domain_folder", "TEXT")
         self._ensure_column(cursor, "files", "time_bucket", "TEXT")
@@ -147,6 +145,10 @@ class IndexManager:
         self._ensure_column(cursor, "files", "content_error", "TEXT")
         self._ensure_column(cursor, "files", "extractor_version", "TEXT")
         self._ensure_column(cursor, "files", "project_root_path", "TEXT")
+        self._ensure_column(cursor, "files", "document_key", "TEXT")
+        self._ensure_column(cursor, "files", "source_version", "TEXT")
+        self._ensure_column(cursor, "files", "content_eligible", "INTEGER DEFAULT 0")
+        self._ensure_column(cursor, "files", "partition_year", "INTEGER")
         self._ensure_column(cursor, "folders", "project_root_path", "TEXT")
         
         cursor.execute("""
@@ -175,6 +177,8 @@ class IndexManager:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_folder_path ON files(folder_path)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_project_root ON files(project_root_path)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_document_key ON files(document_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_partition_year ON files(partition_year)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_folders_name ON folders(name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_folder_project_root ON folders(project_root_path)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_project_recognition_key ON project_roots(recognition_key)")
@@ -222,6 +226,8 @@ class IndexManager:
         return cursor.fetchone() is not None
 
     def content_index_needs_rebuild(self, base_path: Path) -> bool:
+        if not self.content_enabled:
+            return False
         cursor = self.conn.cursor()
         content_types = self.CONTENT_INDEX_TYPES & self.options.indexed_content_types
         if not content_types:
@@ -295,7 +301,8 @@ class IndexManager:
         existing_root = self.get_metadata("index_root")
         changed_count = 1 if full_rebuild else 0
         if full_rebuild or (existing_root and existing_root != str(base_path)):
-            cursor.execute("DELETE FROM file_content_fts")
+            if self.content_enabled:
+                cursor.execute("DELETE FROM file_content_fts")
             cursor.execute("DELETE FROM files")
             cursor.execute("DELETE FROM folders")
             cursor.execute("DELETE FROM project_roots")
@@ -386,24 +393,27 @@ class IndexManager:
                 if progress_callback is not None:
                     progress_callback(processed_count, path_text)
                 cursor.execute("INSERT OR IGNORE INTO seen_files(path) VALUES (?)", (path_text,))
+                existing_columns = (
+                    "file_size, modified_ns, extractor_version, content_error"
+                    if self.content_enabled else "file_size, modified_ns"
+                )
                 existing = cursor.execute(
-                    """
-                    SELECT file_size, modified_ns, extractor_version, content_error
-                    FROM files WHERE path = ?
-                    """,
+                    f"SELECT {existing_columns} FROM files WHERE path = ?",
                     (path_text,),
                 ).fetchone()
+                content_current = not self.content_enabled or (
+                    filepath.suffix.lower().lstrip(".")
+                    not in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types)
+                    or existing is not None
+                    and existing["extractor_version"] == self.EXTRACTOR_VERSION
+                )
                 unchanged = (
                     not full_rebuild
                     and existing is not None
                     and existing["file_size"] == stat.st_size
                     and existing["modified_ns"] == stat.st_mtime_ns
-                    and (
-                        filepath.suffix.lower().lstrip(".")
-                        not in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types)
-                        or existing["extractor_version"] == self.EXTRACTOR_VERSION
-                    )
-                    and not (
+                    and content_current
+                    and not (self.content_enabled and
                         "PyCryptodome is required" in (existing["content_error"] or "")
                         and importlib.util.find_spec("Crypto") is not None
                     )
@@ -418,10 +428,11 @@ class IndexManager:
                 if processed_count % 250 == 0:
                     self.conn.commit()
 
-        cursor.execute(
-            "DELETE FROM file_content_fts WHERE path IN "
-            "(SELECT path FROM files WHERE path NOT IN (SELECT path FROM seen_files))"
-        )
+        if self.content_enabled:
+            cursor.execute(
+                "DELETE FROM file_content_fts WHERE path IN "
+                "(SELECT path FROM files WHERE path NOT IN (SELECT path FROM seen_files))"
+            )
         cursor.execute("DELETE FROM files WHERE path NOT IN (SELECT path FROM seen_files)")
         changed_count += max(cursor.rowcount, 0)
         cursor.execute("DELETE FROM folders WHERE path NOT IN (SELECT path FROM seen_folders)")
@@ -430,7 +441,8 @@ class IndexManager:
             "DELETE FROM project_roots WHERE path NOT IN (SELECT path FROM seen_project_roots)"
         )
         changed_count += max(cursor.rowcount, 0)
-        changed_count += self._normalize_content_statuses()
+        if self.content_enabled:
+            changed_count += self._normalize_content_statuses()
         cursor.execute("DELETE FROM indexed_roots")
         cursor.execute(
             "INSERT INTO indexed_roots(root_path, last_indexed) VALUES (?, ?)",
@@ -489,6 +501,19 @@ class IndexManager:
             relative_dir = str(filepath.parent.relative_to(base_path))
             project_root = self._folder_classifier.classify(filepath.parent, base_path)
             project_root_path = project_root.path if project_root is not None else None
+            document_key = hashlib.sha256(
+                os.path.normcase(str(filepath.resolve())).encode("utf-8")
+            ).hexdigest()
+            source_version = hashlib.sha256(
+                f"{document_key}:{stat.st_size}:{stat.st_mtime_ns}:"
+                f"{self.EXTRACTOR_VERSION}:{self.options.content_fingerprint()}".encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+            content_eligible = int(
+                file_type in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types)
+            )
+            partition_year = int(year) if year else datetime.fromtimestamp(stat.st_mtime).year
             
             cursor.execute("""
                 INSERT OR REPLACE INTO files 
@@ -496,8 +521,9 @@ class IndexManager:
                  year, service_type, customer_name, subfolder,
                  domain_folder, time_bucket, project_name, relative_dir, index_root,
                  full_text_indexed, folder_path, modified_ns, content_hash,
-                 content_status, content_error, extractor_version, project_root_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 content_status, content_error, extractor_version, project_root_path,
+                 document_key, source_version, content_eligible, partition_year)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(filepath),
                 filepath.name,
@@ -522,9 +548,13 @@ class IndexManager:
                 "",
                 "",
                 project_root_path,
+                document_key,
+                source_version,
+                content_eligible,
+                partition_year,
             ))
 
-            if file_type in (self.CONTENT_INDEX_TYPES & self.options.indexed_content_types):
+            if self.content_enabled and content_eligible:
                 cursor.execute("DELETE FROM file_content_fts WHERE path = ?", (str(filepath),))
                 max_bytes = self.options.max_file_size_mb * 1024 * 1024
                 if stat.st_size > max_bytes:
@@ -574,16 +604,9 @@ class IndexManager:
     def _extract_document_with_status(
         self, filepath: Path, file_type: str
     ) -> tuple[str, str, str]:
-        try:
-            content = self._extract_document_text(filepath, file_type)
-            return content, ("success" if content.strip() else "empty"), ""
-        except TimeoutError as exc:
-            return "", "timeout", str(exc)
-        except Exception as exc:
-            message = str(exc)
-            if "encrypted" in message.casefold() or "password" in message.casefold():
-                return "", "encrypted", message
-            return "", "error", message
+        if self._content_extractor is None:
+            return "", "not_applicable", ""
+        return self._content_extractor.extract(filepath)
 
     def _normalize_content_statuses(self) -> int:
         """Migrate older generic errors into actionable diagnostic categories."""
@@ -610,253 +633,6 @@ class IndexManager:
         changed += max(cursor.rowcount, 0)
         return changed
 
-    def _extract_document_text(self, filepath: Path, file_type: str) -> str:
-        if file_type in self.TEXT_CONTENT_TYPES:
-            return self._limit_text(filepath.read_text(encoding="utf-8", errors="replace"))
-        if file_type == "pdf":
-            return self._extract_pdf_text(filepath)
-        if file_type == "docx":
-            return self._extract_docx_text(filepath)
-        if file_type == "doc":
-            return self._extract_doc_text(filepath)
-        if file_type == "xlsx":
-            return self._extract_xlsx_text(filepath)
-        if file_type == "xls":
-            return self._extract_xls_text(filepath)
-        return ""
-
-    def _extract_pdf_text(self, filepath: Path) -> str:
-        reader = PdfReader(str(filepath))
-        parts = []
-        length = 0
-        for page in reader.pages:
-            text = page.extract_text() or ""
-            if text:
-                parts.append(text)
-                length += len(text)
-            if length >= self.options.max_extracted_characters:
-                break
-        extracted = self._limit_text("\n".join(parts))
-        if extracted.strip() or not self.options.ocr_enabled:
-            return extracted
-        return self._ocr_pdf(filepath)
-
-    def _extract_docx_text(self, filepath: Path) -> str:
-        document = Document(str(filepath))
-        parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
-        length = sum(map(len, parts))
-        for table in document.tables:
-            for row in table.rows:
-                values = [cell.text for cell in row.cells if cell.text]
-                if values:
-                    line = "\t".join(values)
-                    parts.append(line)
-                    length += len(line)
-                if length >= self.options.max_extracted_characters:
-                    return self._limit_text("\n".join(parts))
-        return self._limit_text("\n".join(parts))
-
-    def _extract_xlsx_text(self, filepath: Path) -> str:
-        workbook = openpyxl.load_workbook(str(filepath), read_only=True, data_only=True)
-        try:
-            parts = []
-            length = 0
-            for worksheet in workbook.worksheets:
-                parts.append(worksheet.title)
-                for row in worksheet.iter_rows(values_only=True):
-                    values = [str(value) for value in row if value is not None]
-                    if values:
-                        line = "\t".join(values)
-                        parts.append(line)
-                        length += len(line)
-                    if length >= self.options.max_extracted_characters:
-                        return self._limit_text("\n".join(parts))
-            return self._limit_text("\n".join(parts))
-        finally:
-            workbook.close()
-
-    def _extract_xls_text(self, filepath: Path) -> str:
-        command = [
-            sys.executable,
-            "-m",
-            "app.services.xls_text_extractor",
-            str(filepath),
-            "--maximum-characters",
-            str(self.options.max_extracted_characters),
-        ]
-        options = {
-            "capture_output": True,
-            "text": True,
-            "encoding": "utf-8",
-            "errors": "replace",
-            "timeout": self.LEGACY_XLS_TIMEOUT_SECONDS,
-            "cwd": str(Path(__file__).resolve().parents[2]),
-        }
-        if sys.platform == "win32":
-            options["creationflags"] = subprocess.CREATE_NO_WINDOW
-        try:
-            result = subprocess.run(command, **options)
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError(
-                f"XLS-Zeitlimit von {self.LEGACY_XLS_TIMEOUT_SECONDS} Sekunden erreicht"
-            ) from exc
-        if result.returncode != 0:
-            message = result.stderr.strip() or "Unbekannter XLS-Lesefehler"
-            raise RuntimeError(message)
-        return self._limit_text(result.stdout)
-
-    def _extract_doc_text(self, filepath: Path) -> str:
-        command = [
-            sys.executable,
-            "-m",
-            "app.services.doc_text_extractor",
-            str(filepath),
-            "--maximum-characters",
-            str(self.options.max_extracted_characters),
-        ]
-        options = {
-            "capture_output": True,
-            "text": True,
-            "encoding": "utf-8",
-            "errors": "replace",
-            "timeout": self.LEGACY_DOC_TIMEOUT_SECONDS,
-            "cwd": str(Path(__file__).resolve().parents[2]),
-        }
-        if sys.platform == "win32":
-            options["creationflags"] = subprocess.CREATE_NO_WINDOW
-        try:
-            result = subprocess.run(command, **options)
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError(
-                f"DOC-Zeitlimit von {self.LEGACY_DOC_TIMEOUT_SECONDS} Sekunden erreicht"
-            ) from exc
-        if result.returncode != 0:
-            message = result.stderr.strip() or "Unbekannter DOC-Lesefehler"
-            raise RuntimeError(message)
-        return self._limit_text(result.stdout)
-
-    def _ocr_pdf(self, filepath: Path) -> str:
-        pdftoppm = shutil.which("pdftoppm")
-        tesseract = self._find_tesseract()
-        if pdftoppm is None or tesseract is None:
-            return ""
-
-        deadline = time.monotonic() + self.options.ocr_timeout_seconds
-        with TemporaryDirectory(prefix="papagui-ocr-") as temp_dir:
-            output_prefix = Path(temp_dir) / "page"
-            render = subprocess.run(
-                [
-                    pdftoppm,
-                    "-jpeg",
-                    "-jpegopt",
-                    "quality=85",
-                    "-r",
-                    "120",
-                    "-f",
-                    "1",
-                    "-l",
-                    str(self.options.ocr_max_pages),
-                    str(filepath),
-                    str(output_prefix),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=max(5, min(15, self.options.ocr_timeout_seconds)),
-            )
-            if render.returncode != 0:
-                return ""
-
-            image_paths = sorted(Path(temp_dir).glob("page-*.jpg"))
-            language = self._get_ocr_language(tesseract)
-
-            def recognize(image_path: Path) -> tuple[Path, str]:
-                remaining = max(1, deadline - time.monotonic())
-                result = subprocess.run(
-                    [
-                        str(tesseract),
-                        str(image_path),
-                        "stdout",
-                        "-l",
-                        language,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    errors="replace",
-                    timeout=max(1, min(15, remaining)),
-                )
-                return image_path, result.stdout if result.returncode == 0 else ""
-
-            recognized = {}
-            with ThreadPoolExecutor(max_workers=min(4, max(1, len(image_paths)))) as executor:
-                futures = [executor.submit(recognize, image_path) for image_path in image_paths]
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError(
-                        f"OCR-Zeitlimit von {self.options.ocr_timeout_seconds} Sekunden erreicht"
-                    )
-                try:
-                    for future in as_completed(futures, timeout=remaining):
-                        image_path, text = future.result()
-                        if text.strip():
-                            recognized[image_path] = text
-                except TimeoutError as exc:
-                    raise TimeoutError(
-                        f"OCR-Zeitlimit von {self.options.ocr_timeout_seconds} Sekunden erreicht"
-                    ) from exc
-            return self._limit_text(
-                "\n".join(recognized[path] for path in image_paths if path in recognized)
-            )
-
-    def _get_ocr_language(self, tesseract: Path) -> str:
-        if self._ocr_language is not None:
-            return self._ocr_language
-        try:
-            result = subprocess.run(
-                [str(tesseract), "--list-langs"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            languages = set(result.stdout.splitlines()[1:])
-        except Exception:
-            languages = set()
-        if "deu" in languages and "eng" in languages:
-            self._ocr_language = "deu+eng"
-        elif "deu" in languages:
-            self._ocr_language = "deu"
-        else:
-            self._ocr_language = "eng"
-        return self._ocr_language
-
-    def _find_tesseract(self) -> Optional[Path]:
-        found = shutil.which("tesseract")
-        if found:
-            return Path(found)
-        if sys.platform == "win32":
-            for environment_name in ("PROGRAMFILES", "LOCALAPPDATA"):
-                base = os.environ.get(environment_name)
-                if base:
-                    candidate = Path(base) / "Tesseract-OCR" / "tesseract.exe"
-                    if candidate.exists():
-                        return candidate
-        return None
-
-    def _find_libreoffice(self) -> Optional[Path]:
-        for name in ("libreoffice", "soffice"):
-            found = shutil.which(name)
-            if found:
-                return Path(found)
-
-        candidates = []
-        if sys.platform == "darwin":
-            candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
-        elif sys.platform == "win32":
-            for environment_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-                base = os.environ.get(environment_name)
-                if base:
-                    candidates.append(Path(base) / "LibreOffice" / "program" / "soffice.exe")
-        return next((path for path in candidates if path.exists()), None)
-    
     def search_customers(self, query: str, limit: Optional[int] = None) -> List[Dict]:
         cursor = self.conn.cursor()
         
