@@ -6,6 +6,8 @@ import hashlib
 import json
 from PySide6.QtCore import QSettings
 
+from app.core.index_layout import IndexLayout
+
 def _resolve_path_setting(env_name: str) -> Path | None:
     value = os.getenv(env_name, "").strip()
     if not value:
@@ -24,8 +26,16 @@ def _resolve_base_dir() -> Path:
 BASE_DIR = _resolve_base_dir()
 DATA_DIR = _resolve_path_setting("PAPAGUI_DATA_DIR") or (BASE_DIR / "data")
 BAUVORHABEN_DIR = _resolve_path_setting("PAPAGUI_SOURCE_DIR") or (BASE_DIR / "Bauvorhaben")
-DB_FILE = DATA_DIR / "index.db"
+INDEX_LAYOUT = IndexLayout(DATA_DIR / "index")
+CATALOG_DB_FILE = INDEX_LAYOUT.catalog_path
+LEGACY_INDEX_FILE = DATA_DIR / "index.db"
+# Read the legacy index until the first split catalog has been activated.
+DB_FILE = CATALOG_DB_FILE if CATALOG_DB_FILE.exists() else LEGACY_INDEX_FILE
 CUSTOMER_DB_FILE = DATA_DIR / "customers.db"
+
+
+def get_current_index_path() -> Path:
+    return CATALOG_DB_FILE if CATALOG_DB_FILE.exists() else LEGACY_INDEX_FILE
 
 INDEX_BATCH_SIZE = 100
 
@@ -75,6 +85,26 @@ class IndexOptions:
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def catalog_fingerprint(self) -> str:
+        payload = {
+            "content_extensions": sorted(self.indexed_content_types),
+            "excluded_folders": sorted(self.excluded_folder_names),
+        }
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def content_fingerprint(self) -> str:
+        payload = {
+            "max_file_size_mb": self.max_file_size_mb,
+            "max_extracted_characters": self.max_extracted_characters,
+            "ocr_enabled": self.ocr_enabled,
+            "ocr_max_pages": self.ocr_max_pages,
+            "ocr_timeout_seconds": self.ocr_timeout_seconds,
+            "content_extensions": sorted(self.indexed_content_types),
+        }
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass

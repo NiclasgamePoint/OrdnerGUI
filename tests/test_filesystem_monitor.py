@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from app.services.filesystem_monitor import FileSystemMonitor
 
@@ -44,6 +45,22 @@ class FileSystemMonitorTests(unittest.TestCase):
             monitor = FileSystemMonitor(root, excluded_folders={".git"})
             snapshot = monitor.build_snapshot()
             self.assertFalse(any("secret.txt" in path for path in snapshot))
+
+    def test_runtime_monitor_does_not_poll_the_complete_tree(self):
+        with TemporaryDirectory() as directory:
+            monitor = FileSystemMonitor(Path(directory), interval_seconds=0.5)
+            with patch("app.services.filesystem_monitor.Observer", None), patch(
+                "app.services.filesystem_monitor.FileSystemEventHandler", None
+            ), patch.object(
+                monitor,
+                "build_snapshot",
+                side_effect=AssertionError("Kein periodischer Vollscan erlaubt"),
+            ) as snapshot:
+                monitor.start()
+                monitor.msleep(50)
+                monitor.requestInterruption()
+                monitor.wait(2000)
+            snapshot.assert_not_called()
 
 
 if __name__ == "__main__":

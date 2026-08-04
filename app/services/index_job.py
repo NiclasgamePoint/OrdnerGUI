@@ -4,21 +4,24 @@ import argparse
 import logging
 import os
 from pathlib import Path
+import subprocess
+import sys
 import time
 
-from app.core.config import (
-    load_customer_recognition_options,
-    load_index_options,
-)
+from app.core.config import load_customer_recognition_options, load_index_options
+from app.core.catalog_index import CatalogIndexManager, CatalogStore
+from app.core.content_index import ContentStateRepository, ShardRepository
 from app.core.index_job_state import (
     activated_path,
     cancel_path,
     process_is_alive,
+    read_state,
     read_owner,
     utc_now,
     write_state,
 )
 from app.core.index_manager import IndexManager
+from app.core.index_layout import IndexLayout
 from app.core.index_store import (
     activate_index,
     create_build_path,
@@ -52,6 +55,15 @@ class IndexJobRunner:
         self.full_rebuild = full_rebuild
         self.customer_database_path = customer_database_path.resolve()
         self.build_path: Path | None = None
+        self.index_layout = (
+            IndexLayout(self.active_path.parents[1])
+            if self.active_path.name == "active.db"
+            and self.active_path.parent.name == "catalog"
+            else None
+        )
+        self._catalog_store = (
+            CatalogStore(self.index_layout) if self.index_layout is not None else None
+        )
         self._last_progress_write = 0.0
         self._last_progress_path = ""
         self._base_state = {
@@ -68,13 +80,22 @@ class IndexJobRunner:
         manager = None
         try:
             self._write(status="running", processed_count=0, current_path="")
-            self.build_path = create_build_path(self.active_path)
-            seed_build_database(
-                self.active_path,
-                self.build_path,
-                incremental=not self.full_rebuild,
-            )
-            manager = IndexManager(self.build_path, options=load_index_options())
+            if self._catalog_store is not None:
+                self.build_path = self._catalog_store.create_build_path()
+                self._catalog_store.seed_build(
+                    self.build_path, incremental=not self.full_rebuild
+                )
+                manager = CatalogIndexManager(
+                    self.build_path, options=load_index_options()
+                )
+            else:
+                self.build_path = create_build_path(self.active_path)
+                seed_build_database(
+                    self.active_path,
+                    self.build_path,
+                    incremental=not self.full_rebuild,
+                )
+                manager = IndexManager(self.build_path, options=load_index_options())
             indexed_count = manager.synchronize_directory(
                 self.source_path,
                 full_rebuild=self.full_rebuild,
@@ -84,10 +105,16 @@ class IndexJobRunner:
             changed_count = getattr(manager, "last_change_count", indexed_count)
             manager.close()
             manager = None
-            validate_index(self.build_path)
+            if self._catalog_store is not None:
+                self._catalog_store.validate(self.build_path)
+            else:
+                validate_index(self.build_path)
 
             if changed_count == 0 and self.active_path.exists():
                 customer_state = self._recognize_customers(self.build_path)
+                if self._catalog_store is not None:
+                    self._reconcile_content_queue(self.active_path)
+                    self._start_content_job()
                 self.build_path.unlink(missing_ok=True)
                 self.build_path = None
                 self._write(
@@ -140,7 +167,7 @@ class IndexJobRunner:
         owner_missing_since = None
         while True:
             if activated_path(self.state_dir).exists():
-                customer_state = self._recognize_customers(self.active_path)
+                customer_state = self._after_catalog_activation(start_content=False)
                 self._write(
                     status="completed",
                     indexed_count=indexed_count,
@@ -159,9 +186,9 @@ class IndexJobRunner:
                 # Give a newly launched GUI enough time to adopt the job before
                 # replacing the database it is about to open (especially on Windows).
                 if time.monotonic() - owner_missing_since >= 1.0:
-                    activate_index(self.active_path, self.build_path)
+                    self._activate_build()
                     self.build_path = None
-                    customer_state = self._recognize_customers(self.active_path)
+                    customer_state = self._after_catalog_activation(start_content=True)
                     self._write(
                         status="completed",
                         indexed_count=indexed_count,
@@ -180,7 +207,7 @@ class IndexJobRunner:
                 index_path,
                 self.customer_database_path,
                 load_customer_recognition_options(),
-            ).synchronize()
+            ).synchronize(include_documents=self._catalog_store is None)
             return {
                 "customers_detected": stats.detected,
                 "customers_created": stats.created,
@@ -199,6 +226,103 @@ class IndexJobRunner:
                 "customer_cases_pending": 0,
                 "customer_sync_error": str(error),
             }
+
+    def _activate_build(self):
+        if self.build_path is None:
+            raise RuntimeError("Es ist kein aktivierbarer Katalog vorhanden.")
+        if self._catalog_store is not None:
+            self._catalog_store.activate(self.build_path)
+        else:
+            activate_index(self.active_path, self.build_path)
+
+    def _after_catalog_activation(self, *, start_content: bool) -> dict:
+        if self._catalog_store is None:
+            return self._recognize_customers(self.active_path)
+        self._reconcile_content_queue(self.active_path)
+        customer_state = self._recognize_customers(self.active_path)
+        self._archive_legacy_index()
+        if start_content:
+            self._start_content_job()
+        return customer_state
+
+    def _reconcile_content_queue(self, catalog_path: Path):
+        if self.index_layout is None:
+            return
+        manager = CatalogIndexManager(catalog_path, initialize=False)
+        try:
+            with ContentStateRepository.open_recoverable(self.index_layout) as state:
+                shards = ShardRepository(self.index_layout, state)
+                manager.reconcile_content_state(
+                    state,
+                    shards,
+                    load_customer_recognition_options().preferred_patterns,
+                )
+        finally:
+            manager.close()
+
+    def _start_content_job(self):
+        if self.index_layout is None:
+            return
+        state_dir = self.index_layout.jobs_dir / "content"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        current = read_state(state_dir)
+        if current.get("status") == "running" and process_is_alive(
+            int(current.get("pid") or 0)
+        ):
+            return
+        cancel_path(state_dir).unlink(missing_ok=True)
+        command = [
+            sys.executable,
+            "-m",
+            "app.services.content_index_job",
+            "--index-root",
+            str(self.index_layout.root),
+            "--state-dir",
+            str(state_dir),
+            "--customers",
+            str(self.customer_database_path),
+        ]
+        options = {
+            "cwd": str(Path(__file__).resolve().parents[2]),
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            options["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            )
+        else:
+            options["start_new_session"] = True
+        subprocess.Popen(command, **options)
+
+    def _archive_legacy_index(self):
+        if self.index_layout is None:
+            return
+        if not self.index_layout.catalog_path.exists():
+            return
+        legacy_index = self.index_layout.root.parent / "index.db"
+        if not legacy_index.exists():
+            return
+        self.index_layout.legacy_dir.mkdir(parents=True, exist_ok=True)
+        candidates = [
+            legacy_index,
+            *legacy_index.parent.glob("index.backup.*.db"),
+            *legacy_index.parent.glob(".index.build-*.db*"),
+            *legacy_index.parent.glob("index_job.*"),
+        ]
+        for source in candidates:
+            if not source.exists():
+                continue
+            destination = self.index_layout.legacy_dir / source.name
+            sequence = 1
+            while destination.exists():
+                destination = self.index_layout.legacy_dir / (
+                    f"{source.stem}.{sequence}{source.suffix}"
+                )
+                sequence += 1
+            os.replace(source, destination)
 
     def _cleanup_build(self):
         if self.build_path is not None:

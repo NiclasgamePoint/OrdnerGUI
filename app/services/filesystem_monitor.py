@@ -4,8 +4,16 @@ from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
+import threading
 
 from PySide6.QtCore import QThread, Signal
+
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+except ImportError:  # Optional until dependencies are installed after an update.
+    FileSystemEventHandler = None
+    Observer = None
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +31,7 @@ class FileChangeSummary:
 
 
 class FileSystemMonitor(QThread):
-    """Portable polling monitor suitable for local folders and network shares."""
+    """Debounce native filesystem events without rescanning the whole source."""
 
     changesDetected = Signal(object)
     scanFailed = Signal(str)
@@ -86,30 +94,66 @@ class FileSystemMonitor(QThread):
         )
 
     def run(self):
-        while not self.isInterruptionRequested():
-            try:
-                current = self.build_snapshot()
-                if self._snapshot is None:
-                    self._snapshot = current
-                    self.ready.emit(len(current))
-                else:
-                    changes = self.compare_snapshots(self._snapshot, current)
-                    self._snapshot = current
-                    if changes.total:
-                        logger.info(
-                            "Dateisystemänderung: root=%s created=%s modified=%s deleted=%s",
-                            self.root_path,
-                            changes.created,
-                            changes.modified,
-                            changes.deleted,
-                        )
-                        self.changesDetected.emit(changes)
-            except Exception as exc:
-                logger.exception("Dateisystemüberwachung fehlgeschlagen: root=%s", self.root_path)
-                self.scanFailed.emit(str(exc))
+        if not self.root_path.exists() or not self.root_path.is_dir():
+            self.scanFailed.emit(f"Datenquelle nicht erreichbar: {self.root_path}")
+            return
+        if Observer is None or FileSystemEventHandler is None:
+            logger.warning(
+                "Native Dateisystemüberwachung ist nicht verfügbar; "
+                "der tägliche Katalogabgleich bleibt aktiv."
+            )
+            self.ready.emit(0)
+            while not self.isInterruptionRequested():
+                self.msleep(500)
+            return
 
-            waited = 0
-            while waited < self.interval_milliseconds and not self.isInterruptionRequested():
-                step = min(500, self.interval_milliseconds - waited)
-                self.msleep(step)
-                waited += step
+        lock = threading.Lock()
+        counters = {"created": set(), "modified": set(), "deleted": set()}
+
+        class Handler(FileSystemEventHandler):
+            def _record(self, kind: str, event):
+                path = Path(event.src_path)
+                if any(part.casefold() in self_excluded for part in path.parts):
+                    return
+                with lock:
+                    counters[kind].add(str(path))
+
+            def on_created(self, event):
+                self._record("created", event)
+
+            def on_modified(self, event):
+                self._record("modified", event)
+
+            def on_deleted(self, event):
+                self._record("deleted", event)
+
+            def on_moved(self, event):
+                self._record("deleted", event)
+                with lock:
+                    counters["created"].add(str(event.dest_path))
+
+        self_excluded = self.excluded_folders
+        observer = Observer()
+        observer.schedule(Handler(), str(self.root_path), recursive=True)
+        observer.start()
+        self.ready.emit(0)
+        try:
+            while not self.isInterruptionRequested():
+                self.msleep(max(500, self.interval_milliseconds))
+                with lock:
+                    changes = FileChangeSummary(
+                        created=len(counters["created"]),
+                        modified=len(counters["modified"]),
+                        deleted=len(counters["deleted"]),
+                    )
+                    for values in counters.values():
+                        values.clear()
+                if changes.total:
+                    logger.info(
+                        "Dateisystemereignisse: root=%s created=%s modified=%s deleted=%s",
+                        self.root_path, changes.created, changes.modified, changes.deleted,
+                    )
+                    self.changesDetected.emit(changes)
+        finally:
+            observer.stop()
+            observer.join(timeout=5)

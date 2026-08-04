@@ -5,7 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from app.core.customer_repository import CustomerRepository
+from app.core.catalog_index import CatalogStore
 from app.core.index_diagnostics import IndexDiagnosticsService
+from app.core.index_layout import IndexLayout
 from app.core.index_store import available_backups
 from app.core.statistics import StatisticsService
 
@@ -15,10 +17,17 @@ class SettingsDataWorker(QThread):
 
     completed = Signal(object)
 
-    def __init__(self, index_path: Path, customer_database_path: Path, parent=None):
+    def __init__(
+        self,
+        index_path: Path,
+        customer_database_path: Path,
+        index_layout: IndexLayout | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.index_path = index_path
         self.customer_database_path = customer_database_path
+        self.index_layout = index_layout
 
     def run(self):
         payload = {
@@ -32,11 +41,22 @@ class SettingsDataWorker(QThread):
         }
         repository = None
         try:
-            payload["backups"] = available_backups(self.index_path)
-            payload["diagnostics"] = IndexDiagnosticsService().inspect(self.index_path)
+            payload["backups"] = (
+                CatalogStore(self.index_layout).available_backups()
+                if self.index_layout is not None
+                else available_backups(self.index_path)
+            )
+            state_path = (
+                self.index_layout.content_state_path
+                if self.index_layout is not None else None
+            )
+            payload["diagnostics"] = IndexDiagnosticsService().inspect(
+                self.index_path, state_path
+            )
             payload["statistics"] = StatisticsService().load(
                 self.index_path,
                 self.customer_database_path,
+                state_path,
             )
             repository = CustomerRepository(self.customer_database_path)
             payload["recognition_summary"] = repository.last_recognition_run()
