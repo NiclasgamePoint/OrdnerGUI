@@ -28,6 +28,7 @@ from app.core.config import (
     CATALOG_DB_FILE,
     CUSTOMER_DB_FILE,
     DB_FILE,
+    DOCUMENT_SEARCH_ENABLED,
     INDEX_LAYOUT,
     WINDOW_HEIGHT,
     WINDOW_TITLE,
@@ -463,7 +464,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.status_bar.set_text(
-                "Suchbegriff für Kunden, Ordner oder Dokumente eingeben"
+                "Suchbegriff für Kunden oder Ordner eingeben"
             )
 
     def _refresh_customer_results_only(self):
@@ -495,9 +496,7 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text("Bitte mindestens zwei Zeichen eingeben.")
             return
         self.search_page.prepare_search()
-        self.status_bar.set_text(
-            "Kunden-, Ordner- und Dokumentsuche wird vorbereitet …"
-        )
+        self.status_bar.set_text("Kunden- und Ordnersuche wird vorbereitet …")
         self.search_debounce.start()
 
     def _start_live_search(self):
@@ -522,7 +521,10 @@ class MainWindow(QMainWindow):
         self._launch_visible_searches(query, self.search_generation)
 
     def _launch_visible_searches(self, query: str, generation: int):
-        for category in ("customers", "folders", "text"):
+        categories = ["customers", "folders"]
+        if DOCUMENT_SEARCH_ENABLED:
+            categories.append("text")
+        for category in categories:
             worker = SearchWorker(
                 self.index_manager.db_path,
                 generation,
@@ -580,15 +582,17 @@ class MainWindow(QMainWindow):
     def _update_search_status(self):
         customers = self.search_counts["customers"]
         folders = self.search_counts["folders"]
-        documents = self.search_counts["text"]
         customer_text = "…" if customers is None else str(customers)
         folder_text = "…" if folders is None else str(folders)
-        document_text = "…" if documents is None else str(documents)
-        self.status_bar.set_text(
-            f"Kunden: {customer_text} · Ordner: {folder_text} · "
-            f"Dokumente: {document_text}"
-            + self._content_coverage_status()
-        )
+        status = f"Kunden: {customer_text} · Ordner: {folder_text}"
+        if DOCUMENT_SEARCH_ENABLED:
+            documents = self.search_counts["text"]
+            document_text = "…" if documents is None else str(documents)
+            status += (
+                f" · Dokumente: {document_text}"
+                + self._content_coverage_status()
+            )
+        self.status_bar.set_text(status)
 
     def _content_coverage_status(self) -> str:
         coverage = self.content_search_coverage

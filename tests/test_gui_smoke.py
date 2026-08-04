@@ -36,6 +36,41 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIsNotNone(window.folder_page)
             window.close()
 
+    def test_global_search_starts_only_customer_and_folder_workers(self):
+        with (
+            patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+            patch("app.gui.main_window.SearchWorker") as worker_class,
+        ):
+            window = MainWindow()
+            window._launch_visible_searches("Muster", generation=1)
+
+        categories = [
+            call.args[2] for call in worker_class.call_args_list
+        ]
+        self.assertEqual(categories, ["customers", "folders"])
+        self.assertEqual(
+            window.header.search_input.placeholderText(),
+            "Kunden oder Ordner durchsuchen …",
+        )
+        window._update_search_status()
+        self.assertNotIn("Dokumente", window.status_bar.status_label.text())
+        window.close()
+
+    def test_document_worker_can_be_reenabled_with_the_feature_flag(self):
+        with (
+            patch.object(MainWindow, "_initialize_data_source", lambda self: None),
+            patch("app.gui.main_window.DOCUMENT_SEARCH_ENABLED", True),
+            patch("app.gui.main_window.SearchWorker") as worker_class,
+        ):
+            window = MainWindow()
+            window._launch_visible_searches("Muster", generation=1)
+
+        categories = [
+            call.args[2] for call in worker_class.call_args_list
+        ]
+        self.assertEqual(categories, ["customers", "folders", "text"])
+        window.close()
+
     def test_forced_fullscreen_is_enabled_only_when_vnc_flag_is_set(self):
         with patch.dict("os.environ", {"PAPAGUI_FORCE_FULLSCREEN": "1"}, clear=False):
             self.assertTrue(forced_fullscreen())

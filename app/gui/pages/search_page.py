@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.customer_models import Customer
+from app.core.config import DOCUMENT_SEARCH_ENABLED
 from app.gui.widgets.result_row import ResultRow
 from app.gui.widgets.document_result_row import DocumentResultRow
 from app.gui.widgets.statistics_widget import StatisticsWidget
@@ -85,9 +86,14 @@ class SearchPage(QWidget):
     openFileRequested = Signal(str)
     openPathRequested = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        document_search_enabled: bool = DOCUMENT_SEARCH_ENABLED,
+    ):
         super().__init__(parent)
         self.setObjectName("SearchPage")
+        self.document_search_enabled = bool(document_search_enabled)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -111,6 +117,8 @@ class SearchPage(QWidget):
         self.scroll_area.setAccessibleName("Globale Suchergebnisse")
         self.scroll_area.setAccessibleDescription(
             "Enthält Kunden-, Ordner- und Dokumenttreffer."
+            if self.document_search_enabled
+            else "Enthält Kunden- und Ordnertreffer."
         )
 
         content = QWidget()
@@ -122,6 +130,7 @@ class SearchPage(QWidget):
         self.customer_section = _ResultSection("Kunden")
         self.folder_section = _ResultSection("Ordner")
         self.document_section = _ResultSection("Dokumentinhalte")
+        self.document_section.setVisible(self.document_search_enabled)
         self.customer_section.activated.connect(
             lambda value: self.customerActivated.emit(int(value))
         )
@@ -157,19 +166,22 @@ class SearchPage(QWidget):
         else:
             self.set_customers(customers, len(customers))
         self.folder_section.set_message("Suchbegriff eingeben")
-        self.document_section.set_message("Suchbegriff eingeben")
+        if self.document_search_enabled:
+            self.document_section.set_message("Suchbegriff eingeben")
 
     def prepare_search(self):
         self.statistics_widget.setVisible(False)
         self.customer_section.set_message("Kundensuche läuft …")
         self.folder_section.set_message("Ordnersuche läuft …")
-        self.document_section.set_message("Dokumentsuche läuft …")
+        if self.document_search_enabled:
+            self.document_section.set_message("Dokumentsuche läuft …")
 
     def show_short_query_hint(self):
         self.statistics_widget.setVisible(False)
         self.customer_section.set_message("Mindestens zwei Zeichen eingeben")
         self.folder_section.set_message("Mindestens zwei Zeichen eingeben")
-        self.document_section.set_message("Mindestens zwei Zeichen eingeben")
+        if self.document_search_enabled:
+            self.document_section.set_message("Mindestens zwei Zeichen eingeben")
 
     def set_customer_error(self, error: str):
         self.customer_section.set_message(f"Kundensuche fehlgeschlagen: {error}")
@@ -178,6 +190,8 @@ class SearchPage(QWidget):
         self.folder_section.set_message(f"Ordnersuche fehlgeschlagen: {error}")
 
     def set_document_error(self, error: str):
+        if not self.document_search_enabled:
+            return
         self.document_section.set_message(f"Dokumentsuche fehlgeschlagen: {error}")
 
     def set_statistics(
@@ -235,6 +249,8 @@ class SearchPage(QWidget):
         self.folder_section.set_rows(rows, total)
 
     def set_documents(self, documents: list[dict], total: int):
+        if not self.document_search_enabled:
+            return
         rows = [
             DocumentResultRow(
                 str(document.get("filename") or Path(
@@ -248,6 +264,8 @@ class SearchPage(QWidget):
         self.document_section.set_rows(rows, total)
 
     def set_document_coverage(self, coverage):
+        if not self.document_search_enabled:
+            return
         if coverage is None or coverage.complete:
             self.document_section.set_note("")
             return

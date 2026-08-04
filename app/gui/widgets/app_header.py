@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
+from app.core.config import DOCUMENT_SEARCH_ENABLED
+
 from app.gui.widgets.buttons import AppButton
 
 
@@ -34,11 +36,15 @@ class AppHeader(QFrame):
         self.search_input.setObjectName("GlobalSearchInput")
         self.search_input.setPlaceholderText(
             "Kunden, Ordner oder Dokumentinhalte durchsuchen …"
+            if DOCUMENT_SEARCH_ENABLED
+            else "Kunden oder Ordner durchsuchen …"
         )
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setAccessibleName("Globale Suche")
         self.search_input.setAccessibleDescription(
             "Durchsucht Kunden, Ordnernamen und extrahierte Dokumentinhalte."
+            if DOCUMENT_SEARCH_ENABLED
+            else "Durchsucht Kunden und Ordnernamen."
         )
         self.search_input.textChanged.connect(self.queryChanged.emit)
         self.search_input.returnPressed.connect(self.searchRequested.emit)

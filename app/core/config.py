@@ -43,6 +43,9 @@ WINDOW_TITLE = "PapaGUI - Kundenmanagement System"
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
+# The content index remains active for enrichment and future search activation.
+DOCUMENT_SEARCH_ENABLED = False
+
 
 def forced_fullscreen() -> bool:
     value = os.getenv("PAPAGUI_FORCE_FULLSCREEN", "").strip().casefold()
