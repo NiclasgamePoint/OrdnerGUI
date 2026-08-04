@@ -23,6 +23,7 @@ class RecognitionBlacklist:
 
     def __init__(self, options: CustomerRecognitionOptions):
         self.emails = {value.casefold() for value in options.emails}
+        self.phones = {self.normalize_phone(value) for value in options.phones}
         self.names = {normalize_identity(value) for value in options.names}
         self.addresses = {normalize_identity(value) for value in options.addresses}
         self.fragments = {
@@ -45,6 +46,11 @@ class RecognitionBlacklist:
             value.casefold() in self.emails or self.contains_fragment(value)
         )
 
+    def phone_blocked(self, value: str) -> bool:
+        return bool(value) and (
+            self.normalize_phone(value) in self.phones or self.contains_fragment(value)
+        )
+
     def name_blocked(self, value: str) -> bool:
         return bool(value) and (
             normalize_identity(value) in self.names or self.contains_fragment(value)
@@ -63,6 +69,8 @@ class RecognitionBlacklist:
     def filter_suggestion(self, suggestion: CustomerSuggestion) -> CustomerSuggestion:
         if self.email_blocked(suggestion.email):
             suggestion.email = ""
+        if self.phone_blocked(suggestion.phone):
+            suggestion.phone = ""
         if self.address_blocked(
             suggestion.street, suggestion.postal_code, suggestion.city
         ):
@@ -74,7 +82,8 @@ class RecognitionBlacklist:
             if self.name_blocked(contact.name):
                 continue
             email = "" if self.email_blocked(contact.email) else contact.email
-            if not email and not contact.phone and normalize_identity(contact.name) in {
+            phone = "" if self.phone_blocked(contact.phone) else contact.phone
+            if not email and not phone and normalize_identity(contact.name) in {
                 "kunde", "kontakt", "ansprechpartner", "ansprechpartnerin",
             }:
                 continue
@@ -82,13 +91,14 @@ class RecognitionBlacklist:
                 name=contact.name,
                 role=contact.role,
                 email=email,
-                phone=contact.phone,
+                phone=phone,
             ))
         suggestion.contacts = filtered_contacts
         suggestion.evidence = [
             item for item in suggestion.evidence
             if not (
                 (item.field_name == "email" and self.email_blocked(item.value))
+                or (item.field_name == "phone" and self.phone_blocked(item.value))
                 or (item.field_name == "contact_name" and self.name_blocked(item.value))
                 or (
                     item.field_name in {"street", "postal_code", "city"}

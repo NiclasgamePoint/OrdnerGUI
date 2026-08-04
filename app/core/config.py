@@ -82,6 +82,7 @@ class CustomerRecognitionOptions:
     enabled: bool = True
     minimum_year: int = 2016
     email_blacklist: str = ""
+    phone_blacklist: str = ""
     name_blacklist: str = ""
     address_blacklist: str = ""
     text_blacklist: str = ""
@@ -97,6 +98,10 @@ class CustomerRecognitionOptions:
     @property
     def emails(self) -> list[str]:
         return self._lines(self.email_blacklist)
+
+    @property
+    def phones(self) -> list[str]:
+        return self._lines(self.phone_blacklist)
 
     @property
     def names(self) -> list[str]:
@@ -195,6 +200,7 @@ def load_customer_recognition_options() -> CustomerRecognitionOptions:
         ).lower() in {"1", "true", "yes"},
         minimum_year=2016,
         email_blacklist=str(settings.value("customer_recognition/email_blacklist", "")),
+        phone_blacklist=str(settings.value("customer_recognition/phone_blacklist", "")),
         name_blacklist=str(settings.value("customer_recognition/name_blacklist", "")),
         address_blacklist=str(settings.value("customer_recognition/address_blacklist", "")),
         text_blacklist=str(settings.value("customer_recognition/text_blacklist", "")),
@@ -213,6 +219,7 @@ def save_customer_recognition_options(options: CustomerRecognitionOptions):
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
     settings.setValue("customer_recognition/enabled", options.enabled)
     settings.setValue("customer_recognition/email_blacklist", options.email_blacklist)
+    settings.setValue("customer_recognition/phone_blacklist", options.phone_blacklist)
     settings.setValue("customer_recognition/name_blacklist", options.name_blacklist)
     settings.setValue("customer_recognition/address_blacklist", options.address_blacklist)
     settings.setValue("customer_recognition/text_blacklist", options.text_blacklist)
