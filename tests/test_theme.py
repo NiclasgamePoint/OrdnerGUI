@@ -31,11 +31,11 @@ class ThemeTests(unittest.TestCase):
         palette = build_palette("light", "#2db89d")
         self.assertEqual(
             palette.color(QPalette.ColorRole.Window).name(),
-            "#eaf0ef",
+            "#ddeaf4",
         )
         self.assertEqual(
             palette.color(QPalette.ColorRole.Base).name(),
-            "#f5f8f7",
+            "#eef4fa",
         )
         self.assertIn("QHeaderView::section", build_stylesheet("light", "#2db89d"))
         self.assertIn("QScrollArea#PageScrollArea", build_stylesheet("dark", "#2db89d"))
