@@ -536,7 +536,6 @@ class SettingsPopup(QFrame):
         self.recognition_blacklist_fields: dict[str, QPlainTextEdit] = {}
         blacklist_specs = [
             ("email_blacklist", "E-Mail-Adressen", "eine Adresse pro Zeile"),
-            ("phone_blacklist", "Telefonnummern", "eine Nummer pro Zeile"),
             ("name_blacklist", "Namen", "ein Name pro Zeile"),
             ("address_blacklist", "Adressen", "eine Adresse pro Zeile"),
             ("text_blacklist", "Beliebige Textwerte", "ein Textfragment pro Zeile"),
@@ -658,7 +657,7 @@ class SettingsPopup(QFrame):
             return
         self.blacklist_suggestion_list.clear()
         type_labels = {
-            "email": "E-Mail", "phone": "Telefon",
+            "email": "E-Mail",
             "name": "Name", "address": "Adresse",
         }
         for suggestion in self.blacklist_suggestions:
