@@ -261,7 +261,7 @@ class UiNavigationTests(unittest.TestCase):
             repository.close()
 
     def test_search_page_shows_home_statistics_and_document_results(self):
-        page = SearchPage()
+        page = SearchPage(document_search_enabled=True)
         page.set_statistics(ApplicationStatistics(
             customer_count=7,
             project_count=12,
@@ -297,6 +297,22 @@ class UiNavigationTests(unittest.TestCase):
         self.assertEqual(opened_files, ["/tmp/projekt/bericht.docx"])
         self.assertEqual(opened_paths, ["/tmp/projekt"])
         self.assertIn("Dokumentausschnitt", row.snippet_label.text())
+        page.close()
+
+    def test_search_page_hides_document_results_by_default(self):
+        page = SearchPage()
+        page.prepare_search()
+        page.set_documents(
+            [{"filename": "verborgen.pdf", "path": "/tmp/verborgen.pdf"}],
+            1,
+        )
+
+        self.assertTrue(page.document_section.isHidden())
+        self.assertEqual(page.document_section.row_count, 0)
+        self.assertEqual(
+            page.scroll_area.accessibleDescription(),
+            "Enthält Kunden- und Ordnertreffer.",
+        )
         page.close()
 
     def test_central_widgets_expose_accessibility_metadata(self):
