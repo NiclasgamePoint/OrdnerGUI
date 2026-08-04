@@ -28,6 +28,7 @@
 - Text-/Word-Viewer mit Suche sowie externes Öffnen von Datei oder Ordner
 - Separate Kundenverwaltung mit Entität, Stammdaten, Kontakten, Notizen und Tags
 - Light-/Dark-Theme und frei wählbare Akzentfarbe
+- Verzögerte kontextbezogene Erklärungen für alle Einstellungsfelder und -aktionen
 
 ## Architektur
 
@@ -81,6 +82,13 @@ steuern. Pause und Fortsetzung bleiben über Programmneustarts erhalten.
 Diagnose und Wartungsaktionen betreffen ausschließlich rekonstruierbare
 Indexdaten. Suchtrefferlimit, Dokumentinhaltssuche und parallele Shard-Suche
 befinden sich getrennt unter „Einstellungen → Suche“.
+
+Alle konfigurierbaren Felder und Einstellungsaktionen besitzen eine kurze
+kontextbezogene Hilfe. Bleibt die Maus drei Sekunden über einem Feld oder hält
+es drei Sekunden den Tastaturfokus, erscheint eine passive Hilfeblase direkt am
+Element. Sie bleibt bis zum Verlassen beziehungsweise Fokuswechsel sichtbar
+und erklärt neben der Funktion auch wichtige Folgen wie Neuindizierung,
+Ressourcenverbrauch oder Datenlöschung.
 
 Neue Installationen starten mit maximal 100 MB Dokumentgröße und fünf
 OCR-Seiten in der ersten Stufe. Liefert diese Stufe weniger als 500 Zeichen,

@@ -31,7 +31,63 @@ from app.core.config import (
 from app.core.index_diagnostics import IndexDiagnostics
 from app.core.statistics import ApplicationStatistics
 from app.gui.widgets.statistics_widget import StatisticsWidget
+from app.gui.settings_help import SettingsHelpController
 from app.services.index_capabilities import IndexCapabilities
+
+
+SETTINGS_HELP_TEXTS = {
+    "data_source": "Ordner mit den Projekt- und Kundendateien. Ein Wechsel baut den lokalen Suchindex für die neue Quelle auf.",
+    "browse_data_source": "Öffnet die Ordnerauswahl, ohne die aktuelle Datenquelle sofort zu ändern.",
+    "apply_data_source": "Übernimmt den ausgewählten Ordner und startet den erforderlichen Indexaufbau.",
+    "update_index": "Prüft die Datenquelle auf neue, geänderte oder gelöschte Dateien. Der Lauf kann im Hintergrund weiterlaufen.",
+    "cancel_index": "Bricht den aktuellen Kataloglauf kontrolliert ab. Der zuletzt fertige Index bleibt nutzbar.",
+    "index_backup": "Wählt einen früheren Katalogstand aus den rotierenden Sicherungen aus.",
+    "load_index_backup": "Aktiviert den gewählten alten Katalogstand. Kundendaten werden dabei nicht ersetzt.",
+    "automatic_monitoring": "Übernimmt Dateiänderungen automatisch, sobald die Dateisystemüberwachung sie meldet.",
+    "change_delay": "Wartezeit nach einer Dateiänderung, bevor der Index aktualisiert wird. Sie bündelt schnell aufeinanderfolgende Änderungen.",
+    "daily_reconciliation": "Prüft einmal täglich den vollständigen Datenordner als Sicherheitsnetz für verpasste Dateisystemereignisse.",
+    "excluded_folders": "Kommagetrennte Ordnernamen, die beim Indexieren vollständig übersprungen werden.",
+    "content_indexing": "Extrahiert Dokumenttexte für Volltextsuche und Kundenerkennung in einem fortsetzbaren Hintergrundlauf.",
+    "content_formats": "Legt fest, aus welchen Dateiformaten durchsuchbarer Inhalt extrahiert wird. Änderungen können eine Neuindizierung auslösen.",
+    "max_file_size": "Größere Dokumente werden bei der Inhaltsextraktion übersprungen. Der Dateikatalog enthält sie weiterhin.",
+    "max_characters": "Begrenzt den je Dokument gespeicherten Suchtext und damit Speicherbedarf und Verarbeitungszeit.",
+    "resource_profile": "Steuert parallele Dokument-Worker: Schonend etwa 15 %, Ausgewogen 25 % und Schnell 60 % der logischen CPUs, zusätzlich RAM-begrenzt.",
+    "preferred_patterns": "Dateinamen mit diesen Begriffen werden zuerst verarbeitet, damit wichtige Inhalte früher verfügbar sind.",
+    "priority_documents": "Anzahl zuerst verarbeiteter Dokumente je Projektordner, bevor der übrige Bestand folgt.",
+    "newest_first": "Verarbeitet neuere Jahresbereiche vor älteren Archiven.",
+    "ocr_enabled": "Verwendet Tesseract für gescannte PDFs, wenn normale PDF-Parser keinen Text liefern.",
+    "ocr_initial_pages": "Anzahl Seiten der schnellen ersten OCR-Stufe.",
+    "ocr_extended_pages": "Maximale Gesamtseitenzahl, falls die erste OCR-Stufe zu wenig Text erkennt.",
+    "ocr_threshold": "Unterschreitet die erste OCR-Stufe diese Zeichenzahl, werden weitere Seiten verarbeitet.",
+    "pdf_timeout": "Maximale Zeit für pdftotext und den isolierten PyPDF2-Fallback pro PDF.",
+    "ocr_timeout": "Gemeinsames Zeitbudget für Rendern und Texterkennung eines gescannten PDFs.",
+    "save_index": "Speichert die Indexeinstellungen. Änderungen an Formaten oder Extraktion können den Inhaltsindex neu aufbauen.",
+    "pause_content": "Stoppt neue Dokumentaufgaben und pausiert nach Abschluss der bereits laufenden Worker.",
+    "resume_content": "Setzt die fortsetzbare Dokumentwarteschlange an der letzten Stelle fort.",
+    "retry_failed": "Gibt fehlgeschlagene oder abgelaufene Dokumente für einen späteren Reparaturlauf frei.",
+    "optimize_content": "Prüft und optimiert Inhaltsshards, ohne den Dateikatalog oder Kundendaten zu löschen.",
+    "rebuild_content": "Erstellt alle Dokumenttexte und Inhaltsshards neu. Der schnelle Dateikatalog bleibt verfügbar.",
+    "clear_content": "Löscht ausschließlich den rekonstruierbaren Dokumentinhaltindex. Datei- und Kundendaten bleiben erhalten.",
+    "clear_customers": "Löscht dauerhaft alle Kunden, Kontakte, Projekte, Prüffälle und Vorschläge; der Dokumentindex bleibt erhalten.",
+    "result_limit": "Maximale Zahl gefundener Ergebnisse, die pro Suche berücksichtigt wird.",
+    "content_search": "Durchsucht bereits fertiggestellte Dokumentinhalte zusätzlich zu Kunden und Ordnern.",
+    "parallel_shards": "Anzahl gleichzeitig durchsuchter Jahres-Indexdateien. Höhere Werte können die Suche beschleunigen und mehr Ressourcen benötigen.",
+    "save_search": "Speichert die Suchoptionen, ohne einen neuen Indexaufbau auszulösen.",
+    "recognition_enabled": "Erkennt Kunden automatisch aus strukturierten Projektordnern ab 2016; manuelle Werte werden nicht überschrieben.",
+    "recognition_patterns": "Dokumentnamen, die bei der automatischen Kontakterkennung bevorzugt ausgewertet werden.",
+    "blacklist_threshold": "Ab so vielen Kundenordnern wird ein häufig wiederkehrender Wert als möglicher Blocklisteneintrag vorgeschlagen.",
+    "recognition_blacklist": "Ein Wert pro Zeile. Treffer werden nur aus automatisch erkannten Kontaktdaten entfernt, nicht aus manuellen Einträgen.",
+    "save_recognition": "Speichert Aktivierung, Dokumentmuster und Blocklisten der Kundenerkennung.",
+    "blacklist_suggestions": "Zeigt häufige erkannte Werte, die möglicherweise allgemeine Absenderdaten statt Kundendaten sind.",
+    "accept_blacklist": "Übernimmt den ausgewählten Vorschlag in die passende Blockliste.",
+    "dismiss_blacklist": "Verwirft den ausgewählten Blocklistenvorschlag dauerhaft.",
+    "review_recognition": "Öffnet mehrdeutige Kundenzuordnungen zur manuellen Entscheidung.",
+    "appearance_mode": "Wechselt zwischen heller und dunkler Oberfläche.",
+    "appearance_accent": "Wählt die Akzentfarbe für Hervorhebungen und primäre Aktionen.",
+    "custom_accent": "Öffnet die Farbauswahl für eine eigene Akzentfarbe.",
+    "appearance_contrast": "Passt den Kontrast der Oberflächenfarben an; 100 % ist der Standard.",
+    "appearance_font_size": "Ändert Schriftgröße und die mitwachsenden Bedienelemente der gesamten Anwendung.",
+}
 
 
 class ClickActivatedSpinBox(QSpinBox):
@@ -130,6 +186,7 @@ class SettingsPopup(QFrame):
         self.statistics = statistics
         self.index_capabilities = index_capabilities or IndexCapabilities()
         self._color_dialog_active = False
+        self.help_controller = SettingsHelpController(self)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -211,6 +268,7 @@ class SettingsPopup(QFrame):
         root_layout.addWidget(content)
 
         self.nav_list.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav_list.currentRowChanged.connect(lambda _row: self.help_controller.hide())
 
     def _build_general_page(self) -> QWidget:
         page = QWidget()
@@ -236,10 +294,12 @@ class SettingsPopup(QFrame):
         self.data_path_input.setAccessibleDescription(
             "Pfad zum Ordner mit den zu indexierenden Projektdaten."
         )
+        self._register_help("data_source", path_label, self.data_path_input)
         self.data_path_input.textChanged.connect(self._clear_path_error)
         path_row.addWidget(self.data_path_input, 1)
 
         browse_button = AppButton("Durchsuchen", AppButton.SECONDARY)
+        self._register_help("browse_data_source", browse_button)
         browse_button.clicked.connect(self.choose_data_path)
         path_row.addWidget(browse_button)
         layout.addLayout(path_row)
@@ -259,6 +319,7 @@ class SettingsPopup(QFrame):
         apply_row = QHBoxLayout()
         apply_row.addStretch()
         apply_button = AppButton("Pfad übernehmen")
+        self._register_help("apply_data_source", apply_button)
         apply_button.clicked.connect(self.apply_data_path)
         apply_row.addWidget(apply_button)
         layout.addLayout(apply_row)
@@ -371,11 +432,13 @@ class SettingsPopup(QFrame):
 
         reindex_row = QHBoxLayout()
         self.reindex_button = AppButton("Index aktualisieren", AppButton.SECONDARY)
+        self._register_help("update_index", self.reindex_button)
         self.reindex_button.clicked.connect(self.request_reindex)
         reindex_row.addWidget(self.reindex_button)
         self.index_busy_indicator = BusyIndicator()
         reindex_row.addWidget(self.index_busy_indicator)
         self.cancel_index_button = AppButton("Abbrechen", AppButton.DANGER)
+        self._register_help("cancel_index", self.cancel_index_button)
         self.cancel_index_button.clicked.connect(self.cancelIndexRequested.emit)
         reindex_row.addWidget(self.cancel_index_button)
         reindex_row.addStretch()
@@ -392,8 +455,10 @@ class SettingsPopup(QFrame):
 
         backup_row = QHBoxLayout()
         self.backup_combo = QComboBox()
+        self._register_help("index_backup", backup_label, self.backup_combo)
         backup_row.addWidget(self.backup_combo, 1)
         self.load_backup_button = AppButton("Index laden", AppButton.SECONDARY)
+        self._register_help("load_index_backup", self.load_backup_button)
         self.load_backup_button.clicked.connect(self.load_selected_backup)
         backup_row.addWidget(self.load_backup_button)
         layout.addLayout(backup_row)
@@ -413,7 +478,11 @@ class SettingsPopup(QFrame):
         self.automatic_monitoring_checkbox.setChecked(
             self.index_options.automatic_monitoring_enabled
         )
-        form.addRow(self._form_label("Überwachung"), self.automatic_monitoring_checkbox)
+        form.addRow(
+            self._form_label("Überwachung", "automatic_monitoring"),
+            self.automatic_monitoring_checkbox,
+        )
+        self._register_help("automatic_monitoring", self.automatic_monitoring_checkbox)
 
         self.change_delay_combo = QComboBox()
         for seconds in (5, 15, 30, 60):
@@ -421,7 +490,11 @@ class SettingsPopup(QFrame):
         self.change_delay_combo.setCurrentIndex(max(
             0, self.change_delay_combo.findData(self.index_options.change_delay_seconds)
         ))
-        form.addRow(self._form_label("Änderungsverzögerung"), self.change_delay_combo)
+        form.addRow(
+            self._form_label("Änderungsverzögerung", "change_delay"),
+            self.change_delay_combo,
+        )
+        self._register_help("change_delay", self.change_delay_combo)
 
         self.daily_reconciliation_checkbox = QCheckBox(
             "Täglichen vollständigen Sicherheitsabgleich ausführen"
@@ -430,13 +503,18 @@ class SettingsPopup(QFrame):
             self.index_options.daily_reconciliation_enabled
         )
         form.addRow(
-            self._form_label("Sicherheitsabgleich"),
+            self._form_label("Sicherheitsabgleich", "daily_reconciliation"),
             self.daily_reconciliation_checkbox,
         )
+        self._register_help("daily_reconciliation", self.daily_reconciliation_checkbox)
 
         self.excluded_folders_input = QLineEdit(self.index_options.excluded_folders)
         self.excluded_folders_input.setPlaceholderText(".git, .venv, node_modules")
-        form.addRow(self._form_label("Ausgeschlossene Ordner"), self.excluded_folders_input)
+        form.addRow(
+            self._form_label("Ausgeschlossene Ordner", "excluded_folders"),
+            self.excluded_folders_input,
+        )
+        self._register_help("excluded_folders", self.excluded_folders_input)
         layout.addLayout(form)
 
         content_heading = QLabel("Hintergrund-Dateiindizierung")
@@ -454,8 +532,10 @@ class SettingsPopup(QFrame):
             self.index_options.content_indexing_enabled
         )
         content_form.addRow(
-            self._form_label("Dateiindizierung"), self.content_indexing_checkbox
+            self._form_label("Dateiindizierung", "content_indexing"),
+            self.content_indexing_checkbox,
         )
+        self._register_help("content_indexing", self.content_indexing_checkbox)
 
         formats_widget = QWidget()
         formats_layout = QVBoxLayout(formats_widget)
@@ -474,34 +554,45 @@ class SettingsPopup(QFrame):
         for label, extensions in format_groups:
             checkbox = QCheckBox(label)
             checkbox.setChecked(bool(selected_types & extensions))
+            self._register_help("content_formats", checkbox)
             self.content_format_checkboxes[label] = (checkbox, extensions)
             formats_layout.addWidget(checkbox)
-        content_form.addRow(self._form_label("Durchsuchbare Formate"), formats_widget)
+        content_form.addRow(
+            self._form_label("Durchsuchbare Formate", "content_formats"), formats_widget
+        )
 
         self.max_file_size_spin = ClickActivatedSpinBox()
         self.max_file_size_spin.setRange(1, 10_240)
         self.max_file_size_spin.setSuffix(" MB")
         self.max_file_size_spin.setValue(self.index_options.max_file_size_mb)
-        content_form.addRow(self._form_label("Maximale Dokumentgröße"), self.max_file_size_spin)
+        content_form.addRow(
+            self._form_label("Maximale Dokumentgröße", "max_file_size"),
+            self.max_file_size_spin,
+        )
+        self._register_help("max_file_size", self.max_file_size_spin)
 
         self.max_characters_spin = ClickActivatedSpinBox()
         self.max_characters_spin.setRange(10_000, 20_000_000)
         self.max_characters_spin.setSingleStep(100_000)
         self.max_characters_spin.setValue(self.index_options.max_extracted_characters)
-        content_form.addRow(self._form_label("Maximale Extraktlänge"), self.max_characters_spin)
+        content_form.addRow(
+            self._form_label("Maximale Extraktlänge", "max_characters"),
+            self.max_characters_spin,
+        )
+        self._register_help("max_characters", self.max_characters_spin)
 
         self.resource_profile_combo = QComboBox()
         self.resource_profile_combo.addItem("Schonend", "gentle")
         self.resource_profile_combo.addItem("Ausgewogen", "balanced")
         self.resource_profile_combo.addItem("Schnell", "fast")
-        self.resource_profile_combo.setToolTip(
-            "Workerbudget nach logischen CPUs: Schonend 15 %, Ausgewogen 25 %, "
-            "Schnell 60 %. Zusätzlich durch freien Arbeitsspeicher begrenzt."
-        )
         self.resource_profile_combo.setCurrentIndex(max(
             0, self.resource_profile_combo.findData(self.index_options.resource_profile)
         ))
-        content_form.addRow(self._form_label("Ressourcenprofil"), self.resource_profile_combo)
+        content_form.addRow(
+            self._form_label("Ressourcenprofil", "resource_profile"),
+            self.resource_profile_combo,
+        )
+        self._register_help("resource_profile", self.resource_profile_combo)
 
         self.preferred_patterns_input = QLineEdit(
             self.index_options.preferred_document_patterns
@@ -510,8 +601,10 @@ class SettingsPopup(QFrame):
             "Angebot, Auftrag, Vertrag, Anschreiben"
         )
         content_form.addRow(
-            self._form_label("Wichtige Dateinamen"), self.preferred_patterns_input
+            self._form_label("Wichtige Dateinamen", "preferred_patterns"),
+            self.preferred_patterns_input,
         )
+        self._register_help("preferred_patterns", self.preferred_patterns_input)
 
         self.priority_documents_spin = ClickActivatedSpinBox()
         self.priority_documents_spin.setRange(1, 100)
@@ -519,15 +612,17 @@ class SettingsPopup(QFrame):
             self.index_options.priority_documents_per_project
         )
         content_form.addRow(
-            self._form_label("Schnelle Dokumente je Projekt"),
+            self._form_label("Schnelle Dokumente je Projekt", "priority_documents"),
             self.priority_documents_spin,
         )
+        self._register_help("priority_documents", self.priority_documents_spin)
 
         self.newest_years_checkbox = QCheckBox("Neueste Jahre zuerst verarbeiten")
         self.newest_years_checkbox.setChecked(self.index_options.newest_years_first)
         content_form.addRow(
-            self._form_label("Reihenfolge"), self.newest_years_checkbox
+            self._form_label("Reihenfolge", "newest_first"), self.newest_years_checkbox
         )
+        self._register_help("newest_first", self.newest_years_checkbox)
 
         layout.addLayout(content_form)
 
@@ -541,12 +636,17 @@ class SettingsPopup(QFrame):
 
         self.ocr_checkbox = QCheckBox("OCR für gescannte PDFs verwenden")
         self.ocr_checkbox.setChecked(self.index_options.ocr_enabled)
-        ocr_form.addRow(self._form_label("OCR"), self.ocr_checkbox)
+        ocr_form.addRow(self._form_label("OCR", "ocr_enabled"), self.ocr_checkbox)
+        self._register_help("ocr_enabled", self.ocr_checkbox)
 
         self.ocr_pages_spin = ClickActivatedSpinBox()
         self.ocr_pages_spin.setRange(1, 1_000)
         self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
-        ocr_form.addRow(self._form_label("OCR-Seiten (erste Stufe)"), self.ocr_pages_spin)
+        ocr_form.addRow(
+            self._form_label("OCR-Seiten (erste Stufe)", "ocr_initial_pages"),
+            self.ocr_pages_spin,
+        )
+        self._register_help("ocr_initial_pages", self.ocr_pages_spin)
 
         self.ocr_extended_pages_spin = ClickActivatedSpinBox()
         self.ocr_extended_pages_spin.setRange(1, 1_000)
@@ -554,9 +654,10 @@ class SettingsPopup(QFrame):
             self.index_options.ocr_extended_max_pages
         )
         ocr_form.addRow(
-            self._form_label("OCR-Seiten (erweiterte Stufe)"),
+            self._form_label("OCR-Seiten (erweiterte Stufe)", "ocr_extended_pages"),
             self.ocr_extended_pages_spin,
         )
+        self._register_help("ocr_extended_pages", self.ocr_extended_pages_spin)
 
         self.ocr_threshold_spin = ClickActivatedSpinBox()
         self.ocr_threshold_spin.setRange(0, 100_000)
@@ -565,9 +666,10 @@ class SettingsPopup(QFrame):
         )
         self.ocr_threshold_spin.setSuffix(" Zeichen")
         ocr_form.addRow(
-            self._form_label("Erweiterung bei weniger als"),
+            self._form_label("Erweiterung bei weniger als", "ocr_threshold"),
             self.ocr_threshold_spin,
         )
+        self._register_help("ocr_threshold", self.ocr_threshold_spin)
 
         self.ocr_timeout_spin = ClickActivatedSpinBox()
         self.ocr_timeout_spin.setRange(5, 600)
@@ -581,10 +683,15 @@ class SettingsPopup(QFrame):
             self.index_options.pdf_text_timeout_seconds
         )
         ocr_form.addRow(
-            self._form_label("PDF-Texterkennung Zeitlimit"),
+            self._form_label("PDF-Texterkennung Zeitlimit", "pdf_timeout"),
             self.pdf_timeout_spin,
         )
-        ocr_form.addRow(self._form_label("OCR-Zeitlimit pro PDF"), self.ocr_timeout_spin)
+        self._register_help("pdf_timeout", self.pdf_timeout_spin)
+        ocr_form.addRow(
+            self._form_label("OCR-Zeitlimit pro PDF", "ocr_timeout"),
+            self.ocr_timeout_spin,
+        )
+        self._register_help("ocr_timeout", self.ocr_timeout_spin)
 
         capability = self.index_capabilities
         languages = ", ".join(capability.ocr_languages) or "keine erkannt"
@@ -609,6 +716,7 @@ class SettingsPopup(QFrame):
         save_row = QHBoxLayout()
         save_row.addStretch()
         self.save_index_options_button = AppButton("Indexeinstellungen übernehmen")
+        self._register_help("save_index", self.save_index_options_button)
         self.save_index_options_button.clicked.connect(self.save_index_options)
         save_row.addWidget(self.save_index_options_button)
         layout.addLayout(save_row)
@@ -626,12 +734,15 @@ class SettingsPopup(QFrame):
 
         control_row = QHBoxLayout()
         pause_button = AppButton("Pausieren", AppButton.SECONDARY)
+        self._register_help("pause_content", pause_button)
         pause_button.clicked.connect(self.pauseContentIndexRequested.emit)
         control_row.addWidget(pause_button)
         resume_button = AppButton("Fortsetzen", AppButton.SECONDARY)
+        self._register_help("resume_content", resume_button)
         resume_button.clicked.connect(self.resumeContentIndexRequested.emit)
         control_row.addWidget(resume_button)
         retry_button = AppButton("Fehler erneut versuchen", AppButton.SECONDARY)
+        self._register_help("retry_failed", retry_button)
         retry_button.clicked.connect(self.retryFailedContentRequested.emit)
         control_row.addWidget(retry_button)
         control_row.addStretch()
@@ -639,12 +750,15 @@ class SettingsPopup(QFrame):
 
         maintenance_row = QHBoxLayout()
         optimize_button = AppButton("Optimieren", AppButton.SECONDARY)
+        self._register_help("optimize_content", optimize_button)
         optimize_button.clicked.connect(self.optimizeContentIndexRequested.emit)
         maintenance_row.addWidget(optimize_button)
         rebuild_button = AppButton("Neu aufbauen", AppButton.SECONDARY)
+        self._register_help("rebuild_content", rebuild_button)
         rebuild_button.clicked.connect(self.rebuildContentIndexRequested.emit)
         maintenance_row.addWidget(rebuild_button)
         clear_button = AppButton("Dokumentindex löschen", AppButton.DANGER)
+        self._register_help("clear_content", clear_button)
         clear_button.clicked.connect(self.clearContentIndexRequested.emit)
         maintenance_row.addWidget(clear_button)
         maintenance_row.addStretch()
@@ -678,6 +792,7 @@ class SettingsPopup(QFrame):
             "Kundendaten löschen",
             AppButton.DANGER,
         )
+        self._register_help("clear_customers", self.clear_customer_data_button)
         self.clear_customer_data_button.clicked.connect(
             self.clearCustomerDataRequested.emit
         )
@@ -716,7 +831,11 @@ class SettingsPopup(QFrame):
         self.result_limit_spin = ClickActivatedSpinBox()
         self.result_limit_spin.setRange(10, 5_000)
         self.result_limit_spin.setValue(self.index_options.result_limit)
-        form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
+        form.addRow(
+            self._form_label("Maximale Suchtreffer", "result_limit"),
+            self.result_limit_spin,
+        )
+        self._register_help("result_limit", self.result_limit_spin)
 
         self.content_search_checkbox = QCheckBox(
             "Bereits fertig indexierte Dokumentinhalte durchsuchen"
@@ -725,8 +844,10 @@ class SettingsPopup(QFrame):
             self.index_options.content_search_enabled
         )
         form.addRow(
-            self._form_label("Dokumentinhaltssuche"), self.content_search_checkbox
+            self._form_label("Dokumentinhaltssuche", "content_search"),
+            self.content_search_checkbox,
         )
+        self._register_help("content_search", self.content_search_checkbox)
 
         self.parallel_shards_spin = ClickActivatedSpinBox()
         self.parallel_shards_spin.setRange(1, 16)
@@ -734,13 +855,16 @@ class SettingsPopup(QFrame):
             self.index_options.maximum_parallel_shards
         )
         form.addRow(
-            self._form_label("Gleichzeitige Indexdateien"), self.parallel_shards_spin
+            self._form_label("Gleichzeitige Indexdateien", "parallel_shards"),
+            self.parallel_shards_spin,
         )
+        self._register_help("parallel_shards", self.parallel_shards_spin)
         layout.addLayout(form)
 
         save_row = QHBoxLayout()
         save_row.addStretch()
         save_button = AppButton("Sucheinstellungen speichern")
+        self._register_help("save_search", save_button)
         save_button.clicked.connect(self.save_index_options)
         save_row.addWidget(save_button)
         layout.addLayout(save_row)
@@ -792,6 +916,7 @@ class SettingsPopup(QFrame):
             QSizePolicy.Ignored, QSizePolicy.Preferred
         )
         self.recognition_enabled.setChecked(self.recognition_options.enabled)
+        self._register_help("recognition_enabled", self.recognition_enabled)
         layout.addWidget(self.recognition_enabled)
 
         patterns_label = QLabel("Priorisierte Dokumentnamen")
@@ -807,6 +932,9 @@ class SettingsPopup(QFrame):
         self.preferred_document_patterns.setSizePolicy(
             QSizePolicy.Ignored, QSizePolicy.Fixed
         )
+        self._register_help(
+            "recognition_patterns", patterns_label, self.preferred_document_patterns
+        )
         layout.addWidget(self.preferred_document_patterns)
 
         threshold_label = QLabel("Blocklistenvorschlag ab Kundenordnern")
@@ -817,6 +945,9 @@ class SettingsPopup(QFrame):
         self.frequent_value_threshold.setRange(2, 100)
         self.frequent_value_threshold.setValue(
             self.recognition_options.frequent_value_threshold
+        )
+        self._register_help(
+            "blacklist_threshold", threshold_label, self.frequent_value_threshold
         )
         layout.addWidget(self.frequent_value_threshold, 0, Qt.AlignLeft)
 
@@ -846,12 +977,14 @@ class SettingsPopup(QFrame):
             field.setMinimumHeight(max(58, self.selected_font_size * 4))
             field.setPlaceholderText(placeholder)
             field.setPlainText(str(getattr(self.recognition_options, attribute)))
+            self._register_help("recognition_blacklist", label, field)
             self.recognition_blacklist_fields[attribute] = field
             layout.addWidget(field)
 
         save_row = QHBoxLayout()
         save_row.addStretch()
         save_button = AppButton("Kundenerkennung speichern")
+        self._register_help("save_recognition", save_button)
         save_button.clicked.connect(self.save_customer_recognition_options)
         save_row.addWidget(save_button)
         layout.addLayout(save_row)
@@ -865,11 +998,14 @@ class SettingsPopup(QFrame):
             QSizePolicy.Ignored, QSizePolicy.Preferred
         )
         self.blacklist_suggestion_list.setMinimumHeight(100)
+        self._register_help("blacklist_suggestions", self.blacklist_suggestion_list)
         layout.addWidget(self.blacklist_suggestion_list)
         suggestion_actions = QHBoxLayout()
         confirm_suggestion = AppButton("Übernehmen", AppButton.SECONDARY)
+        self._register_help("accept_blacklist", confirm_suggestion)
         confirm_suggestion.clicked.connect(self._confirm_blacklist_suggestion)
         dismiss_suggestion = AppButton("Verwerfen", AppButton.SECONDARY)
+        self._register_help("dismiss_blacklist", dismiss_suggestion)
         dismiss_suggestion.clicked.connect(self._dismiss_blacklist_suggestion)
         suggestion_actions.addWidget(confirm_suggestion)
         suggestion_actions.addWidget(dismiss_suggestion)
@@ -886,6 +1022,7 @@ class SettingsPopup(QFrame):
         self.review_recognition_button = AppButton(
             "Prüffälle öffnen", AppButton.SECONDARY
         )
+        self._register_help("review_recognition", self.review_recognition_button)
         self.review_recognition_button.clicked.connect(
             self.reviewRecognitionRequested.emit
         )
@@ -1053,10 +1190,19 @@ class SettingsPopup(QFrame):
         if hasattr(self, "diagnostics_text"):
             self.diagnostics_text.setPlainText("Indexdiagnose wird geladen …")
 
-    def _form_label(self, text: str) -> QLabel:
+    def _form_label(self, text: str, help_id: str | None = None) -> QLabel:
         label = QLabel(text)
         label.setObjectName("PopupCaption")
+        if help_id:
+            self._register_help(help_id, label)
         return label
+
+    def _register_help(self, help_id: str, *widgets: QWidget):
+        self.help_controller.register(
+            help_id,
+            SETTINGS_HELP_TEXTS[help_id],
+            *widgets,
+        )
 
     def save_index_options(self):
         extensions: set[str] = set()
@@ -1197,6 +1343,7 @@ class SettingsPopup(QFrame):
         self.mode_combo.addItem("Light", "light")
         self.mode_combo.addItem("Dark", "dark")
         self.mode_combo.setCurrentIndex(0 if self.selected_mode == "light" else 1)
+        self._register_help("appearance_mode", mode_label, self.mode_combo)
         mode_row.addWidget(self.mode_combo)
         layout.addLayout(mode_row)
 
@@ -1212,6 +1359,7 @@ class SettingsPopup(QFrame):
         self.accent_combo.addItem("Berry", "#c1457b")
         self.accent_combo.addItem("Forest", "#2f9b61")
         self.accent_combo.addItem("Custom", "custom")
+        self._register_help("appearance_accent", accent_label, self.accent_combo)
         accent_row.addWidget(self.accent_combo)
         layout.addLayout(accent_row)
 
@@ -1222,6 +1370,7 @@ class SettingsPopup(QFrame):
         chooser_row.addWidget(self.preview)
 
         self.pick_button = AppButton("Farbe wählen", AppButton.SECONDARY)
+        self._register_help("custom_accent", self.pick_button)
         self.pick_button.clicked.connect(self.pick_custom_color)
         chooser_row.addWidget(self.pick_button)
         chooser_row.addStretch()
@@ -1235,7 +1384,7 @@ class SettingsPopup(QFrame):
         self.contrast_slider.setObjectName("AppearanceSlider")
         self.contrast_slider.setRange(70, 140)
         self.contrast_slider.setValue(self.selected_contrast)
-        self.contrast_slider.setToolTip("100 % entspricht dem Standardkontrast")
+        self._register_help("appearance_contrast", contrast_label, self.contrast_slider)
         contrast_row.addWidget(self.contrast_slider, 1)
         self.contrast_value_label = QLabel(f"{self.selected_contrast} %")
         self.contrast_value_label.setObjectName("SliderValue")
@@ -1254,6 +1403,9 @@ class SettingsPopup(QFrame):
         self.font_size_slider.setObjectName("AppearanceSlider")
         self.font_size_slider.setRange(10, 20)
         self.font_size_slider.setValue(self.selected_font_size)
+        self._register_help(
+            "appearance_font_size", font_label, self.font_size_slider
+        )
         font_row.addWidget(self.font_size_slider, 1)
         self.font_size_value_label = QLabel(f"{self.selected_font_size} px")
         self.font_size_value_label.setObjectName("SliderValue")
@@ -1345,6 +1497,7 @@ class SettingsPopup(QFrame):
         if self._color_dialog_active:
             event.ignore()
             return
+        self.help_controller.dispose()
         super().closeEvent(event)
 
     def size_for_parent(self) -> QSize:
