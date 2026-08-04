@@ -28,8 +28,7 @@ htmlcov/
 *.db-shm
 *.sqlite
 *.sqlite3
-data/index.db
-data/index_job.*
+data/*
 Bauvorhaben/
 data/preview_cache
 
