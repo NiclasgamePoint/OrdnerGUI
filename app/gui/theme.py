@@ -870,6 +870,19 @@ def build_stylesheet(
         padding: 5px;
     }}
 
+    QFrame#SettingsHelpBubble {{
+        background-color: {card};
+        color: {text};
+        border: 1px solid {accent};
+        border-radius: 8px;
+    }}
+
+    QLabel#SettingsHelpText {{
+        background-color: transparent;
+        color: {text};
+        border: none;
+    }}
+
     QDialog {{
         background-color: {card};
         color: {text};
