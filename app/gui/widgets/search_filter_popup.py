@@ -41,7 +41,7 @@ class SearchFilterPopup(QFrame):
         layout.addWidget(title)
 
         self.domain_combo = self._add_filter(layout, "Fachthema")
-        self.year_combo = self._add_filter(layout, "Jahr oder Vorlagen")
+        self.year_combo = self._add_filter(layout, "Jahre")
         self.file_type_combo = self._add_filter(layout, "Dateityp")
         self.sort_combo = self._add_filter(layout, "Sortierung")
         self.sort_combo.addItem("Relevanz", SearchSort.RELEVANCE)
