@@ -187,7 +187,9 @@ class DocumentTextIndexer:
                 return image, result.stdout if result.returncode == 0 else ""
 
             recognized: dict[Path, str] = {}
-            with ThreadPoolExecutor(max_workers=min(4, max(1, len(images)))) as executor:
+            with ThreadPoolExecutor(
+                max_workers=min(self.options.ocr_workers, max(1, len(images)))
+            ) as executor:
                 futures = [executor.submit(recognize, image) for image in images]
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:

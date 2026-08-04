@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import traceback
+import uuid
 
 from app.core.config import load_index_options
 from app.core.config import load_customer_recognition_options
@@ -15,7 +17,7 @@ from app.core.content_index import (
 )
 from app.core.index_job_state import cancel_path, utc_now, write_state
 from app.core.index_layout import IndexLayout
-from app.core.logging_config import configure_logging
+from app.core.logging_config import CONTENT_PROCESS_LOG_FILE, configure_logging
 from app.core.process_support import suppress_windows_crash_dialogs
 from app.services.content_index_worker import ContentIndexWorker, ContentWorkerResult
 from app.services.document_text_indexer import DocumentTextIndexer
@@ -36,18 +38,27 @@ class ContentIndexJobRunner:
         self.state_dir = state_dir
         self.customer_database_path = customer_database_path
         self.shard_target_bytes = shard_target_bytes
+        self._job_state: dict = {}
 
     def run(self) -> int:
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        write_state(self.state_dir, {
-            "status": "running", "started_at": utc_now(), "pid": os.getpid()
-        })
+        self._job_state = {
+            "job_id": uuid.uuid4().hex,
+            "status": "running",
+            "started_at": utc_now(),
+            "pid": os.getpid(),
+            "process_log": str(CONTENT_PROCESS_LOG_FILE),
+        }
+        self._write()
         try:
+            options = load_index_options()
             self._reconcile_queue()
             worker = ContentIndexWorker(
                 self.layout,
-                DocumentTextIndexer(load_index_options()),
+                DocumentTextIndexer(options),
                 shard_target_bytes=self.shard_target_bytes,
+                pause_seconds=options.document_pause_seconds,
+                newest_years_first=options.newest_years_first,
             )
             priority_result = worker.run(
                 should_cancel=lambda: cancel_path(self.state_dir).exists(),
@@ -84,7 +95,7 @@ class ContentIndexJobRunner:
                         cancelled=recovery.cancelled,
                         progress=recovery.progress,
                     )
-            write_state(self.state_dir, {
+            self._write(**{
                 "status": "cancelled" if result.cancelled else "completed",
                 "processed_count": result.processed,
                 "failed_count": result.failed,
@@ -92,7 +103,8 @@ class ContentIndexJobRunner:
             })
             return 2 if result.cancelled else 0
         except Exception as exc:
-            write_state(self.state_dir, {"status": "error", "error": str(exc)})
+            traceback.print_exc()
+            self._write(status="error", error=str(exc))
             return 1
 
     def _reconcile_queue(self):
@@ -100,6 +112,7 @@ class ContentIndexJobRunner:
         manager = CatalogIndexManager(self.layout.catalog_path, initialize=False)
         try:
             with ContentStateRepository.open_recoverable(self.layout) as state:
+                options = load_index_options()
                 manager.reconcile_content_state(
                     state,
                     ShardRepository(
@@ -107,7 +120,9 @@ class ContentIndexJobRunner:
                         state,
                         target_bytes=self.shard_target_bytes,
                     ),
-                    load_customer_recognition_options().preferred_patterns,
+                    options.preferred_patterns,
+                    options.priority_documents_per_project,
+                    options.newest_years_first,
                 )
         finally:
             manager.close()
@@ -133,11 +148,16 @@ class ContentIndexJobRunner:
         }
 
     def _progress(self, progress, current_path: str):
-        write_state(self.state_dir, {
+        self._write(**{
             "status": "running",
             "current_path": current_path,
             **self._progress_values(progress),
         })
+
+    def _write(self, **changes):
+        """Persist one complete snapshot while retaining the job identity."""
+        self._job_state.update(changes)
+        write_state(self.state_dir, self._job_state)
 
 
 def build_parser() -> argparse.ArgumentParser:

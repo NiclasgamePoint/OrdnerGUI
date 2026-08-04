@@ -43,10 +43,6 @@ WINDOW_TITLE = "PapaGUI - Kundenmanagement System"
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
 
-# The content index remains active for enrichment and future search activation.
-DOCUMENT_SEARCH_ENABLED = False
-
-
 def forced_fullscreen() -> bool:
     value = os.getenv("PAPAGUI_FORCE_FULLSCREEN", "").strip().casefold()
     return value in {"1", "true", "yes", "on"}
@@ -60,6 +56,10 @@ INDEX_SOURCE_KEY = "data/index_source"
 
 @dataclass
 class IndexOptions:
+    automatic_monitoring_enabled: bool = True
+    change_delay_seconds: int = 15
+    daily_reconciliation_enabled: bool = True
+    content_indexing_enabled: bool = True
     max_file_size_mb: int = 100
     max_extracted_characters: int = 2_000_000
     result_limit: int = 200
@@ -68,6 +68,12 @@ class IndexOptions:
     ocr_timeout_seconds: int = 10
     content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
     excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
+    resource_profile: str = "balanced"
+    preferred_document_patterns: str = "anschreiben,angebot,auftrag,vertrag"
+    priority_documents_per_project: int = 24
+    newest_years_first: bool = True
+    content_search_enabled: bool = False
+    maximum_parallel_shards: int = 4
 
     @property
     def excluded_folder_names(self) -> set[str]:
@@ -84,6 +90,26 @@ class IndexOptions:
             for value in self.content_extensions.split(",")
             if value.strip()
         }
+
+    @property
+    def preferred_patterns(self) -> list[str]:
+        return [
+            value.strip().casefold()
+            for value in self.preferred_document_patterns.split(",")
+            if value.strip()
+        ]
+
+    @property
+    def document_pause_seconds(self) -> float:
+        return {"gentle": 0.25, "balanced": 0.05, "fast": 0.0}.get(
+            self.resource_profile, 0.05
+        )
+
+    @property
+    def ocr_workers(self) -> int:
+        return {"gentle": 1, "balanced": 2, "fast": 4}.get(
+            self.resource_profile, 2
+        )
 
     def fingerprint(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True)
@@ -184,17 +210,37 @@ def save_index_source(path: Path):
     settings.sync()
 
 
+def _setting_bool(settings: QSettings, key: str, default: bool) -> bool:
+    return str(settings.value(key, default)).strip().casefold() in {
+        "1", "true", "yes", "on"
+    }
+
+
 def load_index_options() -> IndexOptions:
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
     defaults = IndexOptions()
     return IndexOptions(
+        automatic_monitoring_enabled=_setting_bool(
+            settings, "index/automatic_monitoring_enabled",
+            defaults.automatic_monitoring_enabled,
+        ),
+        change_delay_seconds=int(settings.value(
+            "index/change_delay_seconds", defaults.change_delay_seconds
+        )),
+        daily_reconciliation_enabled=_setting_bool(
+            settings, "index/daily_reconciliation_enabled",
+            defaults.daily_reconciliation_enabled,
+        ),
+        content_indexing_enabled=_setting_bool(
+            settings, "index/content_indexing_enabled",
+            defaults.content_indexing_enabled,
+        ),
         max_file_size_mb=int(settings.value("index/max_file_size_mb", defaults.max_file_size_mb)),
         max_extracted_characters=int(
             settings.value("index/max_extracted_characters", defaults.max_extracted_characters)
         ),
         result_limit=int(settings.value("search/result_limit", defaults.result_limit)),
-        ocr_enabled=str(settings.value("index/ocr_enabled", defaults.ocr_enabled)).lower()
-        in {"1", "true", "yes"},
+        ocr_enabled=_setting_bool(settings, "index/ocr_enabled", defaults.ocr_enabled),
         ocr_max_pages=int(settings.value("index/ocr_max_pages", defaults.ocr_max_pages)),
         ocr_timeout_seconds=int(
             settings.value("index/ocr_timeout_seconds", defaults.ocr_timeout_seconds)
@@ -205,12 +251,43 @@ def load_index_options() -> IndexOptions:
         excluded_folders=str(
             settings.value("index/excluded_folders", defaults.excluded_folders)
         ),
+        resource_profile=str(settings.value(
+            "index/resource_profile", defaults.resource_profile
+        )),
+        preferred_document_patterns=str(settings.value(
+            "index/preferred_document_patterns", defaults.preferred_document_patterns
+        )),
+        priority_documents_per_project=int(settings.value(
+            "index/priority_documents_per_project",
+            defaults.priority_documents_per_project,
+        )),
+        newest_years_first=_setting_bool(
+            settings, "index/newest_years_first", defaults.newest_years_first
+        ),
+        content_search_enabled=_setting_bool(
+            settings, "search/content_enabled", defaults.content_search_enabled
+        ),
+        maximum_parallel_shards=int(settings.value(
+            "search/maximum_parallel_shards", defaults.maximum_parallel_shards
+        )),
     )
 
 
 def save_index_options(options: IndexOptions):
     settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
     values = asdict(options)
+    settings.setValue(
+        "index/automatic_monitoring_enabled",
+        values["automatic_monitoring_enabled"],
+    )
+    settings.setValue("index/change_delay_seconds", values["change_delay_seconds"])
+    settings.setValue(
+        "index/daily_reconciliation_enabled",
+        values["daily_reconciliation_enabled"],
+    )
+    settings.setValue(
+        "index/content_indexing_enabled", values["content_indexing_enabled"]
+    )
     settings.setValue("index/max_file_size_mb", values["max_file_size_mb"])
     settings.setValue(
         "index/max_extracted_characters", values["max_extracted_characters"]
@@ -221,7 +298,26 @@ def save_index_options(options: IndexOptions):
     settings.setValue("index/ocr_timeout_seconds", values["ocr_timeout_seconds"])
     settings.setValue("index/content_extensions", values["content_extensions"])
     settings.setValue("index/excluded_folders", values["excluded_folders"])
+    settings.setValue("index/resource_profile", values["resource_profile"])
+    settings.setValue(
+        "index/preferred_document_patterns",
+        values["preferred_document_patterns"],
+    )
+    settings.setValue(
+        "index/priority_documents_per_project",
+        values["priority_documents_per_project"],
+    )
+    settings.setValue("index/newest_years_first", values["newest_years_first"])
+    settings.setValue("search/content_enabled", values["content_search_enabled"])
+    settings.setValue(
+        "search/maximum_parallel_shards", values["maximum_parallel_shards"]
+    )
     settings.sync()
+    status = settings.status()
+    if int(getattr(status, "value", status)) != 0:
+        raise OSError(
+            f"Indexeinstellungen konnten nicht gespeichert werden: {settings.fileName()}"
+        )
 
 
 def load_customer_recognition_options() -> CustomerRecognitionOptions:

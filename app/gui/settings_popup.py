@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QLineEdit,
+    QMessageBox,
     QSpinBox,
     QStackedWidget,
     QPlainTextEdit,
@@ -22,10 +23,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from app.gui.widgets import AppButton, BusyIndicator
-from app.core.config import CustomerRecognitionOptions, IndexOptions
+from app.core.config import (
+    CustomerRecognitionOptions,
+    IndexOptions,
+    save_index_options as persist_index_options,
+)
 from app.core.index_diagnostics import IndexDiagnostics
 from app.core.statistics import ApplicationStatistics
 from app.gui.widgets.statistics_widget import StatisticsWidget
+from app.services.index_capabilities import IndexCapabilities
 
 
 class ClickActivatedSpinBox(QSpinBox):
@@ -73,6 +79,12 @@ class SettingsPopup(QFrame):
     clearCustomerDataRequested = Signal()
     blacklistSuggestionConfirmed = Signal(int, str, str)
     blacklistSuggestionDismissed = Signal(int)
+    pauseContentIndexRequested = Signal()
+    resumeContentIndexRequested = Signal()
+    retryFailedContentRequested = Signal()
+    rebuildContentIndexRequested = Signal()
+    optimizeContentIndexRequested = Signal()
+    clearContentIndexRequested = Signal()
 
     def __init__(
         self,
@@ -91,6 +103,7 @@ class SettingsPopup(QFrame):
         pending_recognition_cases: int = 0,
         blacklist_suggestions=None,
         statistics: ApplicationStatistics | None = None,
+        index_capabilities: IndexCapabilities | None = None,
     ):
         super().__init__(
             parent,
@@ -115,6 +128,7 @@ class SettingsPopup(QFrame):
         self.pending_recognition_cases = int(pending_recognition_cases)
         self.blacklist_suggestions = list(blacklist_suggestions or [])
         self.statistics = statistics
+        self.index_capabilities = index_capabilities or IndexCapabilities()
         self._color_dialog_active = False
 
         root_layout = QVBoxLayout(self)
@@ -142,7 +156,7 @@ class SettingsPopup(QFrame):
         self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.nav_list.setAccessibleName("Einstellungsbereiche")
         self.nav_list.setAccessibleDescription(
-            "Wechselt zwischen Allgemein, Indexierung, Kundenerkennung, "
+            "Wechselt zwischen Allgemein, Indexierung, Suche, Kundenerkennung, "
             "Statistik und Aussehen."
         )
 
@@ -154,6 +168,10 @@ class SettingsPopup(QFrame):
         index_item = QListWidgetItem("Indexierung")
         index_item.setSizeHint(item_size)
         self.nav_list.addItem(index_item)
+
+        search_item = QListWidgetItem("Suche")
+        search_item.setSizeHint(item_size)
+        self.nav_list.addItem(search_item)
 
         recognition_item = QListWidgetItem("Kundenerkennung")
         recognition_item.setSizeHint(item_size)
@@ -176,6 +194,7 @@ class SettingsPopup(QFrame):
 
         self.stack.addWidget(self._build_general_page())
         self.stack.addWidget(self._build_index_page())
+        self.stack.addWidget(self._build_search_page())
         self.stack.addWidget(self._build_recognition_page())
         self.stack.addWidget(self._build_statistics_page())
         self.stack.addWidget(self._build_appearance_page())
@@ -272,6 +291,34 @@ class SettingsPopup(QFrame):
             f"{processed_count} Dateien geprüft · {filename}"
         )
 
+    def set_content_index_state(self, state: dict):
+        """Render the durable content-job state while the popup remains open."""
+        if not hasattr(self, "content_index_summary_label"):
+            return
+        status = str(state.get("status") or "")
+        labels = {
+            "starting": "wird gestartet",
+            "running": "läuft",
+            "completed": "abgeschlossen",
+            "cancelled": "pausiert",
+            "error": "fehlgeschlagen",
+        }
+        completed = int(state.get("completed_documents") or 0)
+        total = int(state.get("total_documents") or 0)
+        pending = int(state.get("pending_documents") or 0)
+        failed = int(state.get("failed_documents") or state.get("failed_count") or 0)
+        percentage = round(completed * 100 / total) if total else 0
+        parts = [f"Dateiindizierung {labels.get(status, 'noch nicht gestartet')}"]
+        if total:
+            parts.append(f"{completed}/{total} ({percentage} %)")
+            parts.append(f"{pending} ausstehend")
+        if failed:
+            parts.append(f"{failed} fehlgeschlagen")
+        error = str(state.get("error") or "")
+        if error:
+            parts.append(error)
+        self.content_index_summary_label.setText(" · ".join(parts))
+
     def set_backups(self, backups):
         self.backups = list(backups or [])
         if not hasattr(self, "backup_combo"):
@@ -352,53 +399,172 @@ class SettingsPopup(QFrame):
         layout.addLayout(backup_row)
         self.set_backups(self.backups)
 
+        catalog_heading = QLabel("Automatische Katalogaktualisierung")
+        catalog_heading.setObjectName("PopupCaption")
+        layout.addWidget(catalog_heading)
+
         form = QFormLayout()
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
 
-        self.max_file_size_spin = ClickActivatedSpinBox()
-        self.max_file_size_spin.setRange(1, 10_240)
-        self.max_file_size_spin.setSuffix(" MB")
-        self.max_file_size_spin.setValue(self.index_options.max_file_size_mb)
-        form.addRow(self._form_label("Maximale Dokumentgröße"), self.max_file_size_spin)
+        self.automatic_monitoring_checkbox = QCheckBox(
+            "Dateiänderungen automatisch übernehmen"
+        )
+        self.automatic_monitoring_checkbox.setChecked(
+            self.index_options.automatic_monitoring_enabled
+        )
+        form.addRow(self._form_label("Überwachung"), self.automatic_monitoring_checkbox)
 
-        self.max_characters_spin = ClickActivatedSpinBox()
-        self.max_characters_spin.setRange(10_000, 20_000_000)
-        self.max_characters_spin.setSingleStep(100_000)
-        self.max_characters_spin.setValue(self.index_options.max_extracted_characters)
-        form.addRow(self._form_label("Maximale Extraktlänge"), self.max_characters_spin)
+        self.change_delay_combo = QComboBox()
+        for seconds in (5, 15, 30, 60):
+            self.change_delay_combo.addItem(f"{seconds} Sekunden", seconds)
+        self.change_delay_combo.setCurrentIndex(max(
+            0, self.change_delay_combo.findData(self.index_options.change_delay_seconds)
+        ))
+        form.addRow(self._form_label("Änderungsverzögerung"), self.change_delay_combo)
 
-        self.result_limit_spin = ClickActivatedSpinBox()
-        self.result_limit_spin.setRange(10, 5_000)
-        self.result_limit_spin.setValue(self.index_options.result_limit)
-        form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
-
-        self.ocr_checkbox = QCheckBox("OCR für gescannte PDFs verwenden")
-        self.ocr_checkbox.setChecked(self.index_options.ocr_enabled)
-        form.addRow(self._form_label("OCR"), self.ocr_checkbox)
-
-        self.ocr_pages_spin = ClickActivatedSpinBox()
-        self.ocr_pages_spin.setRange(1, 1_000)
-        self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
-        form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
-
-        self.ocr_timeout_spin = ClickActivatedSpinBox()
-        self.ocr_timeout_spin.setRange(5, 600)
-        self.ocr_timeout_spin.setSuffix(" s")
-        self.ocr_timeout_spin.setValue(self.index_options.ocr_timeout_seconds)
-        form.addRow(self._form_label("OCR-Zeitlimit pro PDF"), self.ocr_timeout_spin)
-
-        self.content_extensions_input = QLineEdit(self.index_options.content_extensions)
-        self.content_extensions_input.setPlaceholderText("pdf, docx, xlsx, txt, …")
-        form.addRow(self._form_label("Durchsuchbare Formate"), self.content_extensions_input)
+        self.daily_reconciliation_checkbox = QCheckBox(
+            "Täglichen vollständigen Sicherheitsabgleich ausführen"
+        )
+        self.daily_reconciliation_checkbox.setChecked(
+            self.index_options.daily_reconciliation_enabled
+        )
+        form.addRow(
+            self._form_label("Sicherheitsabgleich"),
+            self.daily_reconciliation_checkbox,
+        )
 
         self.excluded_folders_input = QLineEdit(self.index_options.excluded_folders)
         self.excluded_folders_input.setPlaceholderText(".git, .venv, node_modules")
         form.addRow(self._form_label("Ausgeschlossene Ordner"), self.excluded_folders_input)
         layout.addLayout(form)
 
+        content_heading = QLabel("Hintergrund-Dateiindizierung")
+        content_heading.setObjectName("PopupCaption")
+        layout.addWidget(content_heading)
+
+        content_form = QFormLayout()
+        content_form.setHorizontalSpacing(16)
+        content_form.setVerticalSpacing(10)
+
+        self.content_indexing_checkbox = QCheckBox(
+            "Dokumentinhalte für Suche und Kundenerkennung aufbereiten"
+        )
+        self.content_indexing_checkbox.setChecked(
+            self.index_options.content_indexing_enabled
+        )
+        content_form.addRow(
+            self._form_label("Dateiindizierung"), self.content_indexing_checkbox
+        )
+
+        formats_widget = QWidget()
+        formats_layout = QVBoxLayout(formats_widget)
+        formats_layout.setContentsMargins(0, 0, 0, 0)
+        formats_layout.setSpacing(4)
+        format_groups = (
+            ("PDF", {"pdf"}),
+            ("Word (DOC/DOCX)", {"doc", "docx"}),
+            ("Excel (XLS/XLSX)", {"xls", "xlsx"}),
+            ("Text und strukturierte Textdateien", {
+                "txt", "csv", "md", "log", "json", "xml", "yaml", "yml", "ini"
+            }),
+        )
+        selected_types = self.index_options.indexed_content_types
+        self.content_format_checkboxes = {}
+        for label, extensions in format_groups:
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(bool(selected_types & extensions))
+            self.content_format_checkboxes[label] = (checkbox, extensions)
+            formats_layout.addWidget(checkbox)
+        content_form.addRow(self._form_label("Durchsuchbare Formate"), formats_widget)
+
+        self.max_file_size_spin = ClickActivatedSpinBox()
+        self.max_file_size_spin.setRange(1, 10_240)
+        self.max_file_size_spin.setSuffix(" MB")
+        self.max_file_size_spin.setValue(self.index_options.max_file_size_mb)
+        content_form.addRow(self._form_label("Maximale Dokumentgröße"), self.max_file_size_spin)
+
+        self.max_characters_spin = ClickActivatedSpinBox()
+        self.max_characters_spin.setRange(10_000, 20_000_000)
+        self.max_characters_spin.setSingleStep(100_000)
+        self.max_characters_spin.setValue(self.index_options.max_extracted_characters)
+        content_form.addRow(self._form_label("Maximale Extraktlänge"), self.max_characters_spin)
+
+        self.resource_profile_combo = QComboBox()
+        self.resource_profile_combo.addItem("Schonend", "gentle")
+        self.resource_profile_combo.addItem("Ausgewogen", "balanced")
+        self.resource_profile_combo.addItem("Schnell", "fast")
+        self.resource_profile_combo.setCurrentIndex(max(
+            0, self.resource_profile_combo.findData(self.index_options.resource_profile)
+        ))
+        content_form.addRow(self._form_label("Ressourcenprofil"), self.resource_profile_combo)
+
+        self.preferred_patterns_input = QLineEdit(
+            self.index_options.preferred_document_patterns
+        )
+        self.preferred_patterns_input.setPlaceholderText(
+            "Angebot, Auftrag, Vertrag, Anschreiben"
+        )
+        content_form.addRow(
+            self._form_label("Wichtige Dateinamen"), self.preferred_patterns_input
+        )
+
+        self.priority_documents_spin = ClickActivatedSpinBox()
+        self.priority_documents_spin.setRange(1, 100)
+        self.priority_documents_spin.setValue(
+            self.index_options.priority_documents_per_project
+        )
+        content_form.addRow(
+            self._form_label("Schnelle Dokumente je Projekt"),
+            self.priority_documents_spin,
+        )
+
+        self.newest_years_checkbox = QCheckBox("Neueste Jahre zuerst verarbeiten")
+        self.newest_years_checkbox.setChecked(self.index_options.newest_years_first)
+        content_form.addRow(
+            self._form_label("Reihenfolge"), self.newest_years_checkbox
+        )
+
+        layout.addLayout(content_form)
+
+        ocr_heading = QLabel("OCR für gescannte PDFs")
+        ocr_heading.setObjectName("PopupCaption")
+        layout.addWidget(ocr_heading)
+
+        ocr_form = QFormLayout()
+        ocr_form.setHorizontalSpacing(16)
+        ocr_form.setVerticalSpacing(10)
+
+        self.ocr_checkbox = QCheckBox("OCR für gescannte PDFs verwenden")
+        self.ocr_checkbox.setChecked(self.index_options.ocr_enabled)
+        ocr_form.addRow(self._form_label("OCR"), self.ocr_checkbox)
+
+        self.ocr_pages_spin = ClickActivatedSpinBox()
+        self.ocr_pages_spin.setRange(1, 1_000)
+        self.ocr_pages_spin.setValue(self.index_options.ocr_max_pages)
+        ocr_form.addRow(self._form_label("Maximale OCR-Seiten"), self.ocr_pages_spin)
+
+        self.ocr_timeout_spin = ClickActivatedSpinBox()
+        self.ocr_timeout_spin.setRange(5, 600)
+        self.ocr_timeout_spin.setSuffix(" s")
+        self.ocr_timeout_spin.setValue(self.index_options.ocr_timeout_seconds)
+        ocr_form.addRow(self._form_label("OCR-Zeitlimit pro PDF"), self.ocr_timeout_spin)
+
+        capability = self.index_capabilities
+        languages = ", ".join(capability.ocr_languages) or "keine erkannt"
+        capability_text = (
+            f"Bereit · Sprachen: {languages}"
+            if capability.ocr_available
+            else "Nicht vollständig verfügbar · benötigt Tesseract und Poppler"
+        )
+        self.ocr_capability_label = QLabel(capability_text)
+        self.ocr_capability_label.setWordWrap(True)
+        ocr_form.addRow(self._form_label("Systemstatus"), self.ocr_capability_label)
+        layout.addLayout(ocr_form)
+
         note = QLabel(
-            "Änderungen an Extraktion oder Ausschlüssen werden beim nächsten Indexlauf angewendet."
+            "Änderungen an Formaten, Extraktion oder OCR können eine erneute "
+            "Dateiindizierung auslösen. Der Katalog bleibt dabei nutzbar."
         )
         note.setObjectName("PopupCaption")
         note.setWordWrap(True)
@@ -406,10 +572,47 @@ class SettingsPopup(QFrame):
 
         save_row = QHBoxLayout()
         save_row.addStretch()
-        save_button = AppButton("Indexeinstellungen speichern")
-        save_button.clicked.connect(self.save_index_options)
-        save_row.addWidget(save_button)
+        self.save_index_options_button = AppButton("Indexeinstellungen übernehmen")
+        self.save_index_options_button.clicked.connect(self.save_index_options)
+        save_row.addWidget(self.save_index_options_button)
         layout.addLayout(save_row)
+
+        maintenance_heading = QLabel("Dokumentindex warten")
+        maintenance_heading.setObjectName("PopupCaption")
+        layout.addWidget(maintenance_heading)
+
+        self.content_index_summary_label = QLabel(
+            "Status des Dokumentindexes wird geladen …"
+        )
+        self.content_index_summary_label.setObjectName("PopupCaption")
+        self.content_index_summary_label.setWordWrap(True)
+        layout.addWidget(self.content_index_summary_label)
+
+        control_row = QHBoxLayout()
+        pause_button = AppButton("Pausieren", AppButton.SECONDARY)
+        pause_button.clicked.connect(self.pauseContentIndexRequested.emit)
+        control_row.addWidget(pause_button)
+        resume_button = AppButton("Fortsetzen", AppButton.SECONDARY)
+        resume_button.clicked.connect(self.resumeContentIndexRequested.emit)
+        control_row.addWidget(resume_button)
+        retry_button = AppButton("Fehler erneut versuchen", AppButton.SECONDARY)
+        retry_button.clicked.connect(self.retryFailedContentRequested.emit)
+        control_row.addWidget(retry_button)
+        control_row.addStretch()
+        layout.addLayout(control_row)
+
+        maintenance_row = QHBoxLayout()
+        optimize_button = AppButton("Optimieren", AppButton.SECONDARY)
+        optimize_button.clicked.connect(self.optimizeContentIndexRequested.emit)
+        maintenance_row.addWidget(optimize_button)
+        rebuild_button = AppButton("Neu aufbauen", AppButton.SECONDARY)
+        rebuild_button.clicked.connect(self.rebuildContentIndexRequested.emit)
+        maintenance_row.addWidget(rebuild_button)
+        clear_button = AppButton("Dokumentindex löschen", AppButton.DANGER)
+        clear_button.clicked.connect(self.clearContentIndexRequested.emit)
+        maintenance_row.addWidget(clear_button)
+        maintenance_row.addStretch()
+        layout.addLayout(maintenance_row)
 
         diagnostics_heading = QLabel("Index-Diagnose")
         diagnostics_heading.setObjectName("PopupCaption")
@@ -450,6 +653,62 @@ class SettingsPopup(QFrame):
         scroll.setWidget(content)
         page_layout.addWidget(scroll)
         self.set_indexing(self.indexing)
+        return page
+
+    def _build_search_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("SettingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+
+        heading = QLabel("Suche")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+
+        hint = QLabel(
+            "Diese Werte beeinflussen die Suche, aber lösen keinen neuen Indexaufbau aus."
+        )
+        hint.setObjectName("PopupCaption")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(10)
+
+        self.result_limit_spin = ClickActivatedSpinBox()
+        self.result_limit_spin.setRange(10, 5_000)
+        self.result_limit_spin.setValue(self.index_options.result_limit)
+        form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
+
+        self.content_search_checkbox = QCheckBox(
+            "Bereits fertig indexierte Dokumentinhalte durchsuchen"
+        )
+        self.content_search_checkbox.setChecked(
+            self.index_options.content_search_enabled
+        )
+        form.addRow(
+            self._form_label("Dokumentinhaltssuche"), self.content_search_checkbox
+        )
+
+        self.parallel_shards_spin = ClickActivatedSpinBox()
+        self.parallel_shards_spin.setRange(1, 16)
+        self.parallel_shards_spin.setValue(
+            self.index_options.maximum_parallel_shards
+        )
+        form.addRow(
+            self._form_label("Gleichzeitige Indexdateien"), self.parallel_shards_spin
+        )
+        layout.addLayout(form)
+
+        save_row = QHBoxLayout()
+        save_row.addStretch()
+        save_button = AppButton("Sucheinstellungen speichern")
+        save_button.clicked.connect(self.save_index_options)
+        save_row.addWidget(save_button)
+        layout.addLayout(save_row)
+        layout.addStretch()
         return page
 
     def _build_diagnostics_page(self) -> QWidget:
@@ -740,7 +999,9 @@ class SettingsPopup(QFrame):
             f"Erkannte Ordner: {diagnostics.folder_count}",
             f"Änderungen: {diagnostics.changed_count}",
             f"Volltext-Extrakte: {diagnostics.content_count}",
-            f"Indexgröße: {diagnostics.database_size / 1024 / 1024:.2f} MB",
+            f"Kataloggröße: {diagnostics.database_size / 1024 / 1024:.2f} MB",
+            f"Dokumentindexgröße: {diagnostics.content_database_size / 1024 / 1024:.2f} MB",
+            f"Dokumentindex-Dateien: {diagnostics.shard_count}",
             "",
             "Extraktionsstatus:",
         ]
@@ -762,38 +1023,89 @@ class SettingsPopup(QFrame):
         return label
 
     def save_index_options(self):
-        self.index_options = IndexOptions(
+        extensions: set[str] = set()
+        for checkbox, values in self.content_format_checkboxes.values():
+            if checkbox.isChecked():
+                extensions.update(values)
+        new_options = IndexOptions(
+            automatic_monitoring_enabled=self.automatic_monitoring_checkbox.isChecked(),
+            change_delay_seconds=int(self.change_delay_combo.currentData() or 15),
+            daily_reconciliation_enabled=self.daily_reconciliation_checkbox.isChecked(),
+            content_indexing_enabled=self.content_indexing_checkbox.isChecked(),
             max_file_size_mb=self.max_file_size_spin.value(),
             max_extracted_characters=self.max_characters_spin.value(),
             result_limit=self.result_limit_spin.value(),
             ocr_enabled=self.ocr_checkbox.isChecked(),
             ocr_max_pages=self.ocr_pages_spin.value(),
             ocr_timeout_seconds=self.ocr_timeout_spin.value(),
-            content_extensions=self.content_extensions_input.text().strip(),
+            content_extensions=",".join(sorted(extensions)),
             excluded_folders=self.excluded_folders_input.text().strip(),
+            resource_profile=str(self.resource_profile_combo.currentData() or "balanced"),
+            preferred_document_patterns=self.preferred_patterns_input.text().strip(),
+            priority_documents_per_project=self.priority_documents_spin.value(),
+            newest_years_first=self.newest_years_checkbox.isChecked(),
+            content_search_enabled=self.content_search_checkbox.isChecked(),
+            maximum_parallel_shards=self.parallel_shards_spin.value(),
         )
+        requires_reindex = (
+            self.index_options.catalog_fingerprint() != new_options.catalog_fingerprint()
+            or self.index_options.content_fingerprint()
+            != new_options.content_fingerprint()
+        )
+        if requires_reindex and self.isVisible():
+            answer = self._run_modal_preserving_popup(
+                lambda: QMessageBox.question(
+                    self,
+                    "Erneute Indexierung erforderlich",
+                    "Diese Änderungen erfordern eine erneute Indexierung. Der vorhandene "
+                    "Katalog bleibt verfügbar, während Dokumentinhalte neu aufgebaut werden. "
+                    "Änderungen jetzt speichern?",
+                )
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        # Persist before touching the transient popup again. Even if the window
+        # system closes a Qt.Popup after a modal dialog, the user's selection is
+        # already durable for the next application start.
+        try:
+            persist_index_options(new_options)
+        except OSError as exc:
+            error_message = str(exc)
+            self._run_modal_preserving_popup(
+                lambda: QMessageBox.warning(
+                    self, "Einstellungen konnten nicht gespeichert werden", error_message
+                )
+            )
+            return
+        self.index_options = new_options
         self.indexOptionsChanged.emit(self.index_options)
 
-    def choose_data_path(self):
-        start_path = self.data_path_input.text().strip() or self.data_path
+    def _run_modal_preserving_popup(self, operation):
+        """Keep this transient popup alive while a native/modal child takes focus."""
         popup_position = self.pos()
-
-        # A native file dialog takes focus away from a Qt.Popup. Temporarily
-        # keep this widget alive so it can be restored after the dialog closes.
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         try:
-            selected_path = QFileDialog.getExistingDirectory(
-                self.parentWidget(),
-                "Datenquelle auswählen",
-                start_path,
-                QFileDialog.ShowDirsOnly,
-            )
+            return operation()
         finally:
             self.setAttribute(Qt.WA_DeleteOnClose, True)
             self.move(popup_position)
             self.show()
             self.raise_()
             self.activateWindow()
+
+    def run_modal_preserving_popup(self, operation):
+        return self._run_modal_preserving_popup(operation)
+
+    def choose_data_path(self):
+        start_path = self.data_path_input.text().strip() or self.data_path
+        selected_path = self._run_modal_preserving_popup(
+            lambda: QFileDialog.getExistingDirectory(
+                self.parentWidget(),
+                "Datenquelle auswählen",
+                start_path,
+                QFileDialog.ShowDirsOnly,
+            )
+        )
 
         if selected_path:
             self.data_path_input.setText(selected_path)

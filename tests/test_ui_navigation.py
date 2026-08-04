@@ -356,6 +356,7 @@ class UiNavigationTests(unittest.TestCase):
                 ],
             })
             self.assertEqual(page.file_tabs.count(), 2)
+            self.assertEqual(page.file_tabs.objectName(), "InsetContentTabs")
             self.assertEqual(page.file_tabs.tabText(0), "Ordner")
             self.assertEqual(page.file_tabs.tabText(1), "Mails")
             self.assertTrue(page.file_list.hasMouseTracking())
@@ -422,6 +423,25 @@ class UiNavigationTests(unittest.TestCase):
             open_file.assert_called_once_with(document)
             page.cleanup()
 
+    def test_customer_and_folder_back_buttons_share_card_alignment(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer_page = CustomerPage(repository)
+            folder_page = FolderPage()
+            customer_card = customer_page.splitter.widget(0)
+            folder_card = folder_page.splitter.widget(0)
+
+            customer_margins = customer_card.layout().contentsMargins()
+            folder_margins = folder_card.layout().contentsMargins()
+            self.assertEqual(customer_margins.left(), folder_margins.left())
+            self.assertEqual(customer_margins.top(), folder_margins.top())
+            self.assertEqual(customer_margins.right(), folder_margins.right())
+            self.assertEqual(customer_page.back_button.minimumWidth(), 48)
+            self.assertEqual(folder_page.back_button.minimumWidth(), 48)
+
+            folder_page.cleanup()
+            repository.close()
+
     def test_folder_page_renders_nested_and_empty_subfolders_as_tree(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -482,12 +502,13 @@ class UiNavigationTests(unittest.TestCase):
             pending_recognition_cases=2,
         )
 
-        self.assertEqual(popup.nav_list.count(), 5)
+        self.assertEqual(popup.nav_list.count(), 6)
         self.assertEqual(
             [popup.nav_list.item(index).text() for index in range(popup.nav_list.count())],
             [
                 "Allgemein",
                 "Indexierung",
+                "Suche",
                 "Kundenerkennung",
                 "Statistik",
                 "Aussehen",
@@ -507,7 +528,7 @@ class UiNavigationTests(unittest.TestCase):
         self.assertEqual(popup.font_size_slider.value(), 13)
         self.assertEqual(popup.font_size_value_label.text(), "13 px")
         self.assertEqual(
-            popup.stack.widget(2).findChild(QScrollArea).horizontalScrollBarPolicy(),
+            popup.stack.widget(3).findChild(QScrollArea).horizontalScrollBarPolicy(),
             Qt.ScrollBarAlwaysOff,
         )
         popup.close()
@@ -634,6 +655,7 @@ class UiNavigationTests(unittest.TestCase):
 
             self.assertEqual(page.customer_tabs.tabText(0), "Notizen")
             self.assertEqual(page.customer_tabs.tabText(1), "Journal")
+            self.assertEqual(page.customer_tabs.objectName(), "InsetContentTabs")
             self.assertFalse(page.notes.isReadOnly())
             self.assertEqual(page.notes.height(), 196)
             self.assertFalse(page.journal_entries_section.isVisible())

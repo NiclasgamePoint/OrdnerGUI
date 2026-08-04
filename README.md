@@ -72,6 +72,14 @@ Katalog wird zuerst aktiviert, sodass Datei- und Ordnersuche sofort verfügbar
 sind. Die Dokumentinhaltssuche zeigt während des Hintergrundaufbaus ihren
 Abdeckungsgrad und liefert Treffer aus allen bereits fertigen Shards.
 
+Unter „Einstellungen → Indexierung“ lassen sich die automatische
+Katalogüberwachung, die fortsetzbare Dateiindizierung, Dateiformate,
+Extraktionsgrenzen, OCR, Ressourcenprofil und Queue-Priorisierung getrennt
+steuern. Pause und Fortsetzung bleiben über Programmneustarts erhalten.
+Diagnose und Wartungsaktionen betreffen ausschließlich rekonstruierbare
+Indexdaten. Suchtrefferlimit, Dokumentinhaltssuche und parallele Shard-Suche
+befinden sich getrennt unter „Einstellungen → Suche“.
+
 Nur der Katalog besitzt drei rotierende Sicherungen. Inhaltsshards sind
 rekonstruierbar. Beim ersten erfolgreichen Wechsel wird der alte v0.2-Index nach
 `data/index/legacy-v0.2/` verschoben. `data/customers.db` bleibt davon getrennt

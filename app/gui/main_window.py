@@ -28,7 +28,6 @@ from app.core.config import (
     CATALOG_DB_FILE,
     CUSTOMER_DB_FILE,
     DB_FILE,
-    DOCUMENT_SEARCH_ENABLED,
     INDEX_LAYOUT,
     WINDOW_HEIGHT,
     WINDOW_TITLE,
@@ -67,6 +66,7 @@ from app.gui.widgets import AppHeader, IndexStatusBar, SearchFilterPopup
 from app.gui.workers import (
     BlacklistCleanupWorker,
     ContentJobController,
+    ContentMaintenanceWorker,
     IndexJobController,
     SearchWorker,
     SettingsDataWorker,
@@ -74,6 +74,7 @@ from app.gui.workers import (
 )
 from app.services import FileSystemMonitor
 from app.services.document_converter import DocumentConverter
+from app.services.index_capabilities import IndexCapabilityDetector
 
 
 LOGGER = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
         self.content_job_controller = ContentJobController(
             INDEX_LAYOUT, CUSTOMER_DB_FILE, parent=self
         )
+        self.content_maintenance_worker: ContentMaintenanceWorker | None = None
         self.index_manager = self._open_active_index()
         self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
         self.index_source = get_configured_index_source()
@@ -121,6 +123,8 @@ class MainWindow(QMainWindow):
         self.blacklist_cleanup_worker: BlacklistCleanupWorker | None = None
         self.filesystem_monitor: FileSystemMonitor | None = None
         self.pending_filesystem_sync = False
+        self.pending_content_restart = False
+        self.pending_content_maintenance: str | None = None
         self.tray_icon: QSystemTrayIcon | None = None
         self.index_tray_window: IndexTrayWindow | None = None
         self.source_reconnect_timer = QTimer(self)
@@ -164,10 +168,12 @@ class MainWindow(QMainWindow):
         self._show_initial_customers()
         self._refresh_statistics()
         if CATALOG_DB_FILE.exists():
-            self.content_job_controller.start_or_adopt()
+            self._start_content_indexing_if_enabled()
         self.initialization_timer.start(0)
 
     def _on_content_progress(self, state: dict):
+        if self.settings_popup is not None:
+            self.settings_popup.set_content_index_state(state)
         if str(state.get("status") or "") != "running":
             return
         completed = int(state.get("completed_documents") or 0)
@@ -178,7 +184,18 @@ class MainWindow(QMainWindow):
         )
 
     def _on_content_finished(self, state: dict):
+        if self.settings_popup is not None:
+            self.settings_popup.set_content_index_state(state)
         status = str(state.get("status") or "")
+        if status == "cancelled" and self.pending_content_maintenance:
+            action = self.pending_content_maintenance
+            self.pending_content_maintenance = None
+            QTimer.singleShot(0, lambda: self._start_content_maintenance(action))
+            return
+        if status == "cancelled" and self.pending_content_restart:
+            self.pending_content_restart = False
+            self._start_content_indexing_if_enabled()
+            return
         if status == "completed":
             failed = int(state.get("failed_documents") or 0)
             self.status_bar.set_text(
@@ -191,6 +208,11 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text(
                 f"Katalog aktiv ✓ · Inhaltsindexfehler: {state.get('error') or 'unbekannt'}"
             )
+
+    def _start_content_indexing_if_enabled(self) -> bool:
+        if not self.index_options.content_indexing_enabled:
+            return False
+        return self.content_job_controller.start_or_adopt()
 
     def _initialize_data_source(self):
         if not has_configured_index_source():
@@ -239,7 +261,10 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 10)
         layout.setSpacing(8)
 
-        self.header = AppHeader(self.search_history.entries())
+        self.header = AppHeader(
+            self.search_history.entries(),
+            document_search_enabled=self.index_options.content_search_enabled,
+        )
         layout.addWidget(self.header)
 
         self.filter_popup = SearchFilterPopup(self)
@@ -257,7 +282,9 @@ class MainWindow(QMainWindow):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("PageStack")
-        self.search_page = SearchPage()
+        self.search_page = SearchPage(
+            document_search_enabled=self.index_options.content_search_enabled
+        )
         self.customer_page = CustomerPage(self.customer_repository)
         self.folder_page = FolderPage()
         for page in (self.search_page, self.customer_page, self.folder_page):
@@ -524,7 +551,7 @@ class MainWindow(QMainWindow):
 
     def _launch_visible_searches(self, query: str, generation: int):
         categories = ["customers", "folders"]
-        if DOCUMENT_SEARCH_ENABLED:
+        if self.index_options.content_search_enabled:
             categories.append("text")
         for category in categories:
             worker = SearchWorker(
@@ -538,6 +565,7 @@ class MainWindow(QMainWindow):
                 self.index_options.result_limit,
                 CUSTOMER_DB_FILE,
                 index_layout=(INDEX_LAYOUT if CATALOG_DB_FILE.exists() else None),
+                maximum_parallel_shards=self.index_options.maximum_parallel_shards,
             )
             worker.completed.connect(self._on_search_completed)
             worker.finished.connect(
@@ -587,7 +615,7 @@ class MainWindow(QMainWindow):
         customer_text = "…" if customers is None else str(customers)
         folder_text = "…" if folders is None else str(folders)
         status = f"Kunden: {customer_text} · Ordner: {folder_text}"
-        if DOCUMENT_SEARCH_ENABLED:
+        if self.index_options.content_search_enabled:
             documents = self.search_counts["text"]
             document_text = "…" if documents is None else str(documents)
             status += (
@@ -707,6 +735,7 @@ class MainWindow(QMainWindow):
             recognition_summary={},
             pending_recognition_cases=0,
             blacklist_suggestions=[],
+            index_capabilities=IndexCapabilityDetector().detect(),
         )
         self.settings_popup.set_backups_loading()
         self.settings_popup.set_diagnostics_loading()
@@ -745,12 +774,145 @@ class MainWindow(QMainWindow):
         self.settings_popup.blacklistSuggestionDismissed.connect(
             self.dismiss_blacklist_suggestion
         )
+        self.settings_popup.pauseContentIndexRequested.connect(
+            self.pause_content_indexing
+        )
+        self.settings_popup.resumeContentIndexRequested.connect(
+            self.resume_content_indexing
+        )
+        self.settings_popup.retryFailedContentRequested.connect(
+            lambda: self._start_content_maintenance("retry_failed")
+        )
+        self.settings_popup.optimizeContentIndexRequested.connect(
+            lambda: self._start_content_maintenance("optimize")
+        )
+        self.settings_popup.rebuildContentIndexRequested.connect(
+            self.confirm_rebuild_content_index
+        )
+        self.settings_popup.clearContentIndexRequested.connect(
+            self.confirm_clear_content_index
+        )
         self.settings_popup.destroyed.connect(self._clear_settings_popup)
         self.settings_popup.resize(self.settings_popup.size_for_parent())
         self._center_settings_popup()
         self.settings_popup.show()
         self.settings_popup.raise_()
+        self.settings_popup.set_content_index_state(
+            read_state(self.content_job_controller.state_dir)
+        )
         self._refresh_settings_popup_data()
+
+    def pause_content_indexing(self):
+        self.content_job_controller.pause()
+        self.status_bar.set_text(
+            "Dateiindizierung wird pausiert …"
+            if self.content_job_controller.is_active()
+            else "Dateiindizierung ist pausiert"
+        )
+
+    def resume_content_indexing(self):
+        if not self.index_options.content_indexing_enabled:
+            self.status_bar.set_text(
+                "Dateiindizierung ist in den Einstellungen deaktiviert"
+            )
+            return
+        if self.content_job_controller.resume():
+            self.status_bar.set_text("Dateiindizierung wird fortgesetzt …")
+
+    def confirm_rebuild_content_index(self):
+        answer = self._settings_question(
+            "Dokumentindex neu aufbauen",
+            "Der vorhandene Dokumentindex wird verworfen und aus den Originaldateien "
+            "neu aufgebaut. Der Katalog und die Kundendaten bleiben erhalten.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_content_maintenance("rebuild")
+
+    def confirm_clear_content_index(self):
+        answer = self._settings_question(
+            "Dokumentindex löschen",
+            "Alle extrahierten Dokumentinhalte werden gelöscht. Originaldateien, "
+            "Katalog und Kundendaten bleiben erhalten. Eine laufende Dateiindizierung "
+            "wird dafür automatisch pausiert.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_content_maintenance("clear")
+
+    def _settings_question(self, title: str, text: str):
+        def operation():
+            return QMessageBox.question(self, title, text)
+
+        if self.settings_popup is not None:
+            return self.settings_popup.run_modal_preserving_popup(operation)
+        return operation()
+
+    def _settings_warning(self, title: str, text: str):
+        def operation():
+            return QMessageBox.warning(self, title, text)
+
+        if self.settings_popup is not None:
+            return self.settings_popup.run_modal_preserving_popup(operation)
+        return operation()
+
+    def _start_content_maintenance(self, action: str):
+        if (
+            self.content_maintenance_worker is not None
+            and self.content_maintenance_worker.isRunning()
+        ):
+            self.status_bar.set_text("Eine Dokumentindex-Wartung läuft bereits …")
+            return
+        if self.content_job_controller.is_active():
+            self.pending_content_maintenance = action
+            if action == "clear":
+                self.content_job_controller.pause()
+            else:
+                self.content_job_controller.cancel()
+            self.status_bar.set_text(
+                "Dateiindizierung wird pausiert · Wartung wird anschließend gestartet …"
+            )
+            return
+        labels = {
+            "retry_failed": "Fehlerhafte Dokumente werden vorbereitet …",
+            "optimize": "Dokumentindex wird optimiert …",
+            "rebuild": "Dokumentindex wird für den Neuaufbau vorbereitet …",
+            "clear": "Dokumentindex wird gelöscht …",
+        }
+        self.status_bar.set_text(labels[action])
+        self._wait_for_content_index_readers()
+        worker = ContentMaintenanceWorker(INDEX_LAYOUT, action, self)
+        self.content_maintenance_worker = worker
+        worker.completed.connect(self._on_content_maintenance_complete)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _wait_for_content_index_readers(self):
+        """Release SQLite files before destructive maintenance, including on Windows."""
+        self._cancel_outdated_searches()
+        for worker in tuple(self.search_workers):
+            worker.wait()
+        if self.settings_data_worker is not None and self.settings_data_worker.isRunning():
+            self.settings_data_worker.requestInterruption()
+            self.settings_data_worker.wait()
+        if self.statistics_worker is not None and self.statistics_worker.isRunning():
+            self.statistics_worker.requestInterruption()
+            self.statistics_worker.wait()
+
+    def _on_content_maintenance_complete(self, action: str, result, error: str):
+        self.content_maintenance_worker = None
+        if error:
+            self.status_bar.set_text(f"Dokumentindex-Wartung fehlgeschlagen: {error}")
+            self._settings_warning("Dokumentindex-Wartung", error)
+            return
+        if action == "clear":
+            self.status_bar.set_text("Dokumentindex wurde gelöscht")
+            if self.settings_popup is not None:
+                self.settings_popup.set_content_index_state({})
+        else:
+            self.status_bar.set_text("Dokumentindex-Wartung abgeschlossen ✓")
+            self._start_content_indexing_if_enabled()
+        self._refresh_statistics()
+        if self.settings_popup is not None:
+            self._refresh_settings_popup_data()
 
     def open_index_diagnostics(self):
         if self.settings_popup is None or not self.settings_popup.isVisible():
@@ -1220,7 +1382,7 @@ class MainWindow(QMainWindow):
             self._show_customer_recognition_result(state)
             if self.settings_popup is not None:
                 self._refresh_settings_popup_data()
-            self.content_job_controller.start_or_adopt()
+            self._start_content_indexing_if_enabled()
         if status in {"completed", "no_changes"} and self.settings_popup is not None:
             if status == "no_changes":
                 self._refresh_settings_popup_data()
@@ -1270,7 +1432,9 @@ class MainWindow(QMainWindow):
             self.index_manager.reconcile_content_state(
                 state,
                 ShardRepository(INDEX_LAYOUT, state),
-                self.recognition_options.preferred_patterns,
+                self.index_options.preferred_patterns,
+                self.index_options.priority_documents_per_project,
+                self.index_options.newest_years_first,
             )
 
     def _reload_active_index(self):
@@ -1290,11 +1454,15 @@ class MainWindow(QMainWindow):
             self.filesystem_monitor.wait()
             self.filesystem_monitor.deleteLater()
         self.filesystem_monitor = None
+        self.catalog_reconciliation_timer.stop()
+        if not self.index_options.automatic_monitoring_enabled:
+            return
         if not self.index_source.exists() or not self.index_source.is_dir():
             return
         self.filesystem_monitor = FileSystemMonitor(
             self.index_source,
             excluded_folders=self.index_options.excluded_folder_names,
+            interval_seconds=self.index_options.change_delay_seconds,
             parent=self,
         )
         self.filesystem_monitor.changesDetected.connect(
@@ -1306,7 +1474,8 @@ class MainWindow(QMainWindow):
             )
         )
         self.filesystem_monitor.start()
-        self.catalog_reconciliation_timer.start()
+        if self.index_options.daily_reconciliation_enabled:
+            self.catalog_reconciliation_timer.start()
 
     def _start_daily_catalog_reconciliation(self):
         if self.index_controller.is_active() or not self.index_source.exists():
@@ -1334,17 +1503,44 @@ class MainWindow(QMainWindow):
         )
 
     def on_index_options_changed(self, options):
+        previous_options = self.index_options
         indexing_contract_changed = (
-            self.index_options.catalog_fingerprint() != options.catalog_fingerprint()
-            or self.index_options.content_fingerprint() != options.content_fingerprint()
+            previous_options.catalog_fingerprint() != options.catalog_fingerprint()
+            or previous_options.content_fingerprint() != options.content_fingerprint()
+        )
+        runtime_content_changed = any((
+            previous_options.resource_profile != options.resource_profile,
+            previous_options.preferred_document_patterns
+            != options.preferred_document_patterns,
+            previous_options.priority_documents_per_project
+            != options.priority_documents_per_project,
+            previous_options.newest_years_first != options.newest_years_first,
+        ))
+        content_switch_changed = (
+            previous_options.content_indexing_enabled
+            != options.content_indexing_enabled
         )
         self.index_options = options
         self.index_manager.options = options
         save_index_options(options)
         self.status_bar.set_text("Indexeinstellungen gespeichert")
         self._start_filesystem_monitor()
+        self.header.set_document_search_enabled(options.content_search_enabled)
+        self.search_page.set_document_search_enabled(options.content_search_enabled)
+        if not options.content_indexing_enabled:
+            self.pending_content_restart = False
+            self.content_job_controller.cancel()
         if indexing_contract_changed:
+            self.content_job_controller.cancel()
             self._start_incremental_filesystem_sync()
+        elif runtime_content_changed and options.content_indexing_enabled:
+            if self.content_job_controller.is_active():
+                self.pending_content_restart = True
+                self.content_job_controller.cancel()
+            else:
+                self._start_content_indexing_if_enabled()
+        elif content_switch_changed and options.content_indexing_enabled:
+            self._start_content_indexing_if_enabled()
 
     def on_load_backup_requested(self, backup_path_value: str):
         if self.index_controller.is_active():
@@ -1367,7 +1563,7 @@ class MainWindow(QMainWindow):
             finally:
                 connection.close()
             self._activate_built_index(build_path)
-            self.content_job_controller.start_or_adopt()
+            self._start_content_indexing_if_enabled()
             restored_root = metadata.get("index_root", "")
             if restored_root:
                 self.index_source = Path(restored_root)
@@ -1412,6 +1608,11 @@ class MainWindow(QMainWindow):
         ):
             self.statistics_worker.requestInterruption()
             self.statistics_worker.wait()
+        if (
+            self.content_maintenance_worker is not None
+            and self.content_maintenance_worker.isRunning()
+        ):
+            self.content_maintenance_worker.wait()
         if (
             self.blacklist_cleanup_worker is not None
             and self.blacklist_cleanup_worker.isRunning()

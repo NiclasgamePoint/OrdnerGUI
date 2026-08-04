@@ -219,6 +219,7 @@ class ContentStateRepository:
         self,
         maximum_attempts: int = 3,
         maximum_priority: int | None = None,
+        newest_years_first: bool = True,
     ) -> ContentTask | None:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
@@ -227,6 +228,7 @@ class ContentStateRepository:
                 (maximum_attempts, maximum_priority)
                 if maximum_priority is not None else (maximum_attempts,)
             )
+            year_direction = "DESC" if newest_years_first else "ASC"
             row = self.connection.execute(
                 """
                 SELECT document_key, path, source_version, partition_year,
@@ -234,7 +236,8 @@ class ContentStateRepository:
                 FROM documents
                 WHERE status='pending' AND attempts<?
                 """ + priority_clause + """
-                ORDER BY priority, COALESCE(partition_year, 0) DESC, path COLLATE NOCASE
+                ORDER BY priority, COALESCE(partition_year, 0) """ + year_direction + """,
+                         path COLLATE NOCASE
                 LIMIT 1
                 """,
                 parameters,

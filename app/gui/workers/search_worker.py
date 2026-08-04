@@ -26,6 +26,7 @@ class SearchWorker(QThread):
         page_size: int,
         customer_db_path: Path,
         index_layout: IndexLayout | None = None,
+        maximum_parallel_shards: int = 4,
     ):
         super().__init__()
         self.db_path = db_path
@@ -38,6 +39,7 @@ class SearchWorker(QThread):
         self.page_size = page_size
         self.customer_db_path = customer_db_path
         self.index_layout = index_layout
+        self.maximum_parallel_shards = max(1, int(maximum_parallel_shards))
 
     def run(self):
         try:
@@ -46,7 +48,9 @@ class SearchWorker(QThread):
             else:
                 if self.category == "text" and self.index_layout is not None:
                     results = ContentSearchService(
-                        self.index_layout, self.db_path
+                        self.index_layout,
+                        self.db_path,
+                        maximum_parallel_shards=self.maximum_parallel_shards,
                     ).search_page(
                         self.query,
                         self.filters,

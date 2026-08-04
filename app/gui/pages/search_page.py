@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.customer_models import Customer
-from app.core.config import DOCUMENT_SEARCH_ENABLED
 from app.gui.widgets.result_row import ResultRow
 from app.gui.widgets.document_result_row import DocumentResultRow
 from app.gui.widgets.statistics_widget import StatisticsWidget
@@ -89,7 +88,7 @@ class SearchPage(QWidget):
     def __init__(
         self,
         parent=None,
-        document_search_enabled: bool = DOCUMENT_SEARCH_ENABLED,
+        document_search_enabled: bool = False,
     ):
         super().__init__(parent)
         self.setObjectName("SearchPage")
@@ -166,6 +165,12 @@ class SearchPage(QWidget):
         else:
             self.set_customers(customers, len(customers))
         self.folder_section.set_message("Suchbegriff eingeben")
+        if self.document_search_enabled:
+            self.document_section.set_message("Suchbegriff eingeben")
+
+    def set_document_search_enabled(self, enabled: bool):
+        self.document_search_enabled = bool(enabled)
+        self.document_section.setVisible(self.document_search_enabled)
         if self.document_search_enabled:
             self.document_section.set_message("Suchbegriff eingeben")
 
