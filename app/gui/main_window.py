@@ -848,7 +848,6 @@ class MainWindow(QMainWindow):
     ):
         attributes = {
             "email": "email_blacklist",
-            "phone": "phone_blacklist",
             "name": "name_blacklist",
             "address": "address_blacklist",
         }

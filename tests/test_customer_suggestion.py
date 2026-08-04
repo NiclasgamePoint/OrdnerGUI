@@ -354,31 +354,18 @@ class CustomerSuggestionTests(unittest.TestCase):
 
         self.assertTrue(all(item.automatic for item in evidence))
 
-    def test_phone_validation_accepts_real_numbers_and_rejects_noise(self):
-        service = CustomerSuggestionService()
+    def test_phone_numbers_are_not_extracted_from_documents(self):
+        suggestion = CustomerSuggestionService().suggest_from_text(
+            Path("/tmp/Müller, Berlin"),
+            "Müller",
+            "Kunde: Max Müller\nTelefon: +49 40 1234567\nMobil: 0176 12345678",
+        )
 
-        self.assertEqual(
-            service._clean_phone_candidate(
-                "+44 20 7946 0958", "Telefon: +44 20 7946 0958"
-            ),
-            "+44 20 7946 0958",
-        )
-        self.assertEqual(
-            service._clean_phone_candidate(
-                "+49 40 1234567", "Telefon: +49 40 1234567"
-            ),
-            "+49 40 1234567",
-        )
-        self.assertEqual(
-            service._clean_phone_candidate(
-                "+49 40 1234567", "Fax: +49 40 1234567"
-            ),
-            "",
-        )
-        self.assertEqual(
-            service._clean_phone_candidate("05.03.2024", "Datum 05.03.2024"),
-            "",
-        )
+        self.assertEqual(suggestion.phone, "")
+        self.assertTrue(all(contact.phone == "" for contact in suggestion.contacts))
+        self.assertFalse(any(
+            item.field_name == "phone" for item in suggestion.evidence
+        ))
 
     def test_labeled_and_salutation_names_are_linked_to_nearby_contact_data(self):
         service = CustomerSuggestionService()
@@ -400,7 +387,7 @@ class CustomerSuggestionTests(unittest.TestCase):
         self.assertTrue(any(
             contact.name == "Erika Muster"
             and contact.email == "erika.muster@example.de"
-            and contact.phone == "0176 12345678"
+            and contact.phone == ""
             for contact in suggestion.contacts
         ))
 
@@ -509,11 +496,11 @@ class CustomerSuggestionTests(unittest.TestCase):
             self.assertTrue(any(
                 contact.name == "Max Müller"
                 and contact.email == "max.mueller@example.de"
-                and contact.phone == "+49 40 1234567"
+                and contact.phone == ""
                 for contact in suggestion.contacts
             ))
 
-    def test_two_company_contacts_keep_role_email_and_phone_separate(self):
+    def test_two_company_contacts_keep_role_and_email_separate(self):
         service = CustomerSuggestionService()
         suggestion = service.suggest_from_documents(
             Path("/tmp/Architekturbüro Mayer GmbH, Hamburg"),
@@ -532,13 +519,12 @@ class CustomerSuggestionTests(unittest.TestCase):
         )
 
         self.assertIn(
-            Contact("Maike Mayer", "Architektin", "maike@mayer.de", "040 111111"),
+            Contact("Maike Mayer", "Architektin", "maike@mayer.de"),
             suggestion.contacts,
         )
         self.assertIn(
             Contact(
-                "Max Mustermann", "Projektleiter",
-                "max@mayer.de", "040 222222",
+                "Max Mustermann", "Projektleiter", "max@mayer.de",
             ),
             suggestion.contacts,
         )
@@ -566,13 +552,13 @@ class CustomerSuggestionTests(unittest.TestCase):
             suggestion = service.suggest_for_folder(folder)
 
             self.assertEqual(suggestion.entity_type, "Organisation")
-            self.assertEqual(suggestion.phone, "08268 17191193")
+            self.assertEqual(suggestion.phone, "")
             self.assertTrue(all("Brh" not in contact.name for contact in suggestion.contacts))
-            self.assertTrue(all("0053107" not in contact.phone for contact in suggestion.contacts))
+            self.assertTrue(all(contact.phone == "" for contact in suggestion.contacts))
             self.assertTrue(any(
                 contact.name == "Erika Muster"
                 and contact.email == "erika.muster@example.de"
-                and contact.phone == "0176 12345678"
+                and contact.phone == ""
                 for contact in suggestion.contacts
             ))
 

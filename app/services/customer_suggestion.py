@@ -5,7 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 import re
 
-import phonenumbers
 from docx import Document
 from PyPDF2 import PdfReader
 
@@ -15,10 +14,6 @@ from app.services.document_converter import DocumentConverter
 
 
 EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b")
-PHONE_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:\+\d{1,3}|00\d{1,3}|0[1-9])"
-    r"(?:[\s/().-]*\d){5,14}(?![A-Za-z0-9])"
-)
 POSTAL_CITY_RE = re.compile(r"\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß .-]{2,})")
 STREET_RE = re.compile(
     r"\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß .-]{2,}(?:straße|str\.|weg|allee|platz|ring|gasse|chaussee)\s+\d+[a-zA-Z]?)",
@@ -65,7 +60,6 @@ SIGNATURE_CONTEXT_RE = re.compile(
     r"(?i)\b(?:mit freundlichen grüßen|freundliche grüße|hochachtungsvoll|"
     r"absender|geschäftsführer|i\.?\s*a\.?|i\.?\s*v\.?)\b"
 )
-PHONE_CONTEXT_RE = re.compile(r"(?i)\b(?:tel\.?|telefon|mobil|handy|fon|phone|fax)\b")
 NOISE_LINE_RE = re.compile(
     r"(?i)\b(?:iban|bic|bank|konto|ust|steuer|rechnung|angebot[- ]?nr|kundennr|"
     r"datum|seite|brh|höhe|breite|gesamt|summe|betrag|zahlbar|messwert)\b"
@@ -276,17 +270,8 @@ class CustomerSuggestionService:
                 contact.email.casefold() for contact in suggestion.contacts
                 if contact.email
             }
-            personal_phones = {
-                "".join(character for character in contact.phone if character.isdigit())
-                for contact in suggestion.contacts if contact.phone
-            }
             if suggestion.email.casefold() in personal_emails:
                 suggestion.email = ""
-            suggestion_phone = "".join(
-                character for character in suggestion.phone if character.isdigit()
-            )
-            if suggestion_phone and suggestion_phone in personal_phones:
-                suggestion.phone = ""
         identity_source = str(
             (preferred or eligible or [{"path": str(folder_path)}])[0].get("path")
         )
@@ -404,10 +389,6 @@ class CustomerSuggestionService:
             if excluded_name_context and not salutation and not role_match:
                 name = ""
             email_match = EMAIL_RE.search(line)
-            phone = ""
-            phone_match = PHONE_RE.search(line)
-            if phone_match:
-                phone = self._clean_phone_candidate(phone_match.group(0), line)
             confidence = 0.94 if strong_context else (0.80 if preferred else 0.72)
             if name:
                 evidence.append(self._evidence(
@@ -421,21 +402,10 @@ class CustomerSuggestionService:
                     "E-Mail im Empfängerblock" if strong_context else "E-Mail-Fund",
                     confidence,
                 ))
-            if phone:
-                evidence.append(self._evidence(
-                    "phone", phone, source_path, context, index,
-                    "Telefon im Empfängerblock" if strong_context else "Telefon-Fund",
-                    confidence,
-                ))
             if name:
                 nearby_lines = lines[index:min(len(lines), index + 5)]
                 nearby = " ".join(nearby_lines)
                 nearby_email = EMAIL_RE.search(nearby)
-                nearby_phone_match = PHONE_RE.search(nearby)
-                nearby_phone = (
-                    self._clean_phone_candidate(nearby_phone_match.group(0), nearby)
-                    if nearby_phone_match else ""
-                )
                 role = ""
                 for role_line in nearby_lines[1:3]:
                     labeled_role = ROLE_LABEL_RE.match(role_line)
@@ -455,7 +425,6 @@ class CustomerSuggestionService:
                         and not self._is_generic_email(nearby_email.group(0))
                         else ""
                     ),
-                    phone=nearby_phone,
                 ))
 
         for index, line in enumerate(lines[:60]):
@@ -517,8 +486,6 @@ class CustomerSuggestionService:
         position: int, rule: str, confidence: float,
     ) -> ExtractionEvidence:
         normalized = re.sub(r"\s+", " ", value.strip()).casefold()
-        if field_name == "phone":
-            normalized = "".join(character for character in value if character.isdigit())
         return ExtractionEvidence(
             field_name=field_name,
             value=value.strip(),
@@ -561,7 +528,7 @@ class CustomerSuggestionService:
         return max(matches, key=lambda item: item.confidence, default=None)
 
     def _apply_resolved_evidence(self, suggestion: CustomerSuggestion):
-        for field_name in ("email", "phone"):
+        for field_name in ("email",):
             item = self._best_evidence(suggestion.evidence, field_name)
             if item is not None:
                 setattr(suggestion, field_name, item.value)
@@ -654,7 +621,6 @@ class CustomerSuggestionService:
                 STREET_RE.search(candidate_line)
                 or POSTAL_CITY_RE.search(candidate_line)
                 or EMAIL_RE.search(candidate_line)
-                or PHONE_RE.search(candidate_line)
                 or EXCLUDED_ROLE_RE.search(candidate_line)
                 or NOISE_LINE_RE.search(candidate_line)
             ):
@@ -770,46 +736,11 @@ class CustomerSuggestionService:
             for item in evidence
         )
 
-    def _clean_phone_candidate(self, value: str, line: str) -> str:
-        if (
-            NOISE_LINE_RE.search(line)
-            or DATE_RE.search(line)
-            or "," in value
-            or re.search(r"(?i)\bfax\b", line)
-        ):
-            return ""
-        raw = re.sub(r"\s+", " ", value).strip()
-        compact = re.sub(r"\D", "", raw)
-        international = raw.startswith("+") or raw.startswith("00")
-        if international and raw.startswith("00"):
-            raw = "+" + raw[2:]
-        if not international and not raw.startswith("0"):
-            return ""
-        if not (7 <= len(compact) <= 15):
-            return ""
-        try:
-            parsed = phonenumbers.parse(raw, None if international else "DE")
-        except phonenumbers.NumberParseException:
-            return ""
-        if not (
-            phonenumbers.is_possible_number(parsed)
-            and phonenumbers.is_valid_number(parsed)
-        ):
-            return ""
-        if not international and phonenumbers.region_code_for_number(parsed) != "DE":
-            return ""
-        phone_format = (
-            phonenumbers.PhoneNumberFormat.INTERNATIONAL
-            if international
-            else phonenumbers.PhoneNumberFormat.NATIONAL
-        )
-        return phonenumbers.format_number(parsed, phone_format)
-
     def _clean_name_candidate(self, value: str) -> str:
         candidate = re.split(r"\s{2,}|\t|\|", value.strip(), maxsplit=1)[0].strip(" :-")
         if not candidate or len(candidate) > 60:
             return ""
-        if EMAIL_RE.search(candidate) or PHONE_RE.search(candidate):
+        if EMAIL_RE.search(candidate):
             return ""
         if NOISE_LINE_RE.search(candidate) or DATE_RE.search(candidate):
             return ""

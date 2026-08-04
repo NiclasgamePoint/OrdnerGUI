@@ -6,4 +6,3 @@ Pillow
 PyPDF2
 pycryptodome
 olefile
-phonenumbers

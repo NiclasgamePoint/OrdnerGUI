@@ -23,7 +23,6 @@ class RecognitionBlacklist:
 
     def __init__(self, options: CustomerRecognitionOptions):
         self.emails = {value.casefold() for value in options.emails}
-        self.phones = {self.normalize_phone(value) for value in options.phones}
         self.names = {normalize_identity(value) for value in options.names}
         self.addresses = {normalize_identity(value) for value in options.addresses}
         self.fragments = {
@@ -46,11 +45,6 @@ class RecognitionBlacklist:
             value.casefold() in self.emails or self.contains_fragment(value)
         )
 
-    def phone_blocked(self, value: str) -> bool:
-        return bool(value) and (
-            self.normalize_phone(value) in self.phones or self.contains_fragment(value)
-        )
-
     def name_blocked(self, value: str) -> bool:
         return bool(value) and (
             normalize_identity(value) in self.names or self.contains_fragment(value)
@@ -69,8 +63,6 @@ class RecognitionBlacklist:
     def filter_suggestion(self, suggestion: CustomerSuggestion) -> CustomerSuggestion:
         if self.email_blocked(suggestion.email):
             suggestion.email = ""
-        if self.phone_blocked(suggestion.phone):
-            suggestion.phone = ""
         if self.address_blocked(
             suggestion.street, suggestion.postal_code, suggestion.city
         ):
@@ -82,8 +74,7 @@ class RecognitionBlacklist:
             if self.name_blocked(contact.name):
                 continue
             email = "" if self.email_blocked(contact.email) else contact.email
-            phone = "" if self.phone_blocked(contact.phone) else contact.phone
-            if not email and not phone and normalize_identity(contact.name) in {
+            if not email and not contact.phone and normalize_identity(contact.name) in {
                 "kunde", "kontakt", "ansprechpartner", "ansprechpartnerin",
             }:
                 continue
@@ -91,14 +82,13 @@ class RecognitionBlacklist:
                 name=contact.name,
                 role=contact.role,
                 email=email,
-                phone=phone,
+                phone=contact.phone,
             ))
         suggestion.contacts = filtered_contacts
         suggestion.evidence = [
             item for item in suggestion.evidence
             if not (
                 (item.field_name == "email" and self.email_blocked(item.value))
-                or (item.field_name == "phone" and self.phone_blocked(item.value))
                 or (item.field_name == "contact_name" and self.name_blocked(item.value))
                 or (
                     item.field_name in {"street", "postal_code", "city"}
@@ -172,7 +162,7 @@ class CustomerRecognitionService:
 
             evidence = self._suggestions._mark_automatic_evidence(evidence)
             values = {}
-            for field_name in ("email", "phone", "street", "postal_code", "city"):
+            for field_name in ("email", "street", "postal_code", "city"):
                 matches = [
                     item for item in evidence
                     if item.field_name == field_name and item.automatic
@@ -189,7 +179,6 @@ class CustomerRecognitionService:
                 service_types=services,
                 years=years,
                 email=values.get("email", ""),
-                phone=values.get("phone", ""),
                 street=values.get("street", ""),
                 postal_code=values.get("postal_code", ""),
                 contacts=self._suggestions._deduplicate_contacts(contacts, evidence),
@@ -292,7 +281,6 @@ class CustomerRecognitionService:
                         years=self._years_for_path(folder_path, candidate.years),
                         entity_type=candidate.entity_type,
                         email=candidate.email,
-                        phone=candidate.phone,
                         street=candidate.street,
                         postal_code=candidate.postal_code,
                         contacts=list(candidate.contacts),
@@ -334,7 +322,6 @@ class CustomerRecognitionService:
                 years=[int(root["year"])],
                 entity_type=suggestion.entity_type,
                 email=suggestion.email,
-                phone=suggestion.phone,
                 street=suggestion.street,
                 postal_code=suggestion.postal_code,
                 contacts=suggestion.contacts,
@@ -383,7 +370,6 @@ class CustomerRecognitionService:
             years=sorted({value for candidate in candidates for value in candidate.years}),
             entity_type=next((item.entity_type for item in candidates if item.entity_type), ""),
             email=next((item.email for item in candidates if item.email), ""),
-            phone=next((item.phone for item in candidates if item.phone), ""),
             street=(
                 address_candidate.street if address_candidate is not None else ""
             ),
