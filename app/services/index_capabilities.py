@@ -7,11 +7,14 @@ import shutil
 import subprocess
 import sys
 
+from app.services.index_tool_resolver import IndexToolResolver
+
 
 @dataclass(frozen=True)
 class IndexCapabilities:
     tesseract_path: str = ""
     poppler_path: str = ""
+    pdftotext_path: str = ""
     ocr_languages: tuple[str, ...] = ()
 
     @property
@@ -23,12 +26,16 @@ class IndexCapabilityDetector:
     """Detect optional extraction tools without platform-specific assumptions."""
 
     def detect(self) -> IndexCapabilities:
+        resolver = IndexToolResolver()
         tesseract = self._find_tesseract()
-        poppler = shutil.which("pdftoppm") or ""
+        poppler_path = resolver.resolve("pdftoppm")
+        pdftotext_path = resolver.resolve("pdftotext")
+        poppler = str(poppler_path) if poppler_path else ""
+        pdftotext = str(pdftotext_path) if pdftotext_path else ""
         languages: tuple[str, ...] = ()
         if tesseract:
             languages = self._tesseract_languages(Path(tesseract))
-        return IndexCapabilities(tesseract, poppler, languages)
+        return IndexCapabilities(tesseract, poppler, pdftotext, languages)
 
     @staticmethod
     def _find_tesseract() -> str:

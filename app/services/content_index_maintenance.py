@@ -26,7 +26,7 @@ class ContentIndexMaintenance:
         with ContentStateRepository.open_recoverable(self.layout) as state:
             cursor = state.connection.execute(
                 "UPDATE documents SET status='pending',attempts=0,content_status='',"
-                "content_error='',lease_until='' WHERE status='failed'"
+                "content_error='',error_category='',lease_until='' WHERE status='failed'"
             )
             state.connection.commit()
             return ContentMaintenanceResult(affected_documents=max(cursor.rowcount, 0))

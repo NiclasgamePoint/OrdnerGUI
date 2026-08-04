@@ -52,9 +52,9 @@ class IndexPreferenceTests(unittest.TestCase):
 
     def setUp(self):
         _MemorySettings.values = {}
-        persistence = patch("app.gui.settings_popup.persist_index_options")
-        persistence.start()
-        self.addCleanup(persistence.stop)
+        self.persistence = patch("app.gui.settings_popup.persist_index_options")
+        self.persistence.start()
+        self.addCleanup(self.persistence.stop)
 
     def test_new_preferences_round_trip_through_platform_settings(self):
         options = IndexOptions(
@@ -329,13 +329,61 @@ class IndexPreferenceTests(unittest.TestCase):
         self.assertTrue(popup.isVisible())
         popup.close()
 
+    def test_excel_exclusion_from_visible_popup_survives_fresh_process(self):
+        self.persistence.stop()
+        with TemporaryDirectory() as directory:
+            environment = dict(os.environ)
+            environment["XDG_CONFIG_HOME"] = directory
+            environment["QT_QPA_PLATFORM"] = "offscreen"
+            save_script = "\n".join((
+                "from PySide6.QtCore import QTimer",
+                "from PySide6.QtWidgets import QApplication, QMessageBox",
+                "from app.gui.settings_popup import SettingsPopup",
+                "app = QApplication([])",
+                "popup = SettingsPopup('light', '#2db89d')",
+                "popup.show()",
+                "app.processEvents()",
+                "popup.content_format_checkboxes['Excel (XLS/XLSX)'][0].setChecked(False)",
+                "def confirm():",
+                "    for widget in QApplication.topLevelWidgets():",
+                "        if isinstance(widget, QMessageBox):",
+                "            widget.button(QMessageBox.StandardButton.Yes).click()",
+                "QTimer.singleShot(25, confirm)",
+                "popup.save_index_options_button.click()",
+                "app.processEvents()",
+            ))
+            subprocess.run(
+                [sys.executable, "-c", save_script],
+                cwd=Path(__file__).resolve().parents[1],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            load_script = (
+                "import json;from app.core.config import load_index_options;"
+                "print(json.dumps(sorted(load_index_options().indexed_content_types)))"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", load_script],
+                cwd=Path(__file__).resolve().parents[1],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            extensions = json.loads(result.stdout)
+            self.assertNotIn("xls", extensions)
+            self.assertNotIn("xlsx", extensions)
+
     def test_ocr_toggle_prevents_fallback_for_image_only_pdf(self):
-        page = Mock()
-        page.extract_text.return_value = ""
-        reader = Mock(pages=[page])
         disabled = DocumentTextIndexer(IndexOptions(ocr_enabled=False))
         with (
-            patch("app.services.document_text_indexer.PdfReader", return_value=reader),
+            patch.object(disabled.tools, "resolve", return_value=None),
+            patch.object(
+                disabled, "_run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
             patch.object(disabled, "_ocr_pdf", return_value="OCR") as ocr,
         ):
             self.assertEqual(disabled._pdf(Path("scan.pdf")), "")
@@ -343,8 +391,12 @@ class IndexPreferenceTests(unittest.TestCase):
 
         enabled = DocumentTextIndexer(IndexOptions(ocr_enabled=True))
         with (
-            patch("app.services.document_text_indexer.PdfReader", return_value=reader),
-            patch.object(enabled, "_ocr_pdf", return_value="OCR") as ocr,
+            patch.object(enabled.tools, "resolve", return_value=None),
+            patch.object(
+                enabled, "_run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch.object(enabled, "_ocr_pdf", return_value=("OCR", 1, 1)) as ocr,
         ):
             self.assertEqual(enabled._pdf(Path("scan.pdf")), "OCR")
             ocr.assert_called_once()

@@ -12,7 +12,7 @@ import zlib
 from app.core.index_layout import IndexLayout
 
 
-CONTENT_SCHEMA_VERSION = 1
+CONTENT_SCHEMA_VERSION = 2
 DEFAULT_SHARD_TARGET_BYTES = 1024**3
 TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -91,6 +91,8 @@ class ContentStateRepository:
                 shard_name TEXT NOT NULL DEFAULT '',
                 content_status TEXT NOT NULL DEFAULT '',
                 content_error TEXT NOT NULL DEFAULT '',
+                error_category TEXT NOT NULL DEFAULT '',
+                last_parser TEXT NOT NULL DEFAULT '',
                 extracted_characters INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 catalog_generation TEXT NOT NULL
@@ -112,6 +114,18 @@ class ContentStateRepository:
             );
             """
         )
+        columns = {
+            str(row[1])
+            for row in self.connection.execute("PRAGMA table_info(documents)")
+        }
+        if "error_category" not in columns:
+            self.connection.execute(
+                "ALTER TABLE documents ADD COLUMN error_category TEXT NOT NULL DEFAULT ''"
+            )
+        if "last_parser" not in columns:
+            self.connection.execute(
+                "ALTER TABLE documents ADD COLUMN last_parser TEXT NOT NULL DEFAULT ''"
+            )
         self.connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
             (str(CONTENT_SCHEMA_VERSION),),
@@ -185,6 +199,8 @@ class ContentStateRepository:
                               THEN 0 ELSE documents.attempts END,
                 content_error=CASE WHEN documents.source_version<>excluded.source_version
                                    THEN '' ELSE documents.content_error END,
+                error_category=CASE WHEN documents.source_version<>excluded.source_version
+                                    THEN '' ELSE documents.error_category END,
                 shard_name=CASE
                     WHEN documents.partition_year IS NOT excluded.partition_year THEN ''
                     ELSE documents.shard_name END,
@@ -280,28 +296,47 @@ class ContentStateRepository:
         content_status: str,
         extracted_characters: int,
         content_error: str = "",
+        last_parser: str = "",
     ):
         self.connection.execute(
             """
             UPDATE documents
             SET status='completed', shard_name=?, content_status=?, content_error=?,
-                extracted_characters=?, lease_until='', updated_at=?
+                extracted_characters=?, error_category='', last_parser=?,
+                lease_until='', updated_at=?
             WHERE document_key=? AND source_version=?
             """,
             (
                 shard_name, content_status, content_error[:2000],
-                extracted_characters, utc_now(),
+                extracted_characters, last_parser, utc_now(),
                 task.document_key, task.source_version,
             ),
         )
         self.connection.commit()
 
-    def fail(self, task: ContentTask, error: str, maximum_attempts: int = 3):
-        status = "failed" if task.attempts >= maximum_attempts else "pending"
+    def fail(
+        self,
+        task: ContentTask,
+        error: str,
+        maximum_attempts: int = 3,
+        *,
+        category: str = "error",
+        retry_later_only: bool = False,
+        last_parser: str = "",
+    ):
+        status = (
+            "failed"
+            if retry_later_only or task.attempts >= maximum_attempts
+            else "pending"
+        )
         self.connection.execute(
-            "UPDATE documents SET status=?, content_status='error', content_error=?, "
-            "lease_until='', updated_at=? WHERE document_key=? AND source_version=?",
-            (status, error[:2000], utc_now(), task.document_key, task.source_version),
+            "UPDATE documents SET status=?, content_status=?, content_error=?, "
+            "error_category=?,last_parser=?,lease_until='',updated_at=? "
+            "WHERE document_key=? AND source_version=?",
+            (
+                status, category, error[:2000], category, last_parser, utc_now(),
+                task.document_key, task.source_version,
+            ),
         )
         self.connection.commit()
 

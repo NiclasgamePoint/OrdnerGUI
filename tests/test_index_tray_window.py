@@ -55,6 +55,13 @@ class IndexTrayWindowTests(unittest.TestCase):
                 "pending_documents": 90,
                 "failed_documents": 2,
                 "current_path": str(current_file),
+                "active_workers": 2,
+                "worker_limit": 4,
+                "resource_profile": "balanced",
+                "worker_assignments": [
+                    {"worker": 1, "path": str(root / "angebot.pdf")},
+                    {"worker": 3, "path": str(root / "vertrag.docx")},
+                ],
             })
 
             window = IndexTrayWindow(
@@ -70,8 +77,38 @@ class IndexTrayWindowTests(unittest.TestCase):
             self.assertIn("30 von 120", window.content_detail_label.text())
             self.assertIn("90 ausstehend", window.content_detail_label.text())
             self.assertIn("2 Dokumente mit Fehlern", window.content_detail_label.text())
-            self.assertIn("angebot.pdf", window.content_detail_label.text())
+            self.assertIn("2 von 4 Workern aktiv", window.worker_summary_label.text())
+            self.assertIn("Profil Ausgewogen", window.worker_summary_label.text())
+            self.assertIn("Worker 1:", window.worker_output.toPlainText())
+            self.assertIn("angebot.pdf", window.worker_output.toPlainText())
+            self.assertIn("Worker 3:", window.worker_output.toPlainText())
+            self.assertIn("vertrag.docx", window.worker_output.toPlainText())
             self.assertFalse(window.cancel_button.isHidden())
+            window.close()
+
+    def test_running_legacy_job_does_not_claim_zero_active_workers(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog_state_dir = root / "catalog"
+            content_state_dir = root / "content"
+            current_file = root / "legacy-running.pdf"
+            write_state(catalog_state_dir, {"status": "completed"})
+            write_state(content_state_dir, {
+                "status": "running",
+                "worker_limit": 9,
+                "current_path": str(current_file),
+                "completed_documents": 10,
+                "total_documents": 20,
+            })
+            window = IndexTrayWindow(
+                catalog_state_dir,
+                root / "missing.log",
+                content_state_dir=content_state_dir,
+            )
+            window.refresh()
+            self.assertIn("Index arbeitet", window.worker_summary_label.text())
+            self.assertNotIn("0 von 9", window.worker_summary_label.text())
+            self.assertIn("legacy-running.pdf", window.worker_output.toPlainText())
             window.close()
 
 
