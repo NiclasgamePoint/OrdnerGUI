@@ -178,14 +178,12 @@ class CustomerPage(QWidget):
         self.email = self._value_label()
         self.phone = self._value_label()
         self.address = self._value_label()
-        self.services = self._value_label()
         self.tags = self._value_label()
         form.addRow("Art", self.entity_type)
         form.addRow("Unternehmen", self.company)
         form.addRow("E-Mail", self.email)
         form.addRow("Telefon", self.phone)
         form.addRow("Adresse", self.address)
-        form.addRow("Dienstleistungen", self.services)
         form.addRow("Tags", self.tags)
         form_layout.addLayout(form)
 
@@ -370,7 +368,6 @@ class CustomerPage(QWidget):
             if value
         )
         self.address.setText(address or "-")
-        self.services.setText(", ".join(customer.service_types) or "-")
         self.tags.setText(", ".join(customer.tags) or "-")
 
         self.contacts_table.setRowCount(0)
