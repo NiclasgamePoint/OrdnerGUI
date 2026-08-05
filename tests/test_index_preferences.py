@@ -128,7 +128,8 @@ class IndexPreferenceTests(unittest.TestCase):
             ) as catalog:
                 catalog.synchronize_directory(source, full_rebuild=True)
                 eligible = catalog.conn.execute(
-                    "SELECT content_eligible FROM files WHERE path=?", (str(document),)
+                    "SELECT content_eligible FROM files WHERE path=?",
+                    (str(document.resolve()),),
                 ).fetchone()[0]
                 self.assertEqual(eligible, 1)
                 with ContentStateRepository(layout.content_state_path) as state:
