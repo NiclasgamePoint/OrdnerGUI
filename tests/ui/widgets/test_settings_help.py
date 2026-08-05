@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QTest
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.settings_help import SettingsHelpController
+from app.gui.settings_help import SettingsHelpBubble, SettingsHelpController
 from app.gui.settings_popup import SETTINGS_HELP_TEXTS, SettingsPopup
 
 
@@ -161,6 +162,49 @@ class SettingsHelpTests(unittest.TestCase):
             self.assertTrue(widget.accessibleDescription().strip())
         popup.close()
         self.app.processEvents()
+
+    def test_validation_event_edges_pending_state_and_idempotent_disposal(self):
+        self.controller.set_delay_ms(-2)
+        self.assertEqual(self.controller.delay_ms, 0)
+        with self.assertRaises(ValueError):
+            self.controller.register("", "text", self.first)
+        with self.assertRaises(ValueError):
+            self.controller.register("id", "", self.first)
+
+        self.assertFalse(self.controller.eventFilter(object(), QEvent(QEvent.Type.Enter)))
+        self.controller._activate(self.first)
+        self.controller._activate(self.first)
+        self.controller._hovered.clear()
+        self.controller._focused.clear()
+        self.controller._show_pending()
+        self.assertFalse(self.controller.bubble.isVisible())
+
+        self.controller._suppressed_id = "shared"
+        self.controller._activate(self.first)
+        self.assertFalse(self.controller._timer.isActive())
+        self.controller._hide_if_inactive()
+        self.assertEqual(self.controller._suppressed_id, "")
+
+        watched = Mock()
+        watched.removeEventFilter.side_effect = RuntimeError("deleted")
+        root = QWidget(self.owner)
+        self.controller._help[root] = ("manual", "Manual")
+        self.controller._watch(watched, root)
+        self.assertIn(watched, self.controller._watched_roots)
+        self.controller.owner = Mock()
+        self.controller.owner.removeEventFilter.side_effect = RuntimeError("deleted")
+        self.controller.dispose()
+        self.controller.dispose()
+        self.assertFalse(self.controller.eventFilter(self.first, QEvent(QEvent.Type.Enter)))
+
+    def test_bubble_falls_back_when_no_screen_is_available(self):
+        bubble = SettingsHelpBubble()
+        with patch("app.gui.settings_help.QGuiApplication.screenAt", return_value=None), \
+                patch("app.gui.settings_help.QGuiApplication.primaryScreen", return_value=None), \
+                patch.object(bubble, "show"), patch.object(bubble, "raise_"):
+            bubble.show_for(self.first, "Hilfe")
+        self.assertEqual(bubble.label.text(), "Hilfe")
+        bubble.deleteLater()
 
 
 if __name__ == "__main__":

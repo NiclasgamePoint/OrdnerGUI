@@ -1,17 +1,49 @@
 import re
 import unittest
+from unittest.mock import Mock
 
 from PySide6.QtGui import QPalette
 
 from app.gui.theme import (
     FONT_FAMILY_FALLBACKS,
     ThemeManager,
+    _bounded_int,
+    _safe_color,
+    _tint,
     build_palette,
     build_stylesheet,
 )
 
 
 class ThemeTests(unittest.TestCase):
+    def test_invalid_theme_values_use_safe_fallbacks(self):
+        self.assertEqual(_safe_color("invalid", "#ffffff"), "#ffffff")
+        self.assertEqual(_tint("invalid", True, 120), "invalid")
+        self.assertEqual(_tint("#808080", False, 120), "#6b6b6b")
+        self.assertEqual(_bounded_int("bad", 12, 10, 20), 12)
+        manager = ThemeManager()
+        original = manager.mode
+        manager.set_mode("invalid")
+        self.assertEqual(manager.mode, original)
+        settings = Mock()
+        values = {
+            "theme_mode": "unsupported", "accent_color": "invalid",
+            "contrast": "bad", "font_size": "bad",
+        }
+        settings.value.side_effect = lambda key, default: values.get(key, default)
+        manager.settings = settings
+        manager.load()
+        self.assertEqual(manager.mode, manager.DEFAULT_MODE)
+        manager.set_mode(" DARK ")
+        manager.set_accent("#ffffff")
+        manager.set_contrast(999)
+        manager.set_font_size(1)
+        manager.save()
+        settings.sync.assert_called_once_with()
+        app = Mock()
+        manager.apply(app)
+        self.assertEqual(app.setStyleSheet.call_count, 2)
+        app.setPalette.assert_called_once()
     def test_dark_palette_covers_native_widget_backgrounds(self):
         palette = build_palette("dark", "#f08a3c")
         self.assertEqual(

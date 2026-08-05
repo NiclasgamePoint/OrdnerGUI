@@ -53,8 +53,12 @@ class SearchPreferences:
         )
         return sort_order, include_subfolders
 
-    def save(self, sort_order: SearchSort, include_subfolders: bool):
-        self.settings.setValue(self.SORT_KEY, sort_order.value)
+    def save(self, sort_order: SearchSort | str, include_subfolders: bool):
+        try:
+            normalized_sort = SearchSort(sort_order)
+        except ValueError:
+            normalized_sort = SearchSort.RELEVANCE
+        self.settings.setValue(self.SORT_KEY, normalized_sort.value)
         self.settings.setValue(self.SUBFOLDERS_KEY, bool(include_subfolders))
 
 
