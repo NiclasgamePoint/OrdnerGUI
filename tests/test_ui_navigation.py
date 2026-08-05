@@ -7,9 +7,15 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QLabel,
+    QScrollArea,
+    QWidget,
+)
 
-from app.core.customer_models import Customer
+from app.core.customer_models import Contact, Customer
 from app.core.config import CustomerRecognitionOptions
 from app.core.customer_repository import CustomerRepository
 from app.core.search_models import RecentCustomerHistory
@@ -223,6 +229,65 @@ class UiNavigationTests(unittest.TestCase):
                 dialog.contacts_table.verticalHeader().defaultSectionSize(),
                 34,
             )
+
+            dialog.close()
+            repository.close()
+
+    def test_customer_editor_edits_and_saves_contact_role_and_column_order(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            customer = repository.save(
+                Customer(
+                    display_name="Muster GmbH",
+                    company="Muster GmbH",
+                    entity_type="Unternehmen",
+                    contacts=[
+                        Contact(
+                            name="Erika Muster",
+                            role="Geschäftsführung",
+                            phone="01234 567890",
+                            email="erika@example.de",
+                        )
+                    ],
+                )
+            )
+            dialog = CustomerEditorDialog(repository, customer_id=customer.id)
+
+            headers = [
+                dialog.contacts_table.horizontalHeaderItem(column).text()
+                for column in range(dialog.contacts_table.columnCount())
+            ]
+            self.assertEqual(headers, ["Name", "Rolle", "Telefon", "E-Mail"])
+            header = dialog.contacts_table.horizontalHeader()
+            self.assertEqual(header.sectionResizeMode(2), QHeaderView.ResizeToContents)
+            self.assertEqual(header.sectionResizeMode(3), QHeaderView.Stretch)
+            self.assertFalse(dialog.contacts_table.isColumnHidden(1))
+            self.assertEqual(dialog.contacts_table.item(0, 1).text(), "Geschäftsführung")
+            self.assertEqual(dialog.contacts_table.item(0, 2).text(), "01234 567890")
+            self.assertEqual(dialog.contacts_table.item(0, 3).text(), "erika@example.de")
+
+            dialog.contacts_table.item(0, 1).setText("Bauleitung")
+            dialog._save()
+            saved = repository.get(int(customer.id))
+            self.assertEqual(saved.contacts[0].role, "Bauleitung")
+            self.assertEqual(saved.contacts[0].phone, "01234 567890")
+            self.assertEqual(saved.contacts[0].email, "erika@example.de")
+
+            dialog.close()
+            repository.close()
+
+    def test_customer_editor_role_visibility_follows_customer_type(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            dialog = CustomerEditorDialog(repository, suggested_name="Muster")
+
+            dialog._append_contact(Contact(name="Test", role="Leitung"))
+            self.assertFalse(dialog.contacts_table.isColumnHidden(1))
+            dialog.entity_type.setCurrentText("Privatperson")
+            self.assertTrue(dialog.contacts_table.isColumnHidden(1))
+            dialog.entity_type.setCurrentText("Unternehmen")
+            self.assertFalse(dialog.contacts_table.isColumnHidden(1))
+            self.assertEqual(dialog.contacts_table.item(0, 1).text(), "Leitung")
 
             dialog.close()
             repository.close()
@@ -622,6 +687,34 @@ class UiNavigationTests(unittest.TestCase):
             page.set_customer(customer)
 
             self.assertTrue(page.contacts_table.hasMouseTracking())
+
+            page.close()
+            repository.close()
+
+    def test_customer_page_only_shows_role_for_companies_with_role(self):
+        with TemporaryDirectory() as directory:
+            repository = CustomerRepository(Path(directory) / "customers.db")
+            page = CustomerPage(repository)
+            company = Customer(
+                display_name="Muster GmbH",
+                company="Muster GmbH",
+                entity_type="Unternehmen",
+                contacts=[Contact(name="Test", phone="123", email="a@example.de")],
+            )
+
+            page.set_customer(company)
+            self.assertTrue(page.contacts_table.isColumnHidden(1))
+            header = page.contacts_table.horizontalHeader()
+            self.assertEqual(header.sectionResizeMode(2), QHeaderView.ResizeToContents)
+            self.assertEqual(header.sectionResizeMode(3), QHeaderView.Stretch)
+            company.contacts[0].role = "Leitung"
+            page.set_customer(company)
+            self.assertFalse(page.contacts_table.isColumnHidden(1))
+            self.assertEqual(page.contacts_table.item(0, 2).text(), "123")
+            self.assertEqual(page.contacts_table.item(0, 3).text(), "a@example.de")
+            company.entity_type = "Organisation"
+            page.set_customer(company)
+            self.assertTrue(page.contacts_table.isColumnHidden(1))
 
             page.close()
             repository.close()
