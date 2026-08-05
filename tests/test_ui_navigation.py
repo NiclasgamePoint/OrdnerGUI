@@ -367,7 +367,7 @@ class UiNavigationTests(unittest.TestCase):
         row._open_file()
         row._open_folder()
         self.assertEqual(opened_files, ["/tmp/projekt/bericht.docx"])
-        self.assertEqual(opened_paths, ["/tmp/projekt"])
+        self.assertEqual(opened_paths, [str(Path("/tmp/projekt"))])
         self.assertIn("Dokumentausschnitt", row.snippet_label.text())
         page.close()
 
