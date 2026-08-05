@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -192,15 +193,18 @@ class CustomerPage(QWidget):
         form_layout.addWidget(contacts_title)
         self.contacts_table = QTableWidget(0, 4)
         self.contacts_table.setHorizontalHeaderLabels(
-            ["Name", "Rolle", "E-Mail", "Telefon"]
+            ["Name", "Rolle", "Telefon", "E-Mail"]
         )
         self.contacts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.contacts_table.setMouseTracking(True)
-        self.contacts_table.horizontalHeader().setStretchLastSection(True)
+        contact_header = self.contacts_table.horizontalHeader()
+        contact_header.setStretchLastSection(False)
+        contact_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        contact_header.setSectionResizeMode(3, QHeaderView.Stretch)
         self.contacts_table.setMinimumHeight(150)
         self.contacts_table.setAccessibleName("Kontakte des Kunden")
         self.contacts_table.setAccessibleDescription(
-            "Tabelle mit Name, Rolle, E-Mail und Telefonnummer."
+            "Tabelle mit Name, Rolle, Telefonnummer und E-Mail."
         )
         form_layout.addWidget(self.contacts_table)
 
@@ -372,13 +376,14 @@ class CustomerPage(QWidget):
         self.tags.setText(", ".join(customer.tags) or "-")
 
         self.contacts_table.setRowCount(0)
+        self._update_contact_role_visibility(customer)
         for contact in customer.contacts:
             row = self.contacts_table.rowCount()
             self.contacts_table.insertRow(row)
             self.contacts_table.setItem(row, 0, QTableWidgetItem(contact.name))
             self.contacts_table.setItem(row, 1, QTableWidgetItem(contact.role))
-            self.contacts_table.setItem(row, 2, QTableWidgetItem(contact.email))
-            self.contacts_table.setItem(row, 3, QTableWidgetItem(contact.phone))
+            self.contacts_table.setItem(row, 2, QTableWidgetItem(contact.phone))
+            self.contacts_table.setItem(row, 3, QTableWidgetItem(contact.email))
         self._notes_sync_in_progress = True
         self.notes.setPlainText("\n\n".join(customer.notes))
         self.notes_status.setText("")
@@ -387,6 +392,11 @@ class CustomerPage(QWidget):
         self._reload_journal_entries()
         self._refresh_suggestion_count()
         self._set_projects(customer, folder_summaries or {})
+
+    def _update_contact_role_visibility(self, customer: Customer):
+        has_role = any(contact.role.strip() for contact in customer.contacts)
+        show_role = customer.entity_type.strip() == "Unternehmen" and has_role
+        self.contacts_table.setColumnHidden(1, not show_role)
 
     def _save_notes(self):
         if self.customer is None or self.customer.id is None or self._notes_sync_in_progress:

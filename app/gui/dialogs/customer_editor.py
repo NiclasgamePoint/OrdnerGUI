@@ -43,6 +43,7 @@ class FolderDisplayInfo:
 class CustomerEditorDialog(CenteredPopupDialog):
     AUTO_FILL_STYLE = "border: 1px solid #d7a832; background-color: rgba(215, 168, 50, 0.12);"
     SUGGESTED_ITEM_TOOLTIP = "Automatisch gefundener möglicher Kundenordner"
+    CONTACT_HEADERS = ("Name", "Rolle", "Telefon", "E-Mail")
 
     def __init__(
         self,
@@ -265,13 +266,20 @@ class CustomerEditorDialog(CenteredPopupDialog):
         page = QWidget()
         page.setObjectName("DialogPage")
         layout = QVBoxLayout(page)
-        self.contacts_table = QTableWidget(0, 3)
-        self.contacts_table.setHorizontalHeaderLabels(["Name", "E-Mail", "Telefon"])
+        self.contacts_table = QTableWidget(0, len(self.CONTACT_HEADERS))
+        self.contacts_table.setHorizontalHeaderLabels(self.CONTACT_HEADERS)
         self.contacts_table.verticalHeader().setDefaultSectionSize(34)
         self.contacts_table.verticalHeader().setMinimumSectionSize(30)
-        self.contacts_table.horizontalHeader().setStretchLastSection(True)
+        contact_header = self.contacts_table.horizontalHeader()
+        contact_header.setStretchLastSection(False)
+        contact_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        contact_header.setSectionResizeMode(3, QHeaderView.Stretch)
         for contact in self.customer.contacts:
             self._append_contact(contact)
+        self.entity_type.currentTextChanged.connect(
+            self._update_contact_role_visibility
+        )
+        self._update_contact_role_visibility()
         layout.addWidget(self.contacts_table)
         actions = QHBoxLayout()
         add_button = AppButton("Kontakt hinzufügen", AppButton.SECONDARY)
@@ -287,12 +295,17 @@ class CustomerEditorDialog(CenteredPopupDialog):
     def _append_contact(self, contact: Contact, auto_filled: bool = False):
         row = self.contacts_table.rowCount()
         self.contacts_table.insertRow(row)
-        for column, value in enumerate((contact.name, contact.email, contact.phone)):
+        values = (contact.name, contact.role, contact.phone, contact.email)
+        for column, value in enumerate(values):
             item = QTableWidgetItem(value)
             if auto_filled:
                 item.setBackground(self.palette().alternateBase())
                 item.setToolTip("Automatisch aus Dokument-/Ordnerdaten vorausgefüllt")
             self.contacts_table.setItem(row, column, item)
+
+    def _update_contact_role_visibility(self):
+        is_company = self.entity_type.currentText().strip() == "Unternehmen"
+        self.contacts_table.setColumnHidden(1, not is_company)
 
     def _remove_contact(self):
         row = self.contacts_table.currentRow()
@@ -653,10 +666,17 @@ class CustomerEditorDialog(CenteredPopupDialog):
             values = [
                 self.contacts_table.item(row, column).text().strip()
                 if self.contacts_table.item(row, column) else ""
-                for column in range(3)
+                for column in range(len(self.CONTACT_HEADERS))
             ]
             if values[0]:
-                contacts.append(Contact(values[0], "", values[1], values[2]))
+                contacts.append(
+                    Contact(
+                        name=values[0],
+                        role=values[1],
+                        phone=values[2],
+                        email=values[3],
+                    )
+                )
         company_name = self.company.text().strip()
         self.customer.display_name = company_name
         self.customer.entity_type = self.entity_type.currentText().strip() or "Unternehmen"
