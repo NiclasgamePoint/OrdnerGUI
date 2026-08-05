@@ -1,10 +1,11 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QPointF, QSize, Qt
+from PySide6.QtGui import QColor, QResizeEvent
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -72,6 +73,12 @@ class UiNavigationTests(unittest.TestCase):
 
     def test_navigation_controller_supports_forward(self):
         navigator = NavigationController()
+        navigator.back()
+        navigator.forward()
+        navigator.navigate("search")
+        navigator.navigate("temporary", remember=False)
+        self.assertFalse(navigator.can_go_back)
+        navigator.reset()
         navigator.navigate("customer", 7)
         navigator.navigate("folder", "/tmp/example")
         navigator.back()
@@ -100,6 +107,14 @@ class UiNavigationTests(unittest.TestCase):
 
         popup.close()
         owner.close()
+
+        unowned = CenteredPopupDialog()
+        with patch(
+            "app.gui.dialogs.centered_popup.QApplication.primaryScreen",
+            return_value=None,
+        ):
+            unowned.center_on_parent()
+        unowned.close()
 
     def test_search_page_separates_customer_and_folder_rows(self):
         page = SearchPage()
@@ -387,6 +402,47 @@ class UiNavigationTests(unittest.TestCase):
         )
         page.close()
 
+    def test_search_page_errors_statistics_coverage_and_plain_rows(self):
+        page = SearchPage(document_search_enabled=True)
+        plain_row = QWidget()
+        page.customer_section.set_rows([plain_row], 1)
+        page.customer_section.set_note("Hinweis")
+        self.assertEqual(page.customer_section._message.text(), "Hinweis")
+        minimal_customer = Customer(display_name="Nur Name")
+        page.reset([minimal_customer])
+        page.set_customers([Customer(
+            display_name="Mit Dienst", city="Ort", service_types=["Service"]
+        )], 1)
+        page.set_folders([{}], 1)
+        page.show_short_query_hint()
+        self.assertIn("Mindestens", page.document_section._message.text())
+        page.set_customer_error("customer")
+        page.set_folder_error("folder")
+        page.set_document_error("document")
+        self.assertIn("document", page.document_section._message.text())
+        page.set_statistics(None)
+        page.set_statistics(None, "statistics")
+
+        page.set_document_coverage(None)
+        page.set_document_coverage(SimpleNamespace(complete=True))
+        page.set_document_coverage(SimpleNamespace(
+            complete=False, completed_documents=0, total_documents=0,
+            unavailable_shards=0,
+        ))
+        self.assertIn("0 %", page.document_section._message.text())
+        page.set_document_coverage(SimpleNamespace(
+            complete=False, completed_documents=1, total_documents=2,
+            unavailable_shards=3,
+        ))
+        self.assertIn("3 Shards", page.document_section._message.text())
+
+        page.set_document_search_enabled(False)
+        page.show_short_query_hint()
+        page.set_document_error("ignored")
+        page.set_document_coverage(None)
+        page.set_document_search_enabled(True)
+        page.close()
+
     def test_central_widgets_expose_accessibility_metadata(self):
         page = SearchPage()
         self.assertTrue(page.scroll_area.accessibleName())
@@ -562,6 +618,98 @@ class UiNavigationTests(unittest.TestCase):
             self.assertEqual(pictures.child(0).child(0).text(0), "foto.jpg")
             self.assertEqual(page.file_list.topLevelItem(1).text(0), "Leerer Ordner")
             page.cleanup()
+
+    def test_folder_page_filter_actions_formatting_and_empty_guards(self):
+        with patch("app.gui.pages.folder_page.QSettings.value", return_value=[]):
+            page = FolderPage()
+        page.set_folder({
+            "folder_path": "/project", "files": [
+                {"filename": "one.pdf", "path": "/project/one.pdf",
+                 "file_size": 2 * 1024 * 1024, "modified_date": "invalid"},
+                {"filename": "two.txt", "path": "", "file_size": 2048,
+                 "modified_date": "2026-01-02"},
+                {"filename": "three", "path": "/project/three", "file_size": 3},
+            ],
+            "subfolders": [{"name": "Virtual", "path": "", "children": []}],
+        })
+        self.assertEqual(FolderPage._format_size(2 * 1024 * 1024), "2.0 MB")
+        self.assertEqual(FolderPage._format_size(2048), "2.0 KB")
+        self.assertEqual(FolderPage._format_size(3), "3 B")
+        self.assertEqual(FolderPage._path_key(""), "")
+
+        page.file_filter.setText("missing")
+        page.file_type_filter.setCurrentIndex(page.file_type_filter.findData("pdf"))
+        page._apply_file_filter()
+        page.file_filter.clear()
+        page._apply_file_filter()
+        page._open_selected_file(page.file_list.topLevelItem(0))
+        with patch.object(page.file_list, "itemAt", return_value=None):
+            page._open_tree_context_menu(QPoint(0, 0))
+
+        class FakeAction:
+            def __init__(self, text):
+                self.text = text
+
+            def setEnabled(self, _enabled):
+                pass
+
+        class FakeMenu:
+            selected_text = "Ordner im System öffnen"
+
+            def __init__(self, _parent):
+                self.actions = []
+
+            def addAction(self, text):
+                action = FakeAction(text)
+                self.actions.append(action)
+                return action
+
+            def exec(self, _position):
+                return next(action for action in self.actions if action.text == self.selected_text)
+
+        opened_paths = []
+        managed = []
+        page.openPathRequested.connect(opened_paths.append)
+        page.manageCustomerRequested.connect(lambda *values: managed.append(values))
+        page._open_context_item("file", "")
+        page._open_folder()
+        page._manage_customer()
+        self.assertEqual(opened_paths, ["/project"])
+        self.assertEqual(managed[0][0], "/project")
+        page.folder_path = ""
+        page._open_folder()
+        page._manage_customer()
+
+        item = next(
+            page.file_list.topLevelItem(index)
+            for index in range(page.file_list.topLevelItemCount())
+            if page.file_list.topLevelItem(index).data(0, Qt.UserRole)
+        )
+        with patch.object(page.file_list, "itemAt", return_value=item), \
+                patch("app.gui.pages.folder_page.QMenu", FakeMenu):
+            page._open_tree_context_menu(QPoint(0, 0))
+            FakeMenu.selected_text = "Pfad kopieren"
+            page._open_tree_context_menu(QPoint(0, 0))
+            empty_item = next(
+                page.file_list.topLevelItem(index)
+                for index in range(page.file_list.topLevelItemCount())
+                if not page.file_list.topLevelItem(index).data(0, Qt.UserRole)
+            )
+            with patch.object(page.file_list, "itemAt", return_value=empty_item):
+                page._open_tree_context_menu(QPoint(0, 0))
+
+        with patch.object(FolderPage, "width", return_value=800):
+            page.resizeEvent(QResizeEvent(QSize(800, 500), QSize(1000, 500)))
+        self.assertEqual(page.splitter.orientation(), Qt.Vertical)
+        with patch.object(FolderPage, "width", return_value=1000):
+            page.resizeEvent(QResizeEvent(QSize(1000, 500), QSize(800, 500)))
+        self.assertEqual(page.splitter.orientation(), Qt.Horizontal)
+        page._save_splitter_sizes()
+        page.splitter.setOrientation(Qt.Vertical)
+        page._save_splitter_sizes()
+        with patch.object(FolderPage, "width", return_value=800):
+            page.resizeEvent(QResizeEvent(QSize(800, 500), QSize(800, 500)))
+        page.cleanup()
 
     def test_settings_exposes_explicit_customer_recognition_page(self):
         popup = SettingsPopup(

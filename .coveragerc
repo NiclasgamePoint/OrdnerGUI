@@ -1,0 +1,12 @@
+[run]
+branch = True
+source =
+    app
+    main
+
+[report]
+fail_under = 100
+show_missing = True
+skip_covered = False
+exclude_also =
+    if __name__ == ["']__main__["']:

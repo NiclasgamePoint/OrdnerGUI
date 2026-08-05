@@ -8,12 +8,10 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-try:
-    from watchdog.events import FileSystemEventHandler
-    from watchdog.observers import Observer
-except ImportError:  # Optional until dependencies are installed after an update.
-    FileSystemEventHandler = None
-    Observer = None
+from app.services.watchdog_support import load_watchdog
+
+
+FileSystemEventHandler, Observer = load_watchdog()
 
 
 logger = logging.getLogger(__name__)

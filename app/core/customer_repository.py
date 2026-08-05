@@ -1014,17 +1014,9 @@ class CustomerRepository:
             if suggestion_key in suggested_keys:
                 continue
             suggested_keys.add(suggestion_key)
-            if evidence.field_name == "contact_name":
-                existing_name = self.connection.execute(
-                    "SELECT 1 FROM contacts WHERE customer_id=? AND name=? COLLATE NOCASE",
-                    (customer_id, evidence.value),
-                ).fetchone()
-                if existing_name is not None:
-                    continue
-            else:
-                current_value = str(getattr(customer, evidence.field_name) or "").strip()
-                if normalize_identity(current_value) == normalize_identity(evidence.value):
-                    continue
+            current_value = str(getattr(customer, evidence.field_name) or "").strip()
+            if normalize_identity(current_value) == normalize_identity(evidence.value):
+                continue
             project_id = next((
                 project_id for folder, project_id in project_ids.items()
                 if evidence.source_path == folder
@@ -2167,7 +2159,7 @@ class CustomerRepository:
                             (owner_id,),
                         )
                         removed_fields += 1
-                elif owner_type == "contact":
+                else:  # Schema constraint limits owner_type to customer/contact.
                     row = self.connection.execute(
                         f"SELECT {field} FROM contacts WHERE id=?", (owner_id,)
                     ).fetchone()

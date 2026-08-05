@@ -88,7 +88,7 @@ class IndexPreferenceTests(unittest.TestCase):
             )
             subprocess.run(
                 [sys.executable, "-c", save_script],
-                cwd=Path(__file__).resolve().parents[1],
+                cwd=Path(__file__).resolve().parents[3],
                 env=environment,
                 check=True,
             )
@@ -99,7 +99,7 @@ class IndexPreferenceTests(unittest.TestCase):
             )
             result = subprocess.run(
                 [sys.executable, "-c", load_script],
-                cwd=Path(__file__).resolve().parents[1],
+                cwd=Path(__file__).resolve().parents[3],
                 env=environment,
                 check=True,
                 capture_output=True,
@@ -355,7 +355,7 @@ class IndexPreferenceTests(unittest.TestCase):
             ))
             subprocess.run(
                 [sys.executable, "-c", save_script],
-                cwd=Path(__file__).resolve().parents[1],
+                cwd=Path(__file__).resolve().parents[3],
                 env=environment,
                 check=True,
                 capture_output=True,
@@ -367,7 +367,7 @@ class IndexPreferenceTests(unittest.TestCase):
             )
             result = subprocess.run(
                 [sys.executable, "-c", load_script],
-                cwd=Path(__file__).resolve().parents[1],
+                cwd=Path(__file__).resolve().parents[3],
                 env=environment,
                 check=True,
                 capture_output=True,
