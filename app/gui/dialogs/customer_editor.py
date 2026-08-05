@@ -18,6 +18,7 @@ from app.core.customer_models import Contact, Customer
 from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
 from app.core.folder_structure import MINIMUM_CUSTOMER_YEAR
+from app.core.fuzzy_search import normalize_search_text, search_tokens
 from app.core.search_models import SearchFilters
 from app.gui.dialogs.centered_popup import CenteredPopupDialog
 from app.gui.widgets.buttons import AppButton
@@ -511,7 +512,9 @@ class CustomerEditorDialog(CenteredPopupDialog):
         normalized_queries: list[str] = []
         seen_queries: set[str] = set()
         for query in queries:
-            cleaned = " ".join(query.split())
+            cleaned = " ".join(
+                token for token in search_tokens(query) if len(token) > 1
+            )
             if len(cleaned) < 2:
                 continue
             key = cleaned.casefold()
@@ -529,7 +532,9 @@ class CustomerEditorDialog(CenteredPopupDialog):
                 page = manager.search_folders_page(query, filters, page=1, page_size=200)
                 for item in page.items:
                     path = item.get("folder_path", "")
-                    if path:
+                    if path and self._folder_matches_customer_name(
+                        path, suggested_name
+                    ):
                         self._folder_display_cache[path] = self._folder_display_info(
                             path,
                             str(item.get("relative_path") or ""),
@@ -543,6 +548,34 @@ class CustomerEditorDialog(CenteredPopupDialog):
                 manager.close()
 
         return self._normalize_folder_values(results)
+
+    def _folder_matches_customer_name(
+        self, path_value: str, suggested_name: str
+    ) -> bool:
+        """Require a customer-name match at the start of the project folder."""
+        folder_name = normalize_search_text(Path(path_value).name)
+        if not folder_name:
+            return False
+
+        identities: set[str] = set()
+        for value in (
+            suggested_name,
+            self.customer.display_name,
+            self.customer.company,
+        ):
+            # A clicked project folder is commonly passed as "Kunde, Projekt".
+            # Its part before the comma is the customer identity.
+            for candidate in (value, value.split(",", 1)[0]):
+                normalized = normalize_search_text(candidate)
+                if normalized and any(
+                    len(token) > 1 for token in search_tokens(normalized)
+                ):
+                    identities.add(normalized)
+
+        return any(
+            folder_name == identity or folder_name.startswith(f"{identity} ")
+            for identity in identities
+        )
 
     def _folder_display_info(
         self,

@@ -191,6 +191,29 @@ class UiNavigationTests(unittest.TestCase):
             dialog.close()
             repository.close()
 
+    def test_customer_editor_strictly_matches_short_customer_name(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = CustomerRepository(root / "customers.db")
+            customer = repository.save(Customer(
+                display_name="AB S+E",
+                company="AB S+E",
+            ))
+            dialog = CustomerEditorDialog(repository, customer_id=customer.id)
+
+            self.assertTrue(dialog._folder_matches_customer_name(
+                str(root / "AB S+E, Kita Rickling"), "AB S+E"
+            ))
+            self.assertFalse(dialog._folder_matches_customer_name(
+                str(root / "AB Dahm, Hamburg"), "AB S+E"
+            ))
+            self.assertFalse(dialog._folder_matches_customer_name(
+                str(root / "Blendinger"), "AB S+E"
+            ))
+
+            dialog.close()
+            repository.close()
+
     def test_customer_editor_assigns_current_folder_to_existing_customer(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
