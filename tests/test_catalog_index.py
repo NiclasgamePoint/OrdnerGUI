@@ -24,7 +24,7 @@ class CatalogIndexTests(unittest.TestCase):
                 row = manager.conn.execute(
                     "SELECT document_key, source_version, content_eligible "
                     "FROM files WHERE path=?",
-                    (str(document),),
+                    (str(document.resolve()),),
                 ).fetchone()
                 self.assertEqual(row["content_eligible"], 1)
                 tables = {
@@ -80,8 +80,8 @@ class CatalogIndexTests(unittest.TestCase):
                     priorities = dict(state.connection.execute(
                         "SELECT path,priority FROM documents"
                     ))
-                    self.assertEqual(priorities[str(project / "Angebot.txt")], 0)
-                    self.assertEqual(priorities[str(project / "Sonstiges.txt")], 10)
+                    self.assertEqual(priorities[str((project / "Angebot.txt").resolve())], 0)
+                    self.assertEqual(priorities[str((project / "Sonstiges.txt").resolve())], 10)
                     self.assertEqual(state.progress().total_documents, 2)
 
 
