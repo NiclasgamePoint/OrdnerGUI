@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import unittest
 
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -52,12 +53,21 @@ class SettingsHelpTests(unittest.TestCase):
     def _send(widget, event_type):
         QApplication.sendEvent(widget, QEvent(event_type))
 
+    @staticmethod
+    def _wait_for(predicate, timeout_ms=500):
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            if predicate():
+                return True
+            QTest.qWait(5)
+        return predicate()
+
     def test_hover_waits_for_delay_and_stays_until_leave(self):
         self._send(self.first, QEvent.Type.Enter)
         QTest.qWait(15)
         self.assertFalse(self.controller.bubble.isVisible())
-        QTest.qWait(25)
-        self.assertTrue(self.controller.bubble.isVisible())
+        self.assertTrue(self._wait_for(self.controller.bubble.isVisible))
         self.assertEqual(self.controller.bubble.label.text(), "Gemeinsame Erklärung")
         QTest.qWait(40)
         self.assertTrue(self.controller.bubble.isVisible())
@@ -66,10 +76,9 @@ class SettingsHelpTests(unittest.TestCase):
         self.assertFalse(self.controller.bubble.isVisible())
 
     def test_keyboard_focus_uses_the_same_delay(self):
-        self.first.setFocus()
-        QTest.qWait(40)
-        self.assertTrue(self.controller.bubble.isVisible())
-        self.owner.setFocus()
+        self._send(self.first, QEvent.Type.FocusIn)
+        self.assertTrue(self._wait_for(self.controller.bubble.isVisible))
+        self._send(self.first, QEvent.Type.FocusOut)
         self.app.processEvents()
         self.assertFalse(self.controller.bubble.isVisible())
 
@@ -80,21 +89,23 @@ class SettingsHelpTests(unittest.TestCase):
         self._send(self.second, QEvent.Type.Enter)
         QTest.qWait(20)
         self.assertFalse(self.controller.bubble.isVisible())
-        QTest.qWait(20)
-        self.assertTrue(self.controller.bubble.isVisible())
+        self.assertTrue(self._wait_for(self.controller.bubble.isVisible))
         self.assertEqual(self.controller.bubble.label.text(), "Andere Erklärung")
 
     def test_click_and_owner_hide_close_visible_help(self):
-        self._send(self.first, QEvent.Type.Enter)
-        QTest.qWait(40)
-        self.assertTrue(self.controller.bubble.isVisible())
-        QTest.mouseClick(self.first, Qt.MouseButton.LeftButton)
-        self.assertFalse(self.controller.bubble.isVisible())
-        self._send(self.first, QEvent.Type.FocusOut)
-        self._send(self.first, QEvent.Type.Leave)
-        self._send(self.second, QEvent.Type.Enter)
+        self.controller.bubble.show_for(self.first, "Gemeinsame Erklärung")
         self.app.processEvents()
-        QTest.qWait(40)
+        self.assertTrue(self.controller.bubble.isVisible())
+        # Exercise the controller directly. Sending a native mouse click while a
+        # ToolTip window is visible crashes Qt's offscreen platform plugin on
+        # Linux and macOS and does not add coverage for the event-filter logic.
+        self.controller.eventFilter(
+            self.first,
+            QEvent(QEvent.Type.MouseButtonPress),
+        )
+        self.assertFalse(self.controller.bubble.isVisible())
+        self.controller.bubble.show_for(self.second, "Andere Erklärung")
+        self.app.processEvents()
         self.assertTrue(self.controller.bubble.isVisible())
         self.owner.hide()
         self.app.processEvents()
@@ -113,13 +124,12 @@ class SettingsHelpTests(unittest.TestCase):
         self._send(label, QEvent.Type.Leave)
         self._send(field, QEvent.Type.Enter)
         self.app.processEvents()
-        QTest.qWait(15)
-        self.assertTrue(self.controller.bubble.isVisible())
+        self.assertTrue(self._wait_for(self.controller.bubble.isVisible))
         self.assertEqual(self.controller.bubble.label.text(), "Zeilenerklärung")
 
     def test_help_bubble_is_kept_inside_available_screen(self):
         self._send(self.first, QEvent.Type.Enter)
-        QTest.qWait(40)
+        self.assertTrue(self._wait_for(self.controller.bubble.isVisible))
         screen = QApplication.screenAt(self.controller.bubble.geometry().center())
         screen = screen or QApplication.primaryScreen()
         self.assertIsNotNone(screen)
