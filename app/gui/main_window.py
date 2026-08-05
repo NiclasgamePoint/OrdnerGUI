@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-if __name__ == "__main__" and __package__ is None:
+if __name__ == "__main__" and __package__ is None:  # pragma: no cover - direct module bootstrap
     project_root = Path(__file__).resolve().parents[2]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -1633,7 +1633,7 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-def main():
+def main():  # pragma: no cover - process entry point exercised via main.py
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

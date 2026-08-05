@@ -1,7 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox
@@ -19,6 +19,7 @@ from app.gui.dialogs.customer_data_suggestions import CustomerDataSuggestionsDia
 from app.gui.main_window import MainWindow
 from app.gui.settings_popup import SettingsPopup
 from app.services.customer_recognition import CustomerRecognitionService
+import main as application_main
 from main import show_main_window
 
 
@@ -183,6 +184,43 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(window.calls[2][0], "move")
         self.assertEqual(window.calls[3][0], "resize")
         self.assertEqual(window.calls[4], ("showFullScreen",))
+
+    def test_show_main_window_handles_normal_mode_and_missing_screen(self):
+        window = Mock()
+        with patch.object(application_main, "forced_fullscreen", return_value=False):
+            show_main_window(Mock(), window)
+        window.show.assert_called_once_with()
+        window.showFullScreen.assert_not_called()
+
+        window.reset_mock()
+        window.screen.return_value = None
+        app = Mock()
+        app.primaryScreen.return_value = None
+        with patch.object(application_main, "forced_fullscreen", return_value=True):
+            show_main_window(app, window)
+        window.setGeometry.assert_not_called()
+        window.move.assert_not_called()
+        window.resize.assert_not_called()
+        window.showFullScreen.assert_called_once_with()
+
+    def test_main_configures_qt_builds_window_and_exits_with_event_code(self):
+        qt_app = Mock()
+        qt_app.exec.return_value = 7
+        app_class = Mock(return_value=qt_app)
+        window = Mock()
+        with (
+            patch.object(application_main, "configure_logging") as configure,
+            patch.object(application_main, "QApplication", app_class),
+            patch.object(application_main, "MainWindow", return_value=window),
+            patch.object(application_main, "show_main_window") as show,
+            patch.object(application_main.sys, "exit", side_effect=SystemExit(7)) as exit_process,
+            self.assertRaisesRegex(SystemExit, "7"),
+        ):
+            application_main.main()
+        configure.assert_called_once_with()
+        app_class.setHighDpiScaleFactorRoundingPolicy.assert_called_once()
+        show.assert_called_once_with(qt_app, window)
+        exit_process.assert_called_once_with(7)
 
     def test_accepted_data_path_is_saved_before_index_build_finishes(self):
         with TemporaryDirectory() as directory:

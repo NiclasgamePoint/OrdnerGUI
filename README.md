@@ -162,13 +162,23 @@ Für reproduzierbare Builds steht zusätzlich `requirements-lock.txt` mit exakt 
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/pip install -r requirements-test.txt
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/run_ci.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/run_ci.py --coverage
 ```
 
 Die Tests prüfen unter anderem Katalogaktivierung, Queue-Fortsetzung,
 Jahres-Shard-Rollover, progressive Mehr-Shard-Suche, inkrementelle Indexierung,
 Ressourcenprofile, parallele Extraktion, Timeout-Reparatur, PDF-Fallback,
 stufenweise OCR, Diagnosewerte, Dateisystemänderungen, Viewer und Kunden-CRUD.
+
+Die Suite ist unter `tests/` nach `unit`, `integration`, `ui`, `e2e` und
+`platform` gegliedert. Wiederverwendbare Basisklassen, Fixture-Builder und
+Test-Doubles liegen getrennt unter `base`, `builders` und `fakes`. Der Runner
+startet jedes Testmodul in einem eigenen Prozess, damit Qt zuverlässig beendet
+wird. Mit `--coverage` kombiniert er deren Messdaten und erzwingt für den
+Produktionscode 100 Prozent Zeilen- und Zweigabdeckung. Dieselbe Prüfung läuft
+in GitHub Actions separat unter Linux, macOS und Windows.
 
 ## Kundenvorschläge und Kundenübersicht
 

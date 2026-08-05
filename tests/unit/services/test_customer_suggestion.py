@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from app.services import customer_suggestion as customer_suggestion_module
 from app.core.customer_models import Contact
-from app.core.customer_recognition_models import ExtractionEvidence
+from app.core.customer_recognition_models import ContactScanStats, ExtractionEvidence
 from app.services.customer_suggestion import (
     CustomerSuggestion,
     CustomerSuggestionService,
@@ -13,6 +13,9 @@ from app.services.customer_suggestion import (
 
 
 class CustomerSuggestionTests(unittest.TestCase):
+    def test_contact_scan_stats_serializes(self):
+        self.assertEqual(ContactScanStats(scanned_projects=1).to_dict()["scanned_projects"], 1)
+
     def test_first_name_in_customer_field_sets_automatic_private_person(self):
         suggestion = CustomerSuggestionService().suggest_from_text(
             Path("/tmp/Müller, Berlin"),

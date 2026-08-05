@@ -74,9 +74,15 @@ class SearchFilterPopup(QFrame):
         outer_layout.addWidget(body)
 
         for combo in self.combos:
-            combo.currentIndexChanged.connect(self.filtersChanged.emit)
-        self.sort_combo.currentIndexChanged.connect(self.filtersChanged.emit)
-        self.include_subfolders_checkbox.toggled.connect(self.filtersChanged.emit)
+            combo.currentIndexChanged.connect(
+                lambda _index: self.filtersChanged.emit()
+            )
+        self.sort_combo.currentIndexChanged.connect(
+            lambda _index: self.filtersChanged.emit()
+        )
+        self.include_subfolders_checkbox.toggled.connect(
+            lambda _checked: self.filtersChanged.emit()
+        )
 
     @property
     def combos(self) -> tuple[QComboBox, QComboBox, QComboBox]:

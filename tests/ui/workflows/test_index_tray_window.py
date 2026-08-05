@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication
 
@@ -110,6 +111,49 @@ class IndexTrayWindowTests(unittest.TestCase):
             self.assertNotIn("0 von 9", window.worker_summary_label.text())
             self.assertIn("legacy-running.pdf", window.worker_output.toPlainText())
             window.close()
+
+    def test_status_edges_worker_payloads_and_window_lifecycle(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = root / "catalog"
+            content = root / "content"
+            window = IndexTrayWindow(catalog, root / "missing.log", content_state_dir=content)
+
+            write_state(catalog, {"status": "error", "error": "catalog bad"})
+            write_state(content, {
+                "status": "starting", "failed_count": 1,
+                "worker_assignments": "invalid", "worker_limit": 2,
+                "error": "content bad",
+            })
+            window.refresh()
+            self.assertIn("catalog bad", window.detail_label.text())
+            self.assertIn("1 Dokumente", window.content_detail_label.text())
+            self.assertIn("content bad", window.content_detail_label.text())
+
+            write_state(catalog, {"status": "no_changes"})
+            write_state(content, {
+                "status": "completed", "completed_documents": 5,
+                "total_documents": 3, "worker_assignments": [None, {"worker": 2}],
+            })
+            window.refresh()
+            self.assertEqual(window.progress_bar.value(), 100)
+            self.assertEqual(window.content_progress_bar.value(), 3)
+
+            with patch.object(window, "refresh") as refresh, \
+                    patch.object(window, "show") as show, \
+                    patch.object(window, "raise_") as raise_window, \
+                    patch.object(window, "activateWindow") as activate:
+                window.show_status()
+            refresh.assert_called_once()
+            show.assert_called_once()
+            raise_window.assert_called_once()
+            activate.assert_called_once()
+            self.assertTrue(window.timer.isActive())
+            event = Mock()
+            window.closeEvent(event)
+            event.accept.assert_called_once()
+            self.assertFalse(window.timer.isActive())
+            window.deleteLater()
 
 
 if __name__ == "__main__":

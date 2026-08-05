@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QDialog
 
@@ -28,6 +29,25 @@ class OnboardingDialogTests(unittest.TestCase):
 
         self.assertNotEqual(dialog.result(), QDialog.Accepted)
         self.assertIn("nicht erreichbar", dialog.error_label.text())
+
+        dialog.path_input.clear()
+        dialog.accept_path()
+        self.assertIn("wählen", dialog.error_label.text())
+
+    def test_choose_path_handles_cancel_and_selection(self):
+        dialog = OnboardingDialog(Path("/initial"))
+        with patch(
+            "app.gui.dialogs.onboarding.QFileDialog.getExistingDirectory",
+            return_value="",
+        ):
+            dialog.choose_path()
+        self.assertEqual(dialog.path_input.text(), "/initial")
+        with patch(
+            "app.gui.dialogs.onboarding.QFileDialog.getExistingDirectory",
+            return_value="/selected",
+        ):
+            dialog.choose_path()
+        self.assertEqual(dialog.path_input.text(), "/selected")
 
 
 if __name__ == "__main__":
