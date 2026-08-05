@@ -491,7 +491,7 @@ class MainWindowStateTests(QtTestCase):
             patch.object(self.window, "_reset_views_for_source_change") as reset,
         ):
             self.window.on_settings_data_path_changed(str(source))
-        save.assert_called_once_with(source)
+        save.assert_called_once_with(source.resolve())
         reset.assert_called_once_with()
         other = self.temp_path / "other"
         other.mkdir()

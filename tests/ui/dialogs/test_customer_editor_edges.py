@@ -100,9 +100,10 @@ class CustomerEditorEdgeTests(unittest.TestCase):
         self.assertEqual(dialog._parse_folder_values(""), [])
         self.assertEqual(dialog._parse_folder_values("a | b"), ["a", "b"])
         self.assertEqual(dialog._parse_folder_values("one"), ["one"])
+        absolute_path = str(Path(self.temporary.name).resolve() / "absolute" / "path")
         self.assertEqual(
-            dialog._normalize_folder_values(["", "/absolute/path", "City"]),
-            ["/absolute/path, City"],
+            dialog._normalize_folder_values(["", absolute_path, "City"]),
+            [f"{absolute_path}, City"],
         )
         dialog.close()
 

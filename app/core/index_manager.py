@@ -324,7 +324,10 @@ class IndexManager:
             directory_names[:] = [
                 name for name in directory_names if name.casefold() not in excluded
             ]
-            current_path = Path(current_root)
+            # os.walk may return an alias of the requested root (for example
+            # /var vs /private/var on macOS or an 8.3 short path on Windows).
+            # Keep every persisted and compared path in the same canonical form.
+            current_path = Path(current_root).resolve()
             relative = current_path.relative_to(base_path)
             relative_text = "" if relative == Path(".") else str(relative)
             parent_path = str(current_path.parent) if current_path != base_path else ""

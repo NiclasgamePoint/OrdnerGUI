@@ -13,7 +13,7 @@ class PapaGuiTestCase(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self._temporary_directory = tempfile.TemporaryDirectory()
-        self.temp_path = Path(self._temporary_directory.name)
+        self.temp_path = Path(self._temporary_directory.name).resolve()
         self.addCleanup(self._temporary_directory.cleanup)
 
     def make_file(self, relative_path: str, content: str = "") -> Path:

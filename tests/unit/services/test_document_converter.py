@@ -45,6 +45,10 @@ class DocumentConverterTests(unittest.TestCase):
         with (
             patch.object(Path, "exists", return_value=True),
             patch.object(Path, "read_bytes", side_effect=OSError("denied")),
+            patch(
+                "app.services.document_converter.olefile",
+                Mock(isOleFile=Mock(side_effect=OSError("unreadable"))),
+            ),
         ):
             self.assertEqual(
                 converter._extract_legacy_doc_python(Path("present.doc")),

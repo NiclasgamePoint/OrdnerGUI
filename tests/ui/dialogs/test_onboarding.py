@@ -35,19 +35,21 @@ class OnboardingDialogTests(unittest.TestCase):
         self.assertIn("wählen", dialog.error_label.text())
 
     def test_choose_path_handles_cancel_and_selection(self):
-        dialog = OnboardingDialog(Path("/initial"))
+        initial = Path("/initial")
+        selected = str(Path("/selected"))
+        dialog = OnboardingDialog(initial)
         with patch(
             "app.gui.dialogs.onboarding.QFileDialog.getExistingDirectory",
             return_value="",
         ):
             dialog.choose_path()
-        self.assertEqual(dialog.path_input.text(), "/initial")
+        self.assertEqual(dialog.path_input.text(), str(initial))
         with patch(
             "app.gui.dialogs.onboarding.QFileDialog.getExistingDirectory",
-            return_value="/selected",
+            return_value=selected,
         ):
             dialog.choose_path()
-        self.assertEqual(dialog.path_input.text(), "/selected")
+        self.assertEqual(dialog.path_input.text(), selected)
 
 
 if __name__ == "__main__":

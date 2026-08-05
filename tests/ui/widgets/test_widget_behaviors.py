@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
@@ -70,15 +71,17 @@ class WidgetBehaviorTests(QtTestCase):
         self.assertFalse(indicator.is_running())
 
     def test_document_and_result_rows_emit_actions(self):
-        document = DocumentResultRow("file.txt", "", "/root/file.txt")
+        file_path = str(Path("/root/file.txt"))
+        root_path = str(Path("/root"))
+        document = DocumentResultRow("file.txt", "", file_path)
         files, paths = [], []
         document.openFileRequested.connect(files.append)
         document.openPathRequested.connect(paths.append)
         document._open_file()
         document._open_folder()
-        self.assertEqual(files, ["/root/file.txt"])
-        self.assertEqual(paths, ["/root"])
-        self.assertEqual(document.path, "/root/file.txt")
+        self.assertEqual(files, [file_path])
+        self.assertEqual(paths, [root_path])
+        self.assertEqual(document.path, file_path)
         empty = DocumentResultRow("empty", "", "")
         empty.openFileRequested.connect(files.append)
         empty._open_file()

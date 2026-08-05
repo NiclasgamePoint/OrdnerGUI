@@ -73,7 +73,10 @@ class IndexEnvironmentTests(PapaGuiTestCase):
             ),
             patch.object(Path, "exists", side_effect=[False, True]),
         ):
-            self.assertIn("C:/Two", IndexCapabilityDetector._find_tesseract())
+            self.assertEqual(
+                IndexCapabilityDetector._find_tesseract(),
+                str(Path("C:/Two") / "Tesseract-OCR" / "tesseract.exe"),
+            )
 
     def test_resource_snapshot_and_limits_cover_missing_and_available_psutil(self):
         policy = IndexResourcePolicy()

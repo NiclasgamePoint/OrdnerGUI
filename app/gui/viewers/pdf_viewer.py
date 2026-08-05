@@ -65,6 +65,7 @@ class PdfViewerWidget(QWidget):
         self.close_document()
         error = self.document.load(str(path))
         if error != QPdfDocument.Error.None_:
+            self.document.close()
             raise ValueError(f"PDF konnte nicht geladen werden ({error.name}).")
         self.search_model.setDocument(self.document)
         self.view.setDocument(self.document)

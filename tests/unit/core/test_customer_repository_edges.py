@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from unittest.mock import patch
 
 from app.core.config import CustomerRecognitionOptions
@@ -444,12 +445,12 @@ class CustomerRepositoryEdgeTests(PapaGuiTestCase):
         updated = self.repository.add_folder_to_customer(
             self.customer.id, new_folder, "Service2"
         )
-        self.assertIn(new_folder, updated.folder_paths)
+        self.assertIn(str(Path(new_folder).resolve()), updated.folder_paths)
         self.repository.add_folder_to_customer(self.customer.id, new_folder, "Service2")
         virtual = self.repository.save(Customer(display_name="Virtual"))
         physical = str(self.temp_path / "Virtual")
         updated = self.repository.add_folder_to_customer(virtual.id, physical)
-        self.assertEqual(updated.folder_path, physical)
+        self.assertEqual(updated.folder_path, str(Path(physical).resolve()))
         other = self.repository.save(Customer(display_name="Other Owner"))
         with self.assertRaisesRegex(ValueError, "bereits"):
             self.repository.add_folder_to_customer(other.id, physical)

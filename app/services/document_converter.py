@@ -88,23 +88,28 @@ class DocumentConverter:
             return "", "Python-Fallback"
 
         # Try OLE streams first (higher signal), then raw binary fallback.
-        if olefile is not None and olefile.isOleFile(str(path)):
+        if olefile is not None:
             try:
-                with olefile.OleFileIO(str(path)) as ole:
-                    chunks: list[str] = []
-                    for stream in ole.listdir(streams=True, storages=False):
-                        name = stream[-1] if stream else ""
-                        if name not in {"WordDocument", "1Table", "0Table", "Data"}:
-                            continue
-                        data = ole.openstream(stream).read()
-                        text = self._extract_strings_from_bytes(data)
-                        if text:
-                            chunks.append(text)
-                    merged = "\n".join(chunks).strip()
-                    if merged:
-                        return merged, "Python (olefile)"
+                is_ole = olefile.isOleFile(str(path))
             except Exception:
-                pass
+                is_ole = False
+            if is_ole:
+                try:
+                    with olefile.OleFileIO(str(path)) as ole:
+                        chunks: list[str] = []
+                        for stream in ole.listdir(streams=True, storages=False):
+                            name = stream[-1] if stream else ""
+                            if name not in {"WordDocument", "1Table", "0Table", "Data"}:
+                                continue
+                            data = ole.openstream(stream).read()
+                            text = self._extract_strings_from_bytes(data)
+                            if text:
+                                chunks.append(text)
+                        merged = "\n".join(chunks).strip()
+                        if merged:
+                            return merged, "Python (olefile)"
+                except Exception:
+                    pass
 
         try:
             data = path.read_bytes()
