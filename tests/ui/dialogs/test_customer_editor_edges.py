@@ -95,6 +95,7 @@ class CustomerEditorEdgeTests(unittest.TestCase):
         self.assertEqual(dialog._folder_display_info("/x/Vorlagen/Name").year, "Vorlagen")
         self.assertEqual(dialog._folder_display_info("2026/Name").service, "")
         self.assertEqual(dialog._folder_display_info("/x", "Service").service, "Service")
+        self.assertFalse(dialog._folder_matches_customer_name("/", "Customer"))
         self.assertEqual(dialog._normalize_lookup_token(" A-B_(C). "), "a b c")
         self.assertEqual(dialog._parse_folder_values(""), [])
         self.assertEqual(dialog._parse_folder_values("a | b"), ["a", "b"])
