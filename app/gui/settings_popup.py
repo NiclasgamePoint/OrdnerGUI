@@ -59,7 +59,7 @@ SETTINGS_HELP_TEXTS = {
     "ocr_initial_pages": "Anzahl Seiten der schnellen ersten OCR-Stufe.",
     "ocr_extended_pages": "Maximale Gesamtseitenzahl, falls die erste OCR-Stufe zu wenig Text erkennt.",
     "ocr_threshold": "Unterschreitet die erste OCR-Stufe diese Zeichenzahl, werden weitere Seiten verarbeitet.",
-    "pdf_timeout": "Maximale Zeit für pdftotext und den isolierten PyPDF2-Fallback pro PDF.",
+    "pdf_timeout": "Maximale Zeit für pdftotext und den isolierten pypdf-Fallback pro PDF.",
     "ocr_timeout": "Gemeinsames Zeitbudget für Rendern und Texterkennung eines gescannten PDFs.",
     "save_index": "Speichert die Indexeinstellungen. Änderungen an Formaten oder Extraktion können den Inhaltsindex neu aufbauen.",
     "pause_content": "Stoppt neue Dokumentaufgaben und pausiert nach Abschluss der bereits laufenden Worker.",

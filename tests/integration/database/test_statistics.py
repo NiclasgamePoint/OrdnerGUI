@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -55,6 +56,28 @@ class StatisticsServiceTests(unittest.TestCase):
             self.assertEqual(statistics.customer_count, 0)
             self.assertEqual(statistics.project_count, 0)
             self.assertEqual(statistics.file_count, 0)
+
+    def test_content_state_database_supplies_completed_document_count(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / "source"
+            source.mkdir()
+            index_path = base / "index.db"
+            with IndexManager(index_path) as manager:
+                manager.synchronize_directory(source, full_rebuild=True)
+            state_path = base / "state.db"
+            with sqlite3.connect(state_path) as connection:
+                connection.execute("CREATE TABLE documents (status TEXT)")
+                connection.executemany(
+                    "INSERT INTO documents(status) VALUES (?)",
+                    [("completed",), ("completed",), ("pending",)],
+                )
+            statistics = StatisticsService().load(
+                index_path,
+                base / "missing-customers.db",
+                state_path,
+            )
+            self.assertEqual(statistics.content_count, 2)
 
 
 if __name__ == "__main__":

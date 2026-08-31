@@ -132,9 +132,9 @@ class DocumentTextIndexer:
                 cwd=Path(__file__).resolve().parents[2],
             )
             if result.returncode != 0:
-                raise RuntimeError(result.stderr.strip() or "PyPDF2-Lesefehler")
+                raise RuntimeError(result.stderr.strip() or "pypdf-Lesefehler")
             text = self._limit(result.stdout)
-            parser = "PyPDF2"
+            parser = "pypdf"
         parser_seconds = time.monotonic() - parser_started
         if text.strip() or not self.options.ocr_enabled:
             return ExtractionResult(

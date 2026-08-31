@@ -49,6 +49,8 @@ class IndexJobRunner:
         state_dir: Path,
         full_rebuild: bool,
         customer_database_path: Path,
+        *,
+        launch_content_job: bool = True,
     ):
         self.job_id = job_id
         self.active_path = active_path.resolve()
@@ -56,6 +58,7 @@ class IndexJobRunner:
         self.state_dir = state_dir.resolve()
         self.full_rebuild = full_rebuild
         self.customer_database_path = customer_database_path.resolve()
+        self.launch_content_job = launch_content_job
         self.build_path: Path | None = None
         self.index_layout = (
             IndexLayout(self.active_path.parents[1])
@@ -116,7 +119,8 @@ class IndexJobRunner:
                 customer_state = self._recognize_customers(self.build_path)
                 if self._catalog_store is not None:
                     self._reconcile_content_queue(self.active_path)
-                    self._start_content_job()
+                    if self.launch_content_job:
+                        self._start_content_job()
                 self.build_path.unlink(missing_ok=True)
                 self.build_path = None
                 self._write(
@@ -243,7 +247,7 @@ class IndexJobRunner:
         self._reconcile_content_queue(self.active_path)
         customer_state = self._recognize_customers(self.active_path)
         self._archive_legacy_index()
-        if start_content:
+        if start_content and self.launch_content_job:
             self._start_content_job()
         return customer_state
 

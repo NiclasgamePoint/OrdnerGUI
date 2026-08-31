@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 
 def main() -> int:

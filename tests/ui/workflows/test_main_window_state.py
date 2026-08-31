@@ -94,7 +94,7 @@ class MainWindowStateTests(QtTestCase):
             self.window._initialize_data_source()
         self.assertIn("keine Datenquelle", self.window.status_bar.status_label.text())
         selected = self.temp_path / "source"
-        selected.mkdir()
+        selected.mkdir(exist_ok=True)
         with (
             patch("app.gui.main_window.has_configured_index_source", return_value=False),
             patch("app.gui.main_window.OnboardingDialog") as dialog_class,
@@ -478,7 +478,7 @@ class MainWindowStateTests(QtTestCase):
             self.window.on_settings_data_path_changed(str(self.temp_path / "missing"))
         warning.assert_called_once()
         source = self.temp_path / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         self.window.index_controller.is_active = Mock(return_value=True)
         with patch("app.gui.main_window.QMessageBox.information") as information:
             self.window.on_settings_data_path_changed(str(source))
@@ -516,12 +516,13 @@ class MainWindowStateTests(QtTestCase):
         self.window.index_controller.is_active = Mock(return_value=False)
         self.window.index_controller.start = Mock()
         self.window.index_controller.cancel = Mock()
+        self.window.index_controller.acknowledge_activation = Mock()
         self.window.index_controller.current_state = Mock(return_value={})
         self.window.content_job_controller.cancel = Mock()
         popup = Mock()
         self.window.settings_popup = popup
         source = self.temp_path / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         self.window.index_source = source
 
         self.window.index_controller.is_active.return_value = True
@@ -571,13 +572,15 @@ class MainWindowStateTests(QtTestCase):
             self.window.on_index_ready({"build_path": "build.db"})
         warning.assert_called_once()
 
-        for state in (
-            {"status": "cancelled"},
-            {"status": "error", "error": "bad"},
-            {"status": "no_changes", "indexed_count": 4},
-        ):
-            with patch("app.gui.main_window.QMessageBox.warning"):
-                self.window.on_indexing_complete(state)
+        with patch.object(self.window, "_refresh_settings_popup_data") as refresh_settings:
+            for state in (
+                {"status": "cancelled"},
+                {"status": "error", "error": "bad"},
+                {"status": "no_changes", "indexed_count": 4},
+            ):
+                with patch("app.gui.main_window.QMessageBox.warning"):
+                    self.window.on_indexing_complete(state)
+        refresh_settings.assert_called_once_with()
         with patch.object(self.window, "_refresh_customer_results_only") as refresh:
             self.window.on_indexing_complete({
                 "status": "no_changes", "customers_created": 1,
@@ -597,7 +600,7 @@ class MainWindowStateTests(QtTestCase):
     def test_filesystem_options_backup_and_close_lifecycle(self):
         self.window.index_controller.is_active = Mock(return_value=False)
         source = self.temp_path / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         options = SimpleNamespace(
             automatic_monitoring_enabled=True,
             excluded_folder_names=(),
@@ -831,7 +834,7 @@ class MainWindowStateTests(QtTestCase):
         self.window.index_manager = Mock()
         self.window._reconcile_content_queue()
         source = self.temp_path / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         self.window.index_source = source
         self.window.index_controller.is_active = Mock(return_value=True)
         self.window._start_daily_catalog_reconciliation()
@@ -941,7 +944,7 @@ class MainWindowStateTests(QtTestCase):
             self.window.check_and_index()
         warning.assert_called_once()
         source = self.temp_path / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         self.window.index_source = source
         self.window.index_manager.index_is_current.return_value = True
         with patch.object(self.window, "_start_background_indexing") as start:

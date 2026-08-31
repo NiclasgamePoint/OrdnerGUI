@@ -9,6 +9,12 @@ from unittest.mock import patch
 
 
 class ConfigPathTests(unittest.TestCase):
+    def test_settings_storage_without_override_is_a_noop(self):
+        from app.core import config
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(config._configure_settings_storage())
+
     def test_default_base_dir_is_derived_from_file_location(self):
         from app.core import config
 

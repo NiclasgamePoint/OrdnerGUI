@@ -269,3 +269,15 @@ class IndexJobEdgeTests(PapaGuiTestCase):
             self.assertEqual(runner.run(), 0)
         reconcile.assert_called_once_with(runner.active_path)
         start.assert_called_once_with()
+
+        runner.launch_content_job = False
+        build.touch()
+        runner._catalog_store.create_build_path.return_value = build
+        with (
+            patch("app.services.index_job.CatalogIndexManager", return_value=manager),
+            patch.object(runner, "_recognize_customers", return_value={}),
+            patch.object(runner, "_reconcile_content_queue"),
+            patch.object(runner, "_start_content_job") as start,
+        ):
+            self.assertEqual(runner.run(), 0)
+        start.assert_not_called()

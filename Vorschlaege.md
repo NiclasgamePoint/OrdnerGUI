@@ -18,10 +18,10 @@
 - [x] letzter index lauf in normal datum format
 - [x]Kundenseite Journal hinzufügen, für Telefon notizen Datum Uhrzeit
 - [] dokumentensuche als extra index
-- [] docker mit basis image, da dann disk mit daten maunten und dann index job laufen lassen
+- [x] Docker mit Basis-Image, read-only Datenmount und unabhängigem Index-/Kundenerkennungsjob
 - [x] VorNamensliste aus GitHub um zu checken ob es Privat oder Firma ist.
 - [x] Telefonnummer ertmal raus streichen 
-- [] BUGFIXING
+- [x] Test-Hänger und Deprecation-Warnungen für v0.4 bereinigt
 - [x] Blaufilter auf den lightmode
 - 
 

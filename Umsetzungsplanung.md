@@ -13,6 +13,9 @@
 - [ ] Installer/Deployment: Windows Installer (Inno Setup oder NSIS) mit eingebetteter Venv und Abhängigkeiten
 - [ ] Installer/Deployment: macOS .app-Bundle (PyInstaller oder py2app), optional als .dmg
 - [ ] Installer/Deployment: Linux AppImage oder Flatpak
+- [x] Headless-Docker-Prototyp für Katalog, Kundenerkennung und Inhaltsindexierung
+- [ ] Unveränderliche Indexgenerationen mit Manifest/Prüfsummen für Client-Sync
+- [ ] Atomarer Client-Download und Aktivierung zentral erzeugter Indexgenerationen
 - [ ] Auto-Updates: GitHub Releases per API prüfen und Nutzer über neue Versionen informieren
 - [ ] Auto-Updates: optional automatischer Download und Neustart
 

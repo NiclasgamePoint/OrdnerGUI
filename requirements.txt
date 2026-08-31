@@ -3,7 +3,7 @@ openpyxl
 xlrd
 python-docx
 Pillow
-PyPDF2
+pypdf
 pycryptodome
 olefile
 watchdog

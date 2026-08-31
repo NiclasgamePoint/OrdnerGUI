@@ -23,18 +23,21 @@ def _configure_settings_storage() -> None:
         return
 
     configured.mkdir(parents=True, exist_ok=True)
-    settings_format = QSettings.Format.IniFormat
-    QSettings.setDefaultFormat(settings_format)
-    QSettings.setPath(
-        settings_format,
-        QSettings.Scope.UserScope,
-        str(configured),
-    )
-    QSettings.setPath(
-        settings_format,
-        QSettings.Scope.SystemScope,
-        str(configured),
-    )
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    for settings_format in (
+        QSettings.Format.IniFormat,
+        QSettings.Format.NativeFormat,
+    ):
+        QSettings.setPath(
+            settings_format,
+            QSettings.Scope.UserScope,
+            str(configured),
+        )
+        QSettings.setPath(
+            settings_format,
+            QSettings.Scope.SystemScope,
+            str(configured),
+        )
 
 
 def _resolve_base_dir() -> Path:

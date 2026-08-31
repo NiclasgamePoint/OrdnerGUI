@@ -151,7 +151,7 @@ class IndexPerformanceTests(unittest.TestCase):
             patch.object(indexer, "_run", side_effect=completed) as run,
         ):
             result = indexer._pdf_result(Path("doc.pdf"))
-        self.assertEqual(result.parser, "PyPDF2")
+        self.assertEqual(result.parser, "pypdf")
         self.assertEqual(result.text, "Fallback text")
         self.assertEqual(run.call_count, 2)
         self.assertLessEqual(run.call_args_list[0].kwargs["timeout"], 45)

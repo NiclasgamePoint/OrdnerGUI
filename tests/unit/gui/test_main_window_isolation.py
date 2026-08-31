@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app.gui.main_window import MainWindow
 from tests.base.main_window_test_case import (
@@ -13,6 +14,34 @@ from tests.base.main_window_test_case import (
 
 
 class MainWindowIsolationTests(MainWindowTestCase):
+    def test_catalog_opening_and_shutdown_worker_runtime_edges(self):
+        self.main_window_catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        self.main_window_catalog_path.touch()
+        owner = SimpleNamespace(index_options=Mock())
+        manager = Mock()
+        with patch("app.gui.main_window.CatalogIndexManager", return_value=manager) as manager_type:
+            self.assertIs(MainWindow._open_active_index(owner), manager)
+        manager_type.assert_called_once_with(
+            self.main_window_catalog_path,
+            options=owner.index_options,
+        )
+
+        worker = Mock()
+        worker.isRunning.return_value = False
+        MainWindow._stop_worker_for_shutdown(worker)
+        worker.requestInterruption.assert_not_called()
+
+        worker.isRunning.side_effect = RuntimeError
+        MainWindow._stop_worker_for_shutdown(worker)
+
+        worker = Mock()
+        worker.isRunning.return_value = True
+        worker.requestInterruption.side_effect = RuntimeError
+        worker.wait.side_effect = RuntimeError
+        MainWindow._stop_worker_for_shutdown(worker)
+        worker.requestInterruption.assert_called_once_with()
+        worker.wait.assert_called_once_with()
+
     def test_runtime_paths_and_background_boundaries_are_private_and_inert(self):
         with (
             patch.object(MainWindow, "_initialize_data_source"),

@@ -97,6 +97,8 @@ class WidgetBehaviorTests(QtTestCase):
         right_release = QMouseEvent(
             QEvent.Type.MouseButtonRelease,
             QPointF(0, 0),
+            QPointF(0, 0),
+            QPointF(0, 0),
             Qt.RightButton,
             Qt.RightButton,
             Qt.NoModifier,
@@ -165,6 +167,8 @@ class WidgetBehaviorTests(QtTestCase):
         self.assertEqual((texts, busy, details), (["Working"], [True, False], [True]))
         status.mouseReleaseEvent(QMouseEvent(
             QEvent.Type.MouseButtonRelease,
+            QPointF(0, 0),
+            QPointF(0, 0),
             QPointF(0, 0),
             Qt.RightButton,
             Qt.RightButton,

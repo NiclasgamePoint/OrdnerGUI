@@ -19,5 +19,5 @@ linked libraries. A release check must fail when an executable or required
 runtime library is absent.
 
 Source checkouts remain functional without native artifacts: `pdftotext` falls
-back to the isolated PyPDF2 extractor, while OCR is reported unavailable when
+back to the isolated pypdf extractor, while OCR is reported unavailable when
 `pdftoppm` or Tesseract is missing.

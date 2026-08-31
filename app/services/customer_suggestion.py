@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 from docx import Document
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from app.core.customer_models import Contact
 from app.core.customer_recognition_models import ExtractionEvidence

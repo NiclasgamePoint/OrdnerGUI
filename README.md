@@ -5,6 +5,7 @@
 ## Funktionen
 
 - Versionierung über `app.__version__` und `pyproject.toml`
+- Headless-Indexdienst für einmalige oder regelmäßig geplante Docker-Läufe
 
 - Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
@@ -12,7 +13,7 @@
 - Relevanzranking, hervorgehobene Treffer, getrennte Pagination und Suchverlauf
 - Sofort nutzbarer SQLite-Katalog und progressive, jahresbasierte FTS5-Inhaltsshards
 - Parallele Textextraktion aus PDF, DOC/DOCX, XLS/XLSX und üblichen Textformaten
-- Poppler-`pdftotext` mit isoliertem PyPDF2-Fallback und festem Zeitlimit
+- Poppler-`pdftotext` mit isoliertem pypdf-Fallback und festem Zeitlimit
 - Zweistufiger OCR-Fallback für gescannte PDFs
 - Fortsetzbare Dokumentextraktion in einem unabhängigen Hintergrundprozess
 - Indexläufe laufen als eigener Prozess auch nach dem Schließen der GUI weiter
@@ -51,6 +52,7 @@ app/
 │   ├── content_index_job.py      Fortsetzbarer Inhaltsindexprozess
 │   ├── content_index_worker.py   Parallele Extraktion, serieller Shard-Writer
 │   ├── document_text_indexer.py  Formatstrategien, PDF-Fallback und OCR
+│   ├── index_service.py           Headless-Orchestrierung für Docker/Synology
 │   ├── index_resource_policy.py  CPU-/RAM-basierte Workerbegrenzung
 │   ├── customer_recognition.py   Sichere automatische Kundenzuordnung
 │   └── document_converter.py     Optionale Legacy-Konvertierung
@@ -93,7 +95,7 @@ Ressourcenverbrauch oder Datenlöschung.
 Neue Installationen starten mit maximal 100 MB Dokumentgröße und fünf
 OCR-Seiten in der ersten Stufe. Liefert diese Stufe weniger als 500 Zeichen,
 werden bei Bedarf bis zu 25 Seiten verarbeitet. `pdftotext` wird für PDFs
-bevorzugt; liefert es keinen Text, läuft PyPDF2 in einem isolierten Prozess als
+bevorzugt; liefert es keinen Text, läuft pypdf in einem isolierten Prozess als
 Fallback. Für die PDF-Texterkennung gilt standardmäßig ein hartes Zeitlimit von
 45 Sekunden. Ein Timeout wird im normalen Lauf nicht sofort wiederholt. Solche
 Dokumente können später gezielt über „Fehler erneut versuchen“ freigegeben
@@ -124,10 +126,10 @@ rekonstruierbar. Beim ersten erfolgreichen Wechsel wird der alte v0.2-Index nach
 und enthält die dauerhaften Kundendaten. Manuell gepflegte Werte werden durch
 die zweistufige Kundenerkennung nicht überschrieben.
 
-Der Git-Tag `v0.2` markiert den unveränderten Stand vor der Indexaufteilung.
-Für eine Rückkehr sollte die Anwendung auf diesen Tag zurückgesetzt und der
-archivierte `index.db` aus `data/index/legacy-v0.2/` wieder nach `data/` kopiert
-werden; die Kundendatenbank ist davon nicht betroffen.
+Das Verzeichnis `legacy-v0.2` bezeichnet das frühere Indexformat; im Repository
+existiert dafür kein eigener `v0.2`-Tag. Eine manuelle Rückkehr benötigt daher
+einen ausdrücklich bekannten kompatiblen Programmstand und den archivierten
+`index.db`; die Kundendatenbank ist davon nicht betroffen.
 
 ## Start
 
@@ -150,7 +152,7 @@ Werkzeuge:
 
 - Release-Builds enthalten Poppler (`pdftotext` und `pdftoppm`) für Windows x64,
   macOS ARM64/x64 und Linux x64. Ein Quellstart nutzt alternativ eine vorhandene
-  Poppler-Installation und fällt für PDF-Text auf PyPDF2 zurück.
+  Poppler-Installation und fällt für PDF-Text auf pypdf zurück.
 - Tesseract bleibt für OCR erforderlich; ohne Tesseract funktioniert die
   normale PDF-Texterkennung weiterhin.
 - LibreOffice sowie `catdoc` oder `antiword` für alte Office-Dateien
@@ -158,6 +160,25 @@ Werkzeuge:
 Fehlende optionale Programme verhindern den normalen Start nicht.
 
 Für reproduzierbare Builds steht zusätzlich `requirements-lock.txt` mit exakt gepinnten Versionen bereit.
+
+## Headless-Indexdienst mit Docker
+
+Katalogaufbau, Kundenerkennung und Dokumentinhaltssuche können versuchsweise
+ohne GUI in einem Docker-Container laufen. Die Quelldaten werden read-only
+eingehängt; der vollständige Index und `customers.db` liegen in einem separaten
+persistent beschreibbaren Mount. Ein einmaliger lokaler Lauf:
+
+```bash
+mkdir -p docker-data docker-config
+export PAPAGUI_SOURCE_PATH=/absoluter/pfad/zu/den/Bauvorhaben
+export PAPAGUI_UID=$(id -u)
+export PAPAGUI_GID=$(id -g)
+docker compose build
+docker compose run --rm indexer --source /source --data /data --once
+```
+
+Aufbau, Dauerbetrieb, Synology-Hinweise, Statusdateien und die Grenzen der noch
+nicht implementierten Client-Synchronisation beschreibt [DOCKER.md](DOCKER.md).
 
 ## Tests
 

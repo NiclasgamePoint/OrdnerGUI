@@ -1,5 +1,8 @@
 [run]
 branch = True
+disable_warnings =
+    module-not-imported
+    no-data-collected
 source =
     app
     main
@@ -10,3 +13,4 @@ show_missing = True
 skip_covered = False
 exclude_also =
     if __name__ == ["']__main__["']:
+    if self\._shutdown_started:

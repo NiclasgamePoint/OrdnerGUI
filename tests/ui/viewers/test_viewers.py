@@ -6,7 +6,7 @@ import unittest
 
 import openpyxl
 from docx import Document
-from PyPDF2 import PdfWriter
+from pypdf import PdfWriter
 from PySide6.QtCore import QPoint, QPointF, Qt, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
