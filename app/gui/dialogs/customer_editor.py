@@ -17,6 +17,7 @@ from app.core.config import get_current_index_path
 from app.core.customer_models import Contact, Customer
 from app.core.index_manager import IndexManager
 from app.core.customer_repository import CustomerRepository
+from app.services.customer_api_client import CustomerApiConflict
 from app.core.folder_structure import MINIMUM_CUSTOMER_YEAR
 from app.core.fuzzy_search import normalize_search_text, search_tokens
 from app.core.search_models import SearchFilters
@@ -738,7 +739,20 @@ class CustomerEditorDialog(CenteredPopupDialog):
         self.customer.contacts = contacts
         note_text = self.note_text.toPlainText().strip()
         self.customer.notes = [note_text] if note_text else []
-        self.repository.save(self.customer)
+        try:
+            self.repository.save(self.customer)
+        except CustomerApiConflict as conflict:
+            current_name = (
+                conflict.current.display_name if conflict.current is not None else "gelöscht"
+            )
+            QMessageBox.warning(
+                self,
+                "Änderungskonflikt",
+                "Der Kunde wurde zwischenzeitlich auf einem anderen Client geändert.\n\n"
+                f"Aktueller Serverstand: {current_name}\n"
+                "Ihre Eingabe wurde nicht überschrieben. Bitte laden Sie den Kunden neu.",
+            )
+            return
         self.accept()
 
     def _delete_customer(self):
@@ -748,5 +762,16 @@ class CustomerEditorDialog(CenteredPopupDialog):
             "Nur die hinterlegten Kundendaten werden gelöscht. Dateien und Ordner bleiben erhalten.",
         )
         if answer == QMessageBox.Yes and self.customer.id is not None:
-            self.repository.delete(self.customer.id)
+            try:
+                self.repository.delete(
+                    self.customer.id,
+                    expected_revision=self.customer.revision,
+                )
+            except CustomerApiConflict:
+                QMessageBox.warning(
+                    self,
+                    "Änderungskonflikt",
+                    "Der Kunde wurde zwischenzeitlich geändert und daher nicht gelöscht.",
+                )
+                return
             self.accept()

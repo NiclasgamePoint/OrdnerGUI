@@ -13,7 +13,9 @@ def _resolve_path_setting(env_name: str) -> Path | None:
     value = os.getenv(env_name, "").strip()
     if not value:
         return None
-    return Path(value).expanduser().resolve()
+    # Keep a final `current` symlink intact: the client atomically switches it
+    # when a verified server generation is activated.
+    return Path(value).expanduser().absolute()
 
 
 def _configure_settings_storage() -> None:
@@ -74,6 +76,12 @@ def forced_fullscreen() -> bool:
     value = os.getenv("PAPAGUI_FORCE_FULLSCREEN", "").strip().casefold()
     return value in {"1", "true", "yes", "on"}
 
+
+def external_indexer_enabled() -> bool:
+    """Return whether indexing is owned by an external service."""
+    value = os.getenv("PAPAGUI_EXTERNAL_INDEXER", "").strip().casefold()
+    return value in {"1", "true", "yes", "on"}
+
 RIPGREP_AVAILABLE = shutil.which("rg") is not None
 
 SETTINGS_ORG = "PapaGUI"
@@ -104,6 +112,7 @@ class IndexOptions:
     newest_years_first: bool = True
     content_search_enabled: bool = False
     maximum_parallel_shards: int = 4
+    remote_sync_interval_minutes: int = 15
 
     @property
     def excluded_folder_names(self) -> set[str]:
@@ -312,6 +321,9 @@ def load_index_options() -> IndexOptions:
         maximum_parallel_shards=int(settings.value(
             "search/maximum_parallel_shards", defaults.maximum_parallel_shards
         )),
+        remote_sync_interval_minutes=max(1, int(settings.value(
+            "sync/interval_minutes", defaults.remote_sync_interval_minutes
+        ))),
     )
 
 
@@ -362,6 +374,9 @@ def save_index_options(options: IndexOptions):
     settings.setValue("search/content_enabled", values["content_search_enabled"])
     settings.setValue(
         "search/maximum_parallel_shards", values["maximum_parallel_shards"]
+    )
+    settings.setValue(
+        "sync/interval_minutes", values["remote_sync_interval_minutes"]
     )
     settings.sync()
     status = settings.status()

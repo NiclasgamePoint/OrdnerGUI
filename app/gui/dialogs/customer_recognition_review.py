@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -35,12 +36,15 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
         index_path: Path,
         customer_database_path: Path,
         options: CustomerRecognitionOptions,
+        remote_resolver: Callable[[RecognitionCandidate, str, int | None], object]
+        | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self.index_path = index_path
         self.customer_database_path = customer_database_path
         self.options = options
+        self.remote_resolver = remote_resolver
         self._cases: dict[str, RecognitionCandidate] = {}
         self._customer_labels: dict[int, str] = {}
         self._customers: list[tuple[int, str, str]] = []
@@ -334,14 +338,20 @@ class CustomerRecognitionReviewDialog(CenteredPopupDialog):
             )
             return
         try:
-            CustomerRecognitionService(
-                self.index_path,
-                self.customer_database_path,
-                self.options,
-            ).resolve_case(candidate, action, customer_id)
+            if self.remote_resolver is not None:
+                self.remote_resolver(candidate, action, customer_id)
+            else:
+                CustomerRecognitionService(
+                    self.index_path,
+                    self.customer_database_path,
+                    self.options,
+                ).resolve_case(candidate, action, customer_id)
         except Exception as error:
             QMessageBox.warning(self, "Prüffall konnte nicht gespeichert werden", str(error))
             return
         self.customersChanged.emit()
+        if self.remote_resolver is not None:
+            self.accept()
+            return
         self._load_customers()
         self._reload_cases()

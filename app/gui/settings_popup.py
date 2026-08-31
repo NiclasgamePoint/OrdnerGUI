@@ -46,6 +46,7 @@ SETTINGS_HELP_TEXTS = {
     "automatic_monitoring": "Übernimmt Dateiänderungen automatisch, sobald die Dateisystemüberwachung sie meldet.",
     "change_delay": "Wartezeit nach einer Dateiänderung, bevor der Index aktualisiert wird. Sie bündelt schnell aufeinanderfolgende Änderungen.",
     "daily_reconciliation": "Prüft einmal täglich den vollständigen Datenordner als Sicherheitsnetz für verpasste Dateisystemereignisse.",
+    "remote_sync_interval": "Zeitabstand, in dem der Client eine neue, geprüfte Servergeneration abruft.",
     "excluded_folders": "Kommagetrennte Ordnernamen, die beim Indexieren vollständig übersprungen werden.",
     "content_indexing": "Extrahiert Dokumenttexte für Volltextsuche und Kundenerkennung in einem fortsetzbaren Hintergrundlauf.",
     "content_formats": "Legt fest, aus welchen Dateiformaten durchsuchbarer Inhalt extrahiert wird. Änderungen können eine Neuindizierung auslösen.",
@@ -507,6 +508,18 @@ class SettingsPopup(QFrame):
             self.daily_reconciliation_checkbox,
         )
         self._register_help("daily_reconciliation", self.daily_reconciliation_checkbox)
+
+        self.remote_sync_interval_spin = QSpinBox()
+        self.remote_sync_interval_spin.setRange(1, 1440)
+        self.remote_sync_interval_spin.setSuffix(" Minuten")
+        self.remote_sync_interval_spin.setValue(
+            self.index_options.remote_sync_interval_minutes
+        )
+        form.addRow(
+            self._form_label("Server-Synchronisation", "remote_sync_interval"),
+            self.remote_sync_interval_spin,
+        )
+        self._register_help("remote_sync_interval", self.remote_sync_interval_spin)
 
         self.excluded_folders_input = QLineEdit(self.index_options.excluded_folders)
         self.excluded_folders_input.setPlaceholderText(".git, .venv, node_modules")
@@ -1231,6 +1244,7 @@ class SettingsPopup(QFrame):
             newest_years_first=self.newest_years_checkbox.isChecked(),
             content_search_enabled=self.content_search_checkbox.isChecked(),
             maximum_parallel_shards=self.parallel_shards_spin.value(),
+            remote_sync_interval_minutes=self.remote_sync_interval_spin.value(),
         )
         requires_reindex = (
             self.index_options.catalog_fingerprint() != new_options.catalog_fingerprint()

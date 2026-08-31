@@ -155,7 +155,7 @@ class CustomerEditorEdgeTests(unittest.TestCase):
         with patch.object(QMessageBox, "question", return_value=QMessageBox.Yes), \
                 patch.object(self.repository, "delete") as delete:
             dialog._delete_customer()
-        delete.assert_called_once_with(saved.id)
+        delete.assert_called_once_with(saved.id, expected_revision=saved.revision)
         dialog.close()
 
 

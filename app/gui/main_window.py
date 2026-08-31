@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from app.core.config import (
     WINDOW_HEIGHT,
     WINDOW_TITLE,
     WINDOW_WIDTH,
+    external_indexer_enabled,
     get_configured_index_source,
     has_configured_index_source,
     load_customer_recognition_options,
@@ -68,6 +70,7 @@ from app.gui.workers import (
     ContentJobController,
     ContentMaintenanceWorker,
     IndexJobController,
+    IndexSyncWorker,
     SearchWorker,
     SettingsDataWorker,
     StatisticsWorker,
@@ -75,6 +78,8 @@ from app.gui.workers import (
 from app.services import FileSystemMonitor
 from app.services.document_converter import DocumentConverter
 from app.services.index_capabilities import IndexCapabilityDetector
+from app.services.index_distribution import IndexGenerationClient
+from app.services.customer_sync_repository import SyncedCustomerRepository
 
 
 LOGGER = logging.getLogger(__name__)
@@ -90,6 +95,18 @@ class MainWindow(QMainWindow):
                 options=self.index_options,
             )
         return IndexManager(DB_FILE, options=self.index_options)
+
+    def _open_customer_repository(self) -> CustomerRepository:
+        server_url = os.getenv("PAPAGUI_INDEX_SERVER_URL", "").strip()
+        client_root = os.getenv("PAPAGUI_CLIENT_ROOT", "").strip()
+        if external_indexer_enabled() and server_url and client_root:
+            return SyncedCustomerRepository(
+                CUSTOMER_DB_FILE,
+                server_url,
+                Path(client_root) / "customer-offline-queue.db",
+                token=os.getenv("PAPAGUI_API_TOKEN", ""),
+            )
+        return CustomerRepository(CUSTOMER_DB_FILE)
 
     def __init__(self):
         super().__init__()
@@ -107,13 +124,14 @@ class MainWindow(QMainWindow):
             customer_database_path=CUSTOMER_DB_FILE,
             parent=self,
         )
-        self.index_controller.adopt_running_job()
+        if not external_indexer_enabled():
+            self.index_controller.adopt_running_job()
         self.content_job_controller = ContentJobController(
             INDEX_LAYOUT, CUSTOMER_DB_FILE, parent=self
         )
         self.content_maintenance_worker: ContentMaintenanceWorker | None = None
         self.index_manager = self._open_active_index()
-        self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+        self.customer_repository = self._open_customer_repository()
         self.index_source = get_configured_index_source()
         self.pending_index_source: Path | None = None
         self.theme_manager = ThemeManager()
@@ -136,6 +154,23 @@ class MainWindow(QMainWindow):
         self.catalog_reconciliation_timer.timeout.connect(
             self._start_daily_catalog_reconciliation
         )
+        self.index_sync_timer = QTimer(self)
+        self.index_sync_timer.setInterval(
+            self.index_options.remote_sync_interval_minutes * 60 * 1000
+        )
+        self.index_sync_timer.timeout.connect(self._start_remote_index_sync)
+        self.index_sync_worker: IndexSyncWorker | None = None
+        self.index_sync_client: IndexGenerationClient | None = None
+        server_url = os.getenv("PAPAGUI_INDEX_SERVER_URL", "").strip()
+        client_root = os.getenv("PAPAGUI_CLIENT_ROOT", "").strip()
+        if external_indexer_enabled() and server_url and client_root:
+            self.index_sync_client = IndexGenerationClient(
+                server_url,
+                Path(client_root),
+                token=os.getenv("PAPAGUI_API_TOKEN", ""),
+            )
+            self.index_sync_timer.start()
+            QTimer.singleShot(5_000, self._start_remote_index_sync)
 
         self.search_generation = 0
         self.search_workers: set[SearchWorker] = set()
@@ -171,6 +206,56 @@ class MainWindow(QMainWindow):
         if CATALOG_DB_FILE.exists():
             self._start_content_indexing_if_enabled()
         self.initialization_timer.start(0)
+        if isinstance(self.customer_repository, SyncedCustomerRepository):
+            QTimer.singleShot(0, self._flush_offline_customer_changes)
+
+    def _flush_offline_customer_changes(self) -> None:
+        if self._shutdown_started or not isinstance(
+            self.customer_repository, SyncedCustomerRepository
+        ):
+            return
+        conflicts = self.customer_repository.flush_offline_changes()
+        if conflicts:
+            self.status_bar.set_text(
+                f"{len(conflicts)} Kundendaten-Konflikt(e) benötigen eine Entscheidung"
+            )
+
+    def _start_remote_index_sync(self) -> None:
+        if (
+            self._shutdown_started
+            or self.index_sync_client is None
+            or (self.index_sync_worker is not None and self.index_sync_worker.isRunning())
+        ):
+            return
+        worker = IndexSyncWorker(self.index_sync_client, self)
+        self.index_sync_worker = worker
+        worker.synchronized.connect(self._on_remote_index_synchronized)
+        worker.failed.connect(self._on_remote_index_sync_failed)
+        worker.finished.connect(self._clear_index_sync_worker)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _clear_index_sync_worker(self) -> None:
+        self.index_sync_worker = None
+
+    def _on_remote_index_synchronized(self, changed: bool) -> None:
+        if self._shutdown_started:
+            return
+        if not changed:
+            self.status_bar.set_text("Lokaler Index ist mit dem Server synchron ✓")
+            return
+        self.customer_repository.close()
+        self.customer_repository = self._open_customer_repository()
+        self.customer_page.repository = self.customer_repository
+        self._reload_active_index()
+        self._show_initial_customers()
+        self.status_bar.set_text("Neue Servergeneration lokal aktiviert ✓")
+
+    def _on_remote_index_sync_failed(self, error: str) -> None:
+        if not self._shutdown_started:
+            self.status_bar.set_text(
+                f"Indexserver nicht erreichbar · lokaler Stand bleibt aktiv ({error})"
+            )
 
     def _on_content_progress(self, state: dict):
         if self._shutdown_started:
@@ -215,7 +300,11 @@ class MainWindow(QMainWindow):
             )
 
     def _start_content_indexing_if_enabled(self) -> bool:
-        if self._shutdown_started or not self.index_options.content_indexing_enabled:
+        if (
+            self._shutdown_started
+            or external_indexer_enabled()
+            or not self.index_options.content_indexing_enabled
+        ):
             return False
         return self.content_job_controller.start_or_adopt()
 
@@ -231,11 +320,14 @@ class MainWindow(QMainWindow):
                 return
             self.index_source = dialog.selected_path
             save_index_source(self.index_source)
+        if external_indexer_enabled():
+            self.status_bar.set_text("Indexdienst läuft in Docker im Hintergrund")
+            return
         self.check_and_index()
         self._start_filesystem_monitor()
 
     def _try_reconnect_source(self):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if not self.index_source.exists() or not self.index_source.is_dir():
             return
@@ -904,6 +996,9 @@ class MainWindow(QMainWindow):
         return operation()
 
     def _start_content_maintenance(self, action: str):
+        if external_indexer_enabled():
+            self.status_bar.set_text("Indexwartung wird ausschließlich am Server ausgeführt")
+            return
         if self._shutdown_started:
             return
         if (
@@ -1087,7 +1182,7 @@ class MainWindow(QMainWindow):
             self.customer_repository.clear_all_customer_data()
             self.recent_customer_history.clear()
             self.customer_repository.close()
-            self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            self.customer_repository = self._open_customer_repository()
             self.customer_page.repository = self.customer_repository
             self.navigator.reset("search")
             self._show_initial_customers()
@@ -1096,7 +1191,7 @@ class MainWindow(QMainWindow):
             if self.settings_popup is not None:
                 self.settings_popup.set_recognition_state({}, 0)
         except Exception as exc:
-            self.customer_repository = CustomerRepository(CUSTOMER_DB_FILE)
+            self.customer_repository = self._open_customer_repository()
             self.customer_page.repository = self.customer_repository
             QMessageBox.warning(
                 self,
@@ -1183,10 +1278,22 @@ class MainWindow(QMainWindow):
     def open_customer_recognition_review(self):
         if self.settings_popup is not None:
             self.settings_popup.close()
+        remote_resolver = None
+        if isinstance(self.customer_repository, SyncedCustomerRepository):
+            def resolve_on_server(candidate, action, customer_id):
+                return self.customer_repository.api.action(
+                    "resolve_recognition_case",
+                    candidate=candidate.to_dict(),
+                    resolution=action,
+                    customer_id=customer_id,
+                )
+
+            remote_resolver = resolve_on_server
         dialog = CustomerRecognitionReviewDialog(
             self.index_manager.db_path,
             CUSTOMER_DB_FILE,
             self.recognition_options,
+            remote_resolver=remote_resolver,
             parent=self,
         )
         dialog.customersChanged.connect(self._refresh_customer_results_only)
@@ -1276,6 +1383,9 @@ class MainWindow(QMainWindow):
         self.navigator.reset("search")
 
     def on_settings_reindex_requested(self):
+        if external_indexer_enabled():
+            self.status_bar.set_text("Indexaufbau wird ausschließlich am Server ausgeführt")
+            return
         if self.index_controller.is_active():
             if self.settings_popup is not None:
                 self.settings_popup.set_indexing(True)
@@ -1306,7 +1416,7 @@ class MainWindow(QMainWindow):
         full_rebuild: bool,
         status_text: str,
     ):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if self.index_controller.is_active():
             return
@@ -1345,7 +1455,7 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text("Dateiindizierung wird abgebrochen …")
 
     def check_and_index(self):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if self.index_controller.is_active():
             state = self.index_controller.current_state()
@@ -1529,7 +1639,7 @@ class MainWindow(QMainWindow):
         self._refresh_statistics()
 
     def _start_filesystem_monitor(self):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if self.filesystem_monitor is not None:
             self.filesystem_monitor.requestInterruption()
@@ -1560,7 +1670,7 @@ class MainWindow(QMainWindow):
             self.catalog_reconciliation_timer.start()
 
     def _start_daily_catalog_reconciliation(self):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if self.index_controller.is_active() or not self.index_source.exists():
             return
@@ -1579,7 +1689,7 @@ class MainWindow(QMainWindow):
         self._start_incremental_filesystem_sync()
 
     def _start_incremental_filesystem_sync(self):
-        if self._shutdown_started:
+        if self._shutdown_started or external_indexer_enabled():
             return
         if self.index_controller.is_active():
             self.pending_filesystem_sync = True
@@ -1633,6 +1743,9 @@ class MainWindow(QMainWindow):
             self._start_content_indexing_if_enabled()
 
     def on_load_backup_requested(self, backup_path_value: str):
+        if external_indexer_enabled():
+            self.status_bar.set_text("Lokale Sicherungen werden automatisch verwaltet")
+            return
         if self.index_controller.is_active():
             QMessageBox.information(
                 self,
@@ -1719,6 +1832,7 @@ class MainWindow(QMainWindow):
             self.search_debounce,
             self.source_reconnect_timer,
             self.catalog_reconciliation_timer,
+            self.index_sync_timer,
         ):
             self._run_shutdown_step("Timer stoppen", timer.stop)
 
@@ -1746,6 +1860,7 @@ class MainWindow(QMainWindow):
             ("statistics_worker", "Statistik-Worker beenden"),
             ("content_maintenance_worker", "Inhaltsindex-Wartung beenden"),
             ("blacklist_cleanup_worker", "Blocklisten-Worker beenden"),
+            ("index_sync_worker", "Index-Synchronisierung beenden"),
         ):
             worker = getattr(self, attribute)
             self._run_shutdown_step(

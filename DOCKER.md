@@ -1,9 +1,58 @@
 # Headless-Indexdienst mit Docker
 
-Der Container führt Katalogaufbau, Kundenerkennung und Dokumentinhaltsindexierung
-ohne gestartete PapaGUI-Oberfläche aus. Die Quelldaten werden ausschließlich
-lesend unter `/source` eingebunden. Katalog, Inhaltsshards, Jobstatus,
-`customers.db` und Logs liegen persistent unter `/data`.
+Der Container ist die einzige schreibende Instanz für Katalogaufbau,
+Kundenerkennung und Dokumentinhaltsindexierung. Die Quelldaten werden
+ausschließlich lesend unter `/source` eingebunden. Der Server veröffentlicht nach
+jedem erfolgreichen Lauf eine unveränderliche, mit SHA-256 geprüfte Generation
+aus Index und `customers.db`.
+
+## Einfacher Start zusammen mit PapaGUI
+
+Unter Linux genügt:
+
+```bash
+./start.sh
+```
+
+Das Skript liest die bereits in PapaGUI gewählte Datenquelle, erzeugt einmalig ein
+lokales API-Token, baut beziehungsweise aktualisiert das Image und startet den
+Indexdienst per Docker Compose im Hintergrund. Serverdaten liegen getrennt in
+`docker-server-data`, der verifizierte Clientcache in `client-data`. Die GUI baut
+niemals selbst einen Index. Der Build- und Startlog liegt unter
+`docker-server-data/logs/docker-indexer-startup.log`; Laufzeitlogs zeigt
+weiterhin
+`docker compose logs -f indexer`.
+
+Beim Start und danach im unter Einstellungen festgelegten Intervall lädt der
+Client `current.json` und nur bei einer neuen Generation das ZIP-Archiv. Größe,
+Archiv-Prüfsumme und jede einzelne Datei werden geprüft. Erst danach wird der
+symbolische `current`-Verweis atomar umgeschaltet. Ist der Server nicht
+erreichbar, bleibt die letzte gültige lokale Generation ohne Einschränkung für
+Suche und Anzeige aktiv.
+
+Server und Client behalten jeweils den aktiven Stand plus genau drei vorherige
+vollständige Generationen. Eine Generation enthält `customers.db`, den Katalog,
+den Inhaltsstatus und sämtliche Inhaltsshards.
+
+## Kunden-API und Konflikte
+
+`customers.db` auf dem Server ist die Single Source of Truth. Kunden- und
+Journaländerungen verwenden eine Bearbeitungsrevision. Ein Client sendet immer
+die Revision, die er gelesen hat. Ist sie inzwischen veraltet, antwortet die API
+mit `409 Conflict` und dem aktuellen Datensatz; fremde Änderungen werden niemals
+stillschweigend überschrieben. Offlineänderungen landen in
+`client-data/customer-offline-queue.db` und werden später mit derselben Prüfung
+übertragen.
+
+Die API läuft standardmäßig auf Port `8765`. `start.sh` verwaltet für lokale
+Tests das Token in `docker-config/api-token`. Auf der Synology muss
+`PAPAGUI_API_TOKEN` als Secret gesetzt und der Zugriff zusätzlich über HTTPS
+(Reverse Proxy) abgesichert werden.
+
+Jede angenommene Kundenänderung veröffentlicht sofort wieder eine vollständige
+Generation. So erhalten andere Clients nicht erst beim nächsten nächtlichen
+Indexlauf den neuen Stand. Fehlt lokal das Docker-Buildx-Plugin, fällt
+`start.sh` automatisch auf den klassischen Docker-Builder zurück.
 
 ## Lokaler Probelauf
 
@@ -70,20 +119,17 @@ absolute NAS-Pfade in Container Manager eingetragen werden. Die konfigurierte
 UID/GID benötigt Leserechte auf der Quelle und Schreibrechte auf Ausgabe und
 Konfiguration. Die Quelle sollte weiterhin read-only gemountet bleiben.
 
-Dieses erste Docker-Inkrement erzeugt den vollständigen zentralen Index, verteilt
-ihn aber noch nicht automatisch an Clients. Für die spätere Client-Synchronisation
-sollte niemals ein gerade beschriebener SQLite-Bestand kopiert werden. Vorgesehen
-ist stattdessen eine veröffentlichte, unveränderliche Generation mit Manifest und
-Prüfsummen, die der Client vollständig in ein temporäres Verzeichnis lädt und
-anschließend atomar aktiviert. `customers.db` braucht dabei eine eigene
-Konfliktstrategie, sobald Clients Kundendaten bearbeiten dürfen.
+Die Synology stellt Port `8765` beziehungsweise den HTTPS-Reverse-Proxy für die
+Clients bereit. `PAPAGUI_INDEX_SERVER_URL` zeigt auf diese Adresse. Quelldaten
+bleiben read-only; `docker-server-data` und `docker-config` benötigen
+Schreibrechte für die Container-UID/GID.
 
 ## Einschränkungen des Prototyps
 
-- Eine Containerinstanz pro Ausgabeverzeichnis.
-- Noch kein Generationsexport und kein automatischer Client-Download.
-- Einstellungen werden über das persistente QSettings-Verzeichnis `/config`
-  übernommen; eine eigene Weboberfläche oder API existiert noch nicht.
+- Eine Containerinstanz pro Server-Ausgabeverzeichnis.
+- Noch keine grafische Konfliktzusammenführung Feld für Feld; Konflikte werden
+  sicher abgewiesen und zur Entscheidung behalten.
+- Die API ist bewusst klein und besitzt noch keine Administrations-Weboberfläche.
 - Der Compose-Healthcheck bestätigt den gestarteten Dienststatus, nicht die
   fachliche Vollständigkeit des letzten Indexlaufs. Details stehen in
   `index/jobs/service/index_job.json` und den Logs.

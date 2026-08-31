@@ -94,11 +94,14 @@ class SettingsHelpController(QObject):
         return {help_id for help_id, _text in self._help.values()}
 
     def hide(self):
+        if self._disposed:
+            return
         self._timer.stop()
         self._pending_id = ""
         self._pending_anchor = None
         self._visible_id = ""
-        self.bubble.hide()
+        if self.bubble is not None:
+            self.bubble.hide()
 
     def eventFilter(self, watched, event):
         if getattr(self, "_disposed", True):
@@ -154,6 +157,8 @@ class SettingsHelpController(QObject):
         self._timer.start(self.delay_ms)
 
     def _show_pending(self):
+        if self._disposed or self.bubble is None:
+            return
         anchor = self._pending_anchor
         if anchor is None or not self._is_active(anchor) or not anchor.isVisible():
             self.hide()
@@ -192,8 +197,8 @@ class SettingsHelpController(QObject):
     def dispose(self):
         if self._disposed:
             return
-        self._disposed = True
         self.hide()
+        self._disposed = True
         for watched in tuple(self._watched_roots):
             try:
                 watched.removeEventFilter(self)
@@ -205,4 +210,7 @@ class SettingsHelpController(QObject):
             self.owner.removeEventFilter(self)
         except RuntimeError:
             pass
-        self.bubble.deleteLater()
+        bubble = self.bubble
+        self.bubble = None
+        if bubble is not None:
+            bubble.deleteLater()

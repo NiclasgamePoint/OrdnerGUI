@@ -33,6 +33,7 @@ from app.core.customer_repository import CustomerRepository
 from app.gui.dialogs import CustomerDataSuggestionsDialog, CustomerEditorDialog
 from app.gui.widgets.buttons import AppButton, CountBadgeButton
 from app.gui.widgets.result_row import ResultRow
+from app.services.customer_api_client import CustomerApiConflict
 
 
 class _JournalEntryEditorDialog(QDialog):
@@ -406,18 +407,29 @@ class CustomerPage(QWidget):
         if self.customer.notes == next_notes:
             return
         self.customer.notes = next_notes
-        updated = self.repository.save(self.customer)
+        try:
+            updated = self.repository.save(self.customer)
+        except CustomerApiConflict as conflict:
+            self.notes_status.setText("Konflikt: Serverstand wurde nicht überschrieben")
+            if conflict.current is not None:
+                self.customer = conflict.current
+                self.notes.setPlainText("\n".join(conflict.current.notes))
+            return
         self.customer = updated
         self.notes_status.setText("Automatisch gespeichert")
 
     def _add_journal_entry(self):
         if self.customer is None or self.customer.id is None:
             return
-        entry = self.repository.add_journal_entry(
-            int(self.customer.id),
-            self.journal_input.toPlainText(),
-            self.journal_title_input.text(),
-        )
+        try:
+            entry = self.repository.add_journal_entry(
+                int(self.customer.id),
+                self.journal_input.toPlainText(),
+                self.journal_title_input.text(),
+            )
+        except CustomerApiConflict:
+            self.journal_status.setText("Konflikt: Kunde wurde auf einem anderen Client geändert")
+            return
         if entry is None:
             self.journal_status.setText("Bitte zuerst einen Text eingeben")
             return
@@ -476,12 +488,16 @@ class CustomerPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         title, body = dialog.values()
-        updated = self.repository.update_journal_entry(
-            int(self.customer.id),
-            int(entry.id),
-            body,
-            title,
-        )
+        try:
+            updated = self.repository.update_journal_entry(
+                int(self.customer.id),
+                int(entry.id),
+                body,
+                title,
+            )
+        except CustomerApiConflict:
+            self.journal_status.setText("Konflikt: Serverstand wurde nicht überschrieben")
+            return
         if updated is None:
             self.journal_status.setText("Eintrag konnte nicht gespeichert werden")
             return
@@ -498,10 +514,14 @@ class CustomerPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        deleted = self.repository.delete_journal_entry(
-            int(self.customer.id),
-            int(entry.id),
-        )
+        try:
+            deleted = self.repository.delete_journal_entry(
+                int(self.customer.id),
+                int(entry.id),
+            )
+        except CustomerApiConflict:
+            self.journal_status.setText("Konflikt: Serverstand wurde nicht überschrieben")
+            return
         if not deleted:
             self.journal_status.setText("Eintrag konnte nicht gelöscht werden")
             return

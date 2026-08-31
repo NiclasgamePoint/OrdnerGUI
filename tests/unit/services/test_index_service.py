@@ -145,8 +145,10 @@ class IndexServiceTests(PapaGuiTestCase):
         service.run_once.assert_called_once_with(full_rebuild=True)
 
         service.reset_mock()
+        api = Mock()
         with (
             patch("app.services.index_service.IndexService", return_value=service),
+            patch("app.services.index_service.IndexApiServer", return_value=api),
             patch("app.services.index_service.configure_logging"),
             patch("app.services.index_service.signal.signal"),
             patch("sys.argv", [
@@ -155,3 +157,5 @@ class IndexServiceTests(PapaGuiTestCase):
         ):
             self.assertEqual(main(), 4)
         service.serve.assert_called_once_with(full_rebuild=False)
+        api.start.assert_called_once_with()
+        api.stop.assert_called_once_with()

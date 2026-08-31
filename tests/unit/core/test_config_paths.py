@@ -9,6 +9,17 @@ from unittest.mock import patch
 
 
 class ConfigPathTests(unittest.TestCase):
+    def test_external_indexer_flag_accepts_common_truthy_values(self):
+        from app.core import config
+
+        for value in ("1", "true", "YES", "on"):
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"PAPAGUI_EXTERNAL_INDEXER": value}
+            ):
+                self.assertTrue(config.external_indexer_enabled())
+        with patch.dict(os.environ, {"PAPAGUI_EXTERNAL_INDEXER": "0"}):
+            self.assertFalse(config.external_indexer_enabled())
+
     def test_settings_storage_without_override_is_a_noop(self):
         from app.core import config
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 import signal
 import threading
@@ -14,6 +15,8 @@ from app.core.index_layout import IndexLayout
 from app.core.logging_config import configure_logging
 from app.services.content_index_job import ContentIndexJobRunner
 from app.services.index_job import IndexJobRunner
+from app.services.index_api import IndexApiServer
+from app.services.index_distribution import IndexGenerationPublisher
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,7 @@ class IndexService:
         self.catalog_state_dir = self.layout.jobs_dir / "catalog"
         self.content_state_dir = self.layout.jobs_dir / "content"
         self.service_state_dir = self.layout.jobs_dir / "service"
+        self.publisher = IndexGenerationPublisher(self.data_path)
         self._stopped = threading.Event()
         self._state: dict[str, object] = {}
 
@@ -80,6 +84,10 @@ class IndexService:
             self.content_state_dir,
             self.customer_database_path,
         ).run()
+        if content_result == 0:
+            self._write_state(status="publishing", phase="publishing")
+            published = self.publisher.publish()
+            self._write_state(generation=published.generation)
         final_status = "completed" if content_result == 0 else "error"
         self._write_state(
             status=final_status,
@@ -126,6 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--full-rebuild", action="store_true")
     parser.add_argument("--interval-seconds", type=float, default=86_400)
+    parser.add_argument("--api-host", default="0.0.0.0")
+    parser.add_argument("--api-port", type=int, default=8765)
     return parser
 
 
@@ -141,7 +151,17 @@ def main() -> int:
         signal.signal(stop_signal, lambda *_args: service.stop())
     if arguments.once:
         return service.run_once(full_rebuild=arguments.full_rebuild)
-    return service.serve(full_rebuild=arguments.full_rebuild)
+    api = IndexApiServer(
+        arguments.data,
+        host=arguments.api_host,
+        port=arguments.api_port,
+        token=os.getenv("PAPAGUI_API_TOKEN", ""),
+    )
+    api.start()
+    try:
+        return service.serve(full_rebuild=arguments.full_rebuild)
+    finally:
+        api.stop()
 
 
 if __name__ == "__main__":

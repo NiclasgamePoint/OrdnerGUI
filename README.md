@@ -5,7 +5,9 @@
 ## Funktionen
 
 - Versionierung über `app.__version__` und `pyproject.toml`
-- Headless-Indexdienst für einmalige oder regelmäßig geplante Docker-Läufe
+- Docker-Indexserver als Single Source of Truth mit geprüften Generationen
+- automatischer Client-Synchronisation, drei Backups und Offline-Fallback
+- revisionierter Kunden-API ohne stilles Überschreiben paralleler Änderungen
 
 - Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
@@ -148,6 +150,11 @@ Alternative Startskripte:
 - Windows CMD: `start.bat`
 - Windows PowerShell: `start.ps1`
 
+Unter Linux ist `./start.sh` der gemeinsame Einstiegspunkt. Es startet den
+Docker-Indexserver im Hintergrund, synchronisiert bestmöglich die neueste
+Generation und öffnet die GUI. Ohne erreichbaren Server verwendet PapaGUI den
+letzten lokal geprüften Stand. Die GUI baut selbst keinen Index mehr auf.
+
 Werkzeuge:
 
 - Release-Builds enthalten Poppler (`pdftotext` und `pdftoppm`) für Windows x64,
@@ -163,10 +170,10 @@ Für reproduzierbare Builds steht zusätzlich `requirements-lock.txt` mit exakt 
 
 ## Headless-Indexdienst mit Docker
 
-Katalogaufbau, Kundenerkennung und Dokumentinhaltssuche können versuchsweise
-ohne GUI in einem Docker-Container laufen. Die Quelldaten werden read-only
-eingehängt; der vollständige Index und `customers.db` liegen in einem separaten
-persistent beschreibbaren Mount. Ein einmaliger lokaler Lauf:
+Katalogaufbau, Kundenerkennung und Dokumentinhaltssuche laufen ausschließlich im
+Docker-Container. Für den normalen lokalen Test genügt `./start.sh`. Details zu
+Generationsexport, API, Konflikten, Backups und Synology stehen in
+[DOCKER.md](DOCKER.md). Ein manueller Serverlauf ist weiterhin möglich:
 
 ```bash
 mkdir -p docker-data docker-config
@@ -177,8 +184,6 @@ docker compose build
 docker compose run --rm indexer --source /source --data /data --once
 ```
 
-Aufbau, Dauerbetrieb, Synology-Hinweise, Statusdateien und die Grenzen der noch
-nicht implementierten Client-Synchronisation beschreibt [DOCKER.md](DOCKER.md).
 
 ## Tests
 

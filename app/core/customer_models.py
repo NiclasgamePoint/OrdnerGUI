@@ -79,6 +79,7 @@ class CustomerJournalEntry:
 @dataclass
 class Customer:
     id: int | None = None
+    revision: int = 0
     folder_path: str = ""
     folder_paths: list[str] = field(default_factory=list)
     display_name: str = ""

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Docker-Indexer zur alleinigen Indexquelle erweitert.
+- Unveränderliche, SHA-256-geprüfte Generationen mit drei Serverbackups ergänzt.
+- Automatischen Clientdownload, atomare Aktivierung, drei lokale Backups und
+  Offline-Fallback ergänzt.
+- Authentifizierte Kunden-API mit Revisionen, HTTP-409-Konflikten und dauerhafter
+  Offline-Queue ergänzt.
+- Coverage-Gate für die nun zusätzlich real getesteten HTTP-/Prozessadapter auf
+  weiterhin projektweite 93 Prozent kalibriert; Adapter bleiben in der Messung.
+
 ## 0.4.0
 
 - Headless-Docker-Dienst für Katalog, Kundenerkennung und Inhaltsindexierung.

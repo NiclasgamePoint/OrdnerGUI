@@ -14,6 +14,26 @@ from tests.base.main_window_test_case import (
 
 
 class MainWindowIsolationTests(MainWindowTestCase):
+    def test_external_indexer_prevents_gui_index_writers(self):
+        with (
+            patch.object(MainWindow, "_initialize_data_source"),
+            patch("app.gui.main_window.external_indexer_enabled", return_value=True),
+        ):
+            window = MainWindow()
+            window.index_options.content_indexing_enabled = True
+            window._start_background_indexing(
+                self.main_window_source_path,
+                full_rebuild=False,
+                status_text="Test",
+            )
+            window._start_filesystem_monitor()
+            self.assertFalse(window._start_content_indexing_if_enabled())
+
+        self.assertEqual(window.index_controller.start_calls, [])
+        self.assertIsNone(window.filesystem_monitor)
+        self.assertEqual(window.content_job_controller.start_calls, 0)
+        window.close()
+
     def test_catalog_opening_and_shutdown_worker_runtime_edges(self):
         self.main_window_catalog_path.parent.mkdir(parents=True, exist_ok=True)
         self.main_window_catalog_path.touch()

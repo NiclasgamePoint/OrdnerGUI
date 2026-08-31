@@ -25,6 +25,14 @@ from app.core.folder_structure import ProjectRoot, normalize_identity
 from app.core.search_models import SearchSort
 
 
+class CustomerConflictError(RuntimeError):
+    """Raised when a client attempts to replace a stale customer revision."""
+
+    def __init__(self, current: Customer | None):
+        super().__init__("Der Kundendatensatz wurde zwischenzeitlich geändert.")
+        self.current = current
+
+
 class CustomerRepository:
     """Persistent customer data, intentionally independent from replaceable search indexes."""
 
@@ -40,6 +48,12 @@ class CustomerRepository:
         if not readonly:
             self.connection.execute("PRAGMA journal_mode = WAL")
             self._initialize()
+
+    def __enter__(self) -> CustomerRepository:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     @staticmethod
     def _folder_key(folder_path: str) -> str:
@@ -79,6 +93,7 @@ class CustomerRepository:
                 street TEXT NOT NULL DEFAULT '',
                 postal_code TEXT NOT NULL DEFAULT '',
                 city TEXT NOT NULL DEFAULT '',
+                revision INTEGER NOT NULL DEFAULT 1,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS customer_types (
@@ -240,6 +255,7 @@ class CustomerRepository:
         )
         self._migrate_data_suggestions()
         self._migrate_journal_entries()
+        self._migrate_customer_revisions()
         self.connection.executemany(
             "INSERT OR IGNORE INTO customer_types (name) VALUES (?)",
             [("Unternehmen",), ("Privatperson",), ("Organisation",)],
@@ -271,6 +287,15 @@ class CustomerRepository:
         self._migrate_legacy_projects()
         self.connection.commit()
         self.merge_duplicate_customers_by_name()
+
+    def _migrate_customer_revisions(self) -> None:
+        columns = {
+            str(row[1]) for row in self.connection.execute("PRAGMA table_info(customers)")
+        }
+        if "revision" not in columns:
+            self.connection.execute(
+                "ALTER TABLE customers ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+            )
 
     def get_by_folder(
         self,
@@ -2582,6 +2607,7 @@ class CustomerRepository:
 
         return Customer(
             id=primary.id,
+            revision=max(source.revision for source in sources),
             folder_path=preferred_folder,
             folder_paths=folders,
             display_name=first_value("display_name"),
@@ -2607,7 +2633,21 @@ class CustomerRepository:
             ),
         )
 
-    def save(self, customer: Customer, commit: bool = True) -> Customer:
+    def save(
+        self,
+        customer: Customer,
+        commit: bool = True,
+        expected_revision: int | None = None,
+    ) -> Customer:
+        if customer.id is not None and expected_revision is not None:
+            self.connection.execute("BEGIN IMMEDIATE")
+            row = self.connection.execute(
+                "SELECT revision FROM customers WHERE id=?", (customer.id,)
+            ).fetchone()
+            current_revision = int(row[0]) if row is not None else None
+            if current_revision != expected_revision:
+                self.connection.rollback()
+                raise CustomerConflictError(self.get(customer.id))
         same_name = self.find_by_name(customer.display_name)
         if customer.id is None and same_name:
             merge_target = next(
@@ -2674,7 +2714,8 @@ class CustomerRepository:
                 """
                 UPDATE customers SET
                     folder_path=?, display_name=?, entity_type=?, company=?, email=?,
-                    phone=?, street=?, postal_code=?, city=?, updated_at=CURRENT_TIMESTAMP
+                    phone=?, street=?, postal_code=?, city=?, revision=revision+1,
+                    updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
                 """,
                 (*values, customer_id),
@@ -2719,7 +2760,13 @@ class CustomerRepository:
             self.connection.commit()
         return self.get(customer_id)
 
-    def delete(self, customer_id: int):
+    def delete(self, customer_id: int, expected_revision: int | None = None):
+        if expected_revision is not None:
+            self.connection.execute("BEGIN IMMEDIATE")
+            current = self.get(customer_id)
+            if current is None or current.revision != expected_revision:
+                self.connection.rollback()
+                raise CustomerConflictError(current)
         self.connection.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
         self.connection.commit()
 
@@ -2878,6 +2925,7 @@ class CustomerRepository:
         ]
         return Customer(
             id=customer_id,
+            revision=int(row["revision"] or 0),
             folder_path=row["folder_path"], display_name=row["display_name"],
             entity_type=row["entity_type"], company=row["company"], email=row["email"],
             phone=row["phone"], street=row["street"], postal_code=row["postal_code"],

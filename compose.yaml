@@ -10,6 +10,7 @@ services:
       PAPAGUI_DATA_DIR: /data
       PAPAGUI_SOURCE_DIR: /source
       PAPAGUI_SETTINGS_DIR: /config
+      PAPAGUI_API_TOKEN: ${PAPAGUI_API_TOKEN:-}
       QT_QPA_PLATFORM: offscreen
     volumes:
       - type: bind
@@ -22,6 +23,8 @@ services:
       - type: bind
         source: ${PAPAGUI_CONFIG_PATH:-./docker-config}
         target: /config
+    ports:
+      - "${PAPAGUI_API_PORT:-8765}:8765"
     command:
       - --source
       - /source
@@ -29,6 +32,8 @@ services:
       - /data
       - --interval-seconds
       - ${PAPAGUI_INDEX_INTERVAL_SECONDS:-86400}
+      - --api-port
+      - "8765"
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; raise SystemExit(0 if Path('/data/index/jobs/service/index_job.json').exists() else 1)"]
       interval: 30s

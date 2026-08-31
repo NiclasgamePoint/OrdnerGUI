@@ -195,6 +195,8 @@ class SettingsHelpTests(unittest.TestCase):
         self.controller.owner.removeEventFilter.side_effect = RuntimeError("deleted")
         self.controller.dispose()
         self.controller.dispose()
+        self.controller.hide()
+        self.assertIsNone(self.controller.bubble)
         self.assertFalse(self.controller.eventFilter(self.first, QEvent(QEvent.Type.Enter)))
 
     def test_bubble_falls_back_when_no_screen_is_available(self):
