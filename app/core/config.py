@@ -8,11 +8,33 @@ from PySide6.QtCore import QSettings
 
 from app.core.index_layout import IndexLayout
 
+
 def _resolve_path_setting(env_name: str) -> Path | None:
     value = os.getenv(env_name, "").strip()
     if not value:
         return None
     return Path(value).expanduser().resolve()
+
+
+def _configure_settings_storage() -> None:
+    """Use an explicit, portable QSettings directory when configured."""
+    configured = _resolve_path_setting("PAPAGUI_SETTINGS_DIR")
+    if configured is None:
+        return
+
+    configured.mkdir(parents=True, exist_ok=True)
+    settings_format = QSettings.Format.IniFormat
+    QSettings.setDefaultFormat(settings_format)
+    QSettings.setPath(
+        settings_format,
+        QSettings.Scope.UserScope,
+        str(configured),
+    )
+    QSettings.setPath(
+        settings_format,
+        QSettings.Scope.SystemScope,
+        str(configured),
+    )
 
 
 def _resolve_base_dir() -> Path:
@@ -22,6 +44,8 @@ def _resolve_base_dir() -> Path:
     # Always derive defaults from source location, never from cwd.
     return Path(__file__).resolve().parents[2]
 
+
+_configure_settings_storage()
 
 BASE_DIR = _resolve_base_dir()
 DATA_DIR = _resolve_path_setting("PAPAGUI_DATA_DIR") or (BASE_DIR / "data")

@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self._shutdown_started = False
         self.setWindowTitle(WINDOW_TITLE)
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(920, 640)
@@ -172,6 +173,8 @@ class MainWindow(QMainWindow):
         self.initialization_timer.start(0)
 
     def _on_content_progress(self, state: dict):
+        if self._shutdown_started:
+            return
         if self.settings_popup is not None:
             self.settings_popup.set_content_index_state(state)
         if str(state.get("status") or "") != "running":
@@ -184,6 +187,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_content_finished(self, state: dict):
+        if self._shutdown_started:
+            return
         if self.settings_popup is not None:
             self.settings_popup.set_content_index_state(state)
         status = str(state.get("status") or "")
@@ -210,11 +215,13 @@ class MainWindow(QMainWindow):
             )
 
     def _start_content_indexing_if_enabled(self) -> bool:
-        if not self.index_options.content_indexing_enabled:
+        if self._shutdown_started or not self.index_options.content_indexing_enabled:
             return False
         return self.content_job_controller.start_or_adopt()
 
     def _initialize_data_source(self):
+        if self._shutdown_started:
+            return
         if not has_configured_index_source():
             dialog = OnboardingDialog(parent=self)
             if dialog.exec() != QDialog.Accepted or dialog.selected_path is None:
@@ -228,6 +235,8 @@ class MainWindow(QMainWindow):
         self._start_filesystem_monitor()
 
     def _try_reconnect_source(self):
+        if self._shutdown_started:
+            return
         if not self.index_source.exists() or not self.index_source.is_dir():
             return
         self.source_reconnect_timer.stop()
@@ -332,6 +341,8 @@ class MainWindow(QMainWindow):
         self.index_controller.finished.connect(self.on_indexing_complete)
 
     def _show_route(self, entry: NavigationEntry):
+        if self._shutdown_started:
+            return
         if entry.page == "search":
             self.page_stack.setCurrentWidget(self.search_page)
             return
@@ -414,9 +425,13 @@ class MainWindow(QMainWindow):
                 self._show_from_tray()
 
     def open_customer_page(self, customer_id: int):
+        if self._shutdown_started:
+            return
         self.navigator.navigate("customer", customer_id)
 
     def open_folder_page(self, folder_path: str):
+        if self._shutdown_started:
+            return
         if folder_path:
             self.navigator.navigate("folder", folder_path)
 
@@ -456,6 +471,8 @@ class MainWindow(QMainWindow):
             )
 
     def manage_folder_customer(self, folder_path: str, folder_name: str):
+        if self._shutdown_started:
+            return
         dialog = CustomerEditorDialog(
             repository=self.customer_repository,
             folder_path=folder_path,
@@ -470,12 +487,16 @@ class MainWindow(QMainWindow):
             self.navigator.navigate("customer", customer.id)
 
     def _on_customer_changed(self, _customer_id: int):
+        if self._shutdown_started:
+            return
         self._refresh_statistics()
         self._refresh_customer_results_only()
         if self.navigator.current.page == "customer":
             self._show_route(self.navigator.current)
 
     def _show_initial_customers(self):
+        if self._shutdown_started:
+            return
         customers = [
             customer
             for customer_id in self.recent_customer_history.ids()
@@ -497,6 +518,8 @@ class MainWindow(QMainWindow):
             )
 
     def _refresh_customer_results_only(self):
+        if self._shutdown_started:
+            return
         query = self.header.query()
         if query:
             customers = self.customer_repository.search(
@@ -510,6 +533,8 @@ class MainWindow(QMainWindow):
         self.search_page.set_customers(customers, len(customers))
 
     def on_search_text_changed(self, text: str):
+        if self._shutdown_started:
+            return
         self.search_generation += 1
         self._cancel_outdated_searches()
         self.search_debounce.stop()
@@ -529,11 +554,15 @@ class MainWindow(QMainWindow):
         self.search_debounce.start()
 
     def _start_live_search(self):
+        if self._shutdown_started:
+            return
         query = self.header.query()
         if len(query) >= 2:
             self._launch_visible_searches(query, self.search_generation)
 
     def start_full_search(self):
+        if self._shutdown_started:
+            return
         query = self.header.query()
         if len(query) < 2:
             self.status_bar.set_text("Bitte mindestens zwei Zeichen eingeben.")
@@ -550,6 +579,8 @@ class MainWindow(QMainWindow):
         self._launch_visible_searches(query, self.search_generation)
 
     def _launch_visible_searches(self, query: str, generation: int):
+        if self._shutdown_started:
+            return
         categories = ["customers", "folders"]
         if self.index_options.content_search_enabled:
             categories.append("text")
@@ -581,6 +612,8 @@ class MainWindow(QMainWindow):
         results,
         error: str,
     ):
+        if self._shutdown_started:
+            return
         if generation != self.search_generation:
             return
         if error:
@@ -656,6 +689,8 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_search_facets(self):
+        if self._shutdown_started:
+            return
         try:
             facets = self.index_manager.get_search_facets()
         except Exception:
@@ -677,6 +712,8 @@ class MainWindow(QMainWindow):
         self._update_filter_button()
 
     def _on_filter_changed(self):
+        if self._shutdown_started:
+            return
         self.search_preferences.save(
             self.filter_popup.sort_combo.currentData() or SearchSort.RELEVANCE,
             self.filter_popup.include_subfolders_checkbox.isChecked(),
@@ -689,6 +726,8 @@ class MainWindow(QMainWindow):
         self.header.set_filter_count(self.filter_popup.active_filter_count())
 
     def open_filter_popup(self):
+        if self._shutdown_started:
+            return
         if self.filter_popup.isVisible():
             self.filter_popup.close()
             return
@@ -716,6 +755,8 @@ class MainWindow(QMainWindow):
             self.index_tray_window.update()
 
     def open_settings_popup(self):
+        if self._shutdown_started:
+            return
         self.filter_popup.close()
         if self.settings_popup is not None and self.settings_popup.isVisible():
             self.settings_popup.close()
@@ -803,6 +844,8 @@ class MainWindow(QMainWindow):
         self._refresh_settings_popup_data()
 
     def pause_content_indexing(self):
+        if self._shutdown_started:
+            return
         self.content_job_controller.pause()
         self.status_bar.set_text(
             "Dateiindizierung wird pausiert …"
@@ -811,6 +854,8 @@ class MainWindow(QMainWindow):
         )
 
     def resume_content_indexing(self):
+        if self._shutdown_started:
+            return
         if not self.index_options.content_indexing_enabled:
             self.status_bar.set_text(
                 "Dateiindizierung ist in den Einstellungen deaktiviert"
@@ -820,6 +865,8 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text("Dateiindizierung wird fortgesetzt …")
 
     def confirm_rebuild_content_index(self):
+        if self._shutdown_started:
+            return
         answer = self._settings_question(
             "Dokumentindex neu aufbauen",
             "Der vorhandene Dokumentindex wird verworfen und aus den Originaldateien "
@@ -829,6 +876,8 @@ class MainWindow(QMainWindow):
             self._start_content_maintenance("rebuild")
 
     def confirm_clear_content_index(self):
+        if self._shutdown_started:
+            return
         answer = self._settings_question(
             "Dokumentindex löschen",
             "Alle extrahierten Dokumentinhalte werden gelöscht. Originaldateien, "
@@ -855,6 +904,8 @@ class MainWindow(QMainWindow):
         return operation()
 
     def _start_content_maintenance(self, action: str):
+        if self._shutdown_started:
+            return
         if (
             self.content_maintenance_worker is not None
             and self.content_maintenance_worker.isRunning()
@@ -899,6 +950,8 @@ class MainWindow(QMainWindow):
 
     def _on_content_maintenance_complete(self, action: str, result, error: str):
         self.content_maintenance_worker = None
+        if self._shutdown_started:
+            return
         if error:
             self.status_bar.set_text(f"Dokumentindex-Wartung fehlgeschlagen: {error}")
             self._settings_warning("Dokumentindex-Wartung", error)
@@ -921,6 +974,8 @@ class MainWindow(QMainWindow):
             self.settings_popup.nav_list.setCurrentRow(1)
 
     def _start_settings_data_load(self):
+        if self._shutdown_started:
+            return
         if self.settings_data_worker is not None and self.settings_data_worker.isRunning():
             self.settings_data_worker.requestInterruption()
             self.settings_data_worker.wait()
@@ -935,7 +990,7 @@ class MainWindow(QMainWindow):
         self.settings_data_worker.start()
 
     def _refresh_settings_popup_data(self):
-        if self.settings_popup is None:
+        if self._shutdown_started or self.settings_popup is None:
             return
         self.settings_popup.set_backups_loading()
         self.settings_popup.set_diagnostics_loading()
@@ -944,6 +999,8 @@ class MainWindow(QMainWindow):
         self._start_settings_data_load()
 
     def _refresh_statistics(self):
+        if self._shutdown_started:
+            return
         if (
             self.statistics_worker is not None
             and self.statistics_worker.isRunning()
@@ -969,11 +1026,14 @@ class MainWindow(QMainWindow):
             worker.deleteLater()
             if self.statistics_worker is worker:
                 self.statistics_worker = None
+        if self._shutdown_started:
+            self.statistics_refresh_pending = False
+            return
         if self.statistics_refresh_pending:
             self._refresh_statistics()
 
     def _on_settings_data_loaded(self, payload):
-        if self.settings_popup is None:
+        if self._shutdown_started or self.settings_popup is None:
             return
         self.settings_popup.set_backups(payload.get("backups", []))
         self.settings_popup.set_diagnostics(payload.get("diagnostics"))
@@ -1050,6 +1110,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._cleanup_blacklisted_values)
 
     def _cleanup_blacklisted_values(self):
+        if self._shutdown_started:
+            return
         if (
             self.blacklist_cleanup_worker is not None
             and self.blacklist_cleanup_worker.isRunning()
@@ -1065,6 +1127,8 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_blacklist_cleanup_complete(self, result: dict, error: str):
+        if self._shutdown_started:
+            return
         if error:
             QMessageBox.warning(self, "Blocklisten-Bereinigung", error)
             return
@@ -1242,6 +1306,8 @@ class MainWindow(QMainWindow):
         full_rebuild: bool,
         status_text: str,
     ):
+        if self._shutdown_started:
+            return
         if self.index_controller.is_active():
             return
         self.status_bar.set_busy(True)
@@ -1260,6 +1326,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Indexierung", str(exc))
 
     def on_indexing_progress(self, processed_count: int, current_path: str):
+        if self._shutdown_started:
+            return
         filename = Path(current_path).name
         self.status_bar.set_text(
             f"Indexierung: {processed_count} Dateien geprüft · {filename}"
@@ -1277,6 +1345,8 @@ class MainWindow(QMainWindow):
             self.status_bar.set_text("Dateiindizierung wird abgebrochen …")
 
     def check_and_index(self):
+        if self._shutdown_started:
+            return
         if self.index_controller.is_active():
             state = self.index_controller.current_state()
             source_value = state.get("source")
@@ -1316,6 +1386,8 @@ class MainWindow(QMainWindow):
         )
 
     def on_index_ready(self, state):
+        if self._shutdown_started:
+            return
         build_path_value = str(state.get("build_path") or "")
         if not build_path_value:
             return
@@ -1335,6 +1407,8 @@ class MainWindow(QMainWindow):
             )
 
     def on_indexing_complete(self, state):
+        if self._shutdown_started:
+            return
         self.status_bar.set_busy(False)
         if self.settings_popup is not None:
             self.settings_popup.set_indexing(False)
@@ -1411,6 +1485,8 @@ class MainWindow(QMainWindow):
             )
 
     def _activate_built_index(self, build_path: Path):
+        if self._shutdown_started:
+            return
         self.search_generation += 1
         self._cancel_outdated_searches()
         for search_worker in tuple(self.search_workers):
@@ -1426,7 +1502,9 @@ class MainWindow(QMainWindow):
         self._refresh_statistics()
 
     def _reconcile_content_queue(self):
-        if not isinstance(self.index_manager, CatalogIndexManager):
+        if self._shutdown_started or not isinstance(
+            self.index_manager, CatalogIndexManager
+        ):
             return
         with ContentStateRepository.open_recoverable(INDEX_LAYOUT) as state:
             self.index_manager.reconcile_content_state(
@@ -1438,6 +1516,8 @@ class MainWindow(QMainWindow):
             )
 
     def _reload_active_index(self):
+        if self._shutdown_started:
+            return
         self.search_generation += 1
         self._cancel_outdated_searches()
         for search_worker in tuple(self.search_workers):
@@ -1449,6 +1529,8 @@ class MainWindow(QMainWindow):
         self._refresh_statistics()
 
     def _start_filesystem_monitor(self):
+        if self._shutdown_started:
+            return
         if self.filesystem_monitor is not None:
             self.filesystem_monitor.requestInterruption()
             self.filesystem_monitor.wait()
@@ -1478,12 +1560,16 @@ class MainWindow(QMainWindow):
             self.catalog_reconciliation_timer.start()
 
     def _start_daily_catalog_reconciliation(self):
+        if self._shutdown_started:
+            return
         if self.index_controller.is_active() or not self.index_source.exists():
             return
         self.status_bar.set_text("Täglicher Katalogabgleich wird gestartet …")
         self._start_incremental_filesystem_sync()
 
     def _on_filesystem_changes(self, changes):
+        if self._shutdown_started:
+            return
         if self.index_controller.is_active():
             self.pending_filesystem_sync = True
             return
@@ -1493,6 +1579,8 @@ class MainWindow(QMainWindow):
         self._start_incremental_filesystem_sync()
 
     def _start_incremental_filesystem_sync(self):
+        if self._shutdown_started:
+            return
         if self.index_controller.is_active():
             self.pending_filesystem_sync = True
             return
@@ -1503,6 +1591,8 @@ class MainWindow(QMainWindow):
         )
 
     def on_index_options_changed(self, options):
+        if self._shutdown_started:
+            return
         previous_options = self.index_options
         indexing_contract_changed = (
             previous_options.catalog_fingerprint() != options.catalog_fingerprint()
@@ -1583,53 +1673,104 @@ class MainWindow(QMainWindow):
                 str(exc),
             )
 
-    def closeEvent(self, event):
-        self.initialization_timer.stop()
-        self.search_debounce.stop()
-        for worker in tuple(self.search_workers):
-            worker.requestInterruption()
-        for worker in tuple(self.search_workers):
-            worker.wait()
-        if (
-            self.filesystem_monitor is not None
-            and self.filesystem_monitor.isRunning()
-        ):
-            self.filesystem_monitor.requestInterruption()
-            self.filesystem_monitor.wait()
-        if (
-            self.settings_data_worker is not None
-            and self.settings_data_worker.isRunning()
-        ):
-            self.settings_data_worker.requestInterruption()
-            self.settings_data_worker.wait()
-        if (
-            self.statistics_worker is not None
-            and self.statistics_worker.isRunning()
-        ):
-            self.statistics_worker.requestInterruption()
-            self.statistics_worker.wait()
-        if (
-            self.content_maintenance_worker is not None
-            and self.content_maintenance_worker.isRunning()
-        ):
-            self.content_maintenance_worker.wait()
-        if (
-            self.blacklist_cleanup_worker is not None
-            and self.blacklist_cleanup_worker.isRunning()
-        ):
-            self.blacklist_cleanup_worker.wait()
-        self.folder_page.cleanup()
+    @staticmethod
+    def _stop_worker_for_shutdown(worker):
+        if worker is None:
+            return
         try:
-            DocumentConverter.clear_word_preview_cache()
+            running = worker.isRunning()
+        except RuntimeError:
+            return
+        if not running:
+            return
+        try:
+            worker.requestInterruption()
+        except RuntimeError:
+            pass
+        try:
+            worker.wait()
+        except RuntimeError:
+            pass
+
+    @staticmethod
+    def _run_shutdown_step(description: str, operation):
+        try:
+            operation()
         except Exception:
-            LOGGER.exception("Word-Preview-Cache konnte nicht gelöscht werden.")
-        self.index_manager.close()
-        self.customer_repository.close()
-        self.index_controller.release_owner()
+            LOGGER.exception("Shutdown-Schritt fehlgeschlagen: %s", description)
+
+    def closeEvent(self, event):
+        if self._shutdown_started:
+            event.accept()
+            return
+
+        # This flag must be set before stopping any worker. Signals that were
+        # already queued can otherwise start follow-up work against databases
+        # closed later in this method.
+        self._shutdown_started = True
+        self.search_generation += 1
+        self.statistics_refresh_pending = False
+        self.pending_filesystem_sync = False
+        self.pending_content_restart = False
+        self.pending_content_maintenance = None
+
+        for timer in (
+            self.initialization_timer,
+            self.search_debounce,
+            self.source_reconnect_timer,
+            self.catalog_reconciliation_timer,
+        ):
+            self._run_shutdown_step("Timer stoppen", timer.stop)
+
+        # Both detached index processes may continue. The window only gives up
+        # ownership and stops polling so no more GUI callbacks are generated.
+        self._run_shutdown_step(
+            "Katalogindex-Beobachtung beenden",
+            self.index_controller.release_owner,
+        )
+        self._run_shutdown_step(
+            "Inhaltsindex-Beobachtung beenden",
+            self.content_job_controller.stop_observing,
+        )
+
+        for worker in tuple(self.search_workers):
+            self._run_shutdown_step(
+                "Such-Worker beenden",
+                lambda worker=worker: self._stop_worker_for_shutdown(worker),
+            )
+        self.search_workers.clear()
+
+        for attribute, description in (
+            ("filesystem_monitor", "Dateisystemüberwachung beenden"),
+            ("settings_data_worker", "Einstellungs-Worker beenden"),
+            ("statistics_worker", "Statistik-Worker beenden"),
+            ("content_maintenance_worker", "Inhaltsindex-Wartung beenden"),
+            ("blacklist_cleanup_worker", "Blocklisten-Worker beenden"),
+        ):
+            worker = getattr(self, attribute)
+            self._run_shutdown_step(
+                description,
+                lambda worker=worker: self._stop_worker_for_shutdown(worker),
+            )
+            setattr(self, attribute, None)
+
+        self._run_shutdown_step("Dateivorschau beenden", self.folder_page.cleanup)
+        self._run_shutdown_step(
+            "Word-Preview-Cache löschen",
+            DocumentConverter.clear_word_preview_cache,
+        )
+        self._run_shutdown_step("Dokumentindex schließen", self.index_manager.close)
+        self._run_shutdown_step(
+            "Kundendatenbank schließen",
+            self.customer_repository.close,
+        )
         if self.tray_icon is not None:
-            self.tray_icon.hide()
+            self._run_shutdown_step("Tray-Icon ausblenden", self.tray_icon.hide)
         if self.index_tray_window is not None:
-            self.index_tray_window.close()
+            self._run_shutdown_step(
+                "Indexstatusfenster schließen",
+                self.index_tray_window.close,
+            )
         event.accept()
 
 

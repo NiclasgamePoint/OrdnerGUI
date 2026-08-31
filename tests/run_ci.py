@@ -7,6 +7,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+DEFAULT_MODULE_TIMEOUT_SECONDS = 300.0
+MODULE_TIMEOUT_EXIT_CODE = 124
 
 
 def test_modules(test_root: Path) -> list[str]:
@@ -18,12 +23,72 @@ def test_modules(test_root: Path) -> list[str]:
     ]
 
 
-def run_module(module: str, project_root: Path, coverage: bool) -> int:
+def _module_environment(test_root: Path) -> dict[str, str]:
+    directories = {
+        "data": test_root / "data",
+        "source": test_root / "source",
+        "config": test_root / "config",
+    }
+    for directory in directories.values():
+        directory.mkdir(parents=True, exist_ok=True)
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PAPAGUI_TEST_ROOT": str(test_root),
+            "PAPAGUI_DATA_DIR": str(directories["data"]),
+            "PAPAGUI_SOURCE_DIR": str(directories["source"]),
+            "PAPAGUI_SETTINGS_DIR": str(directories["config"]),
+            "XDG_CONFIG_HOME": str(directories["config"]),
+            "APPDATA": str(directories["config"]),
+            "LOCALAPPDATA": str(directories["config"]),
+        }
+    )
+    environment.setdefault("QT_QPA_PLATFORM", "offscreen")
+    return environment
+
+
+def run_module(
+    module: str,
+    project_root: Path,
+    coverage: bool,
+    timeout_seconds: float = DEFAULT_MODULE_TIMEOUT_SECONDS,
+) -> int:
     command = [sys.executable]
     if coverage:
         command += ["-m", "coverage", "run", "--parallel-mode"]
     command += ["-m", "unittest", module, "-v"]
-    return subprocess.run(command, cwd=project_root, check=False).returncode
+
+    safe_name = module.replace(".", "-")
+    try:
+        with TemporaryDirectory(prefix=f"papagui-{safe_name}-") as directory:
+            test_root = Path(directory).resolve()
+            environment = _module_environment(test_root)
+            try:
+                return subprocess.run(
+                    command,
+                    cwd=project_root,
+                    check=False,
+                    env=environment,
+                    timeout=timeout_seconds,
+                ).returncode
+            except subprocess.TimeoutExpired:
+                print(
+                    f"TIMEOUT: Test module '{module}' exceeded "
+                    f"{timeout_seconds:g} seconds and was terminated. "
+                    "Its isolated test data will be removed.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return MODULE_TIMEOUT_EXIT_CODE
+    except OSError as error:
+        print(
+            f"ERROR: Test module '{module}' could not be executed in its "
+            f"isolated environment: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
 
 
 def coverage_command(project_root: Path, *arguments: str) -> int:
@@ -41,7 +106,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="collect, combine and enforce project coverage",
     )
+    parser.add_argument(
+        "--module-timeout",
+        type=float,
+        default=DEFAULT_MODULE_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=(
+            "maximum runtime for each test module "
+            f"(default: {DEFAULT_MODULE_TIMEOUT_SECONDS:g} seconds)"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.module_timeout <= 0:
+        parser.error("--module-timeout must be greater than zero")
 
     project_root = Path(__file__).resolve().parent.parent
     test_root = Path(__file__).parent
@@ -53,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     for module in test_modules(test_root):
         print(f"\n=== {module} ===", flush=True)
-        if run_module(module, project_root, args.coverage):
+        if run_module(
+            module,
+            project_root,
+            args.coverage,
+            args.module_timeout,
+        ):
             failures.append(module)
 
     if failures:

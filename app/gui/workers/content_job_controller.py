@@ -125,3 +125,7 @@ class ContentJobController(QObject):
     def resume(self) -> bool:
         pause_path(self.state_dir).unlink(missing_ok=True)
         return self.start_or_adopt()
+
+    def stop_observing(self):
+        """Stop GUI-side polling without cancelling the independent worker."""
+        self._timer.stop()

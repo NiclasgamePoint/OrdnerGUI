@@ -43,6 +43,32 @@ class ConfigPathTests(unittest.TestCase):
             module = importlib.import_module(module_name)
             importlib.reload(module)
 
+    def test_settings_directory_override_uses_portable_ini_storage(self):
+        from PySide6.QtCore import QSettings
+
+        from app.core import config
+
+        previous = os.environ.get("PAPAGUI_SETTINGS_DIR")
+        try:
+            with TemporaryDirectory() as directory:
+                settings_root = Path(directory).resolve()
+                os.environ["PAPAGUI_SETTINGS_DIR"] = str(settings_root)
+                config = importlib.reload(config)
+
+                settings = QSettings(config.SETTINGS_ORG, config.SETTINGS_APP)
+                settings_path = Path(settings.fileName()).resolve()
+                self.assertEqual(
+                    QSettings.defaultFormat(),
+                    QSettings.Format.IniFormat,
+                )
+                self.assertTrue(settings_path.is_relative_to(settings_root))
+        finally:
+            if previous is None:
+                os.environ.pop("PAPAGUI_SETTINGS_DIR", None)
+            else:
+                os.environ["PAPAGUI_SETTINGS_DIR"] = previous
+            importlib.reload(config)
+
     def test_customer_recognition_defaults_to_enabled_without_saved_value(self):
         from app.core import config
 

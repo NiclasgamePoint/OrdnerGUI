@@ -21,9 +21,10 @@ from app.gui.settings_popup import SettingsPopup
 from app.services.customer_recognition import CustomerRecognitionService
 import main as application_main
 from main import show_main_window
+from tests.base.main_window_test_case import MainWindowTestCase
 
 
-class GuiSmokeTests(unittest.TestCase):
+class GuiSmokeTests(MainWindowTestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
