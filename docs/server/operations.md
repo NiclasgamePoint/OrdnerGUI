@@ -1,0 +1,247 @@
+# Serverbetrieb mit Docker und Synology
+
+## Volumes und Rechte
+
+Der Container verwendet drei klar getrennte Pfade:
+
+| Containerpfad | Rechte | Inhalt |
+| --- | --- | --- |
+| `/source` | read-only | Gemountete Bauvorhaben/Dokumente |
+| `/data` | read-write | Index, `customers.db`, Generationen, Backups und Jobstatus |
+| `/config` | read-write | Servereinstellungen und Passwort-Hash |
+
+Nur eine Serverinstanz darf dasselbe `/data`-Volume verwenden. Die konfigurierte
+UID/GID benötigt Leserechte auf der Quelle und Schreibrechte auf Daten und
+Konfiguration.
+
+Die Compose-Datei bindet Port 8765 standardmäßig ausschließlich an
+`127.0.0.1`. `PAPAGUI_API_BIND_ADDRESS=0.0.0.0` ist nur für einen bewusst
+abgesicherten direkten LAN-Zugriff vorgesehen. `/config/api-token` und
+`/config/admin-password-hash` werden als UTF-8-Dateien gelesen; ihre Werte sind
+nicht Bestandteil der Containerumgebung und deshalb nicht über
+`docker inspect` sichtbar.
+
+## Lokaler Start
+
+```bash
+cp deploy/server/.env.example deploy/server/.env
+```
+
+In `.env` werden absolute Quell-, Daten- und Configpfade, `source_id`, UID/GID
+und die Bind-Adresse eingetragen. Secrets gehören weder in Git noch in `.env`
+oder Compose-Dateien. Vor dem ersten Start wird zunächst das Image gebaut:
+
+```bash
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml build
+```
+
+Danach die beiden Secretdateien argv-sicher erzeugen. Das Passwort wird verdeckt
+vom Terminal gelesen und gelangt nur über stdin in den kurzlebigen Container:
+
+```bash
+PAPAGUI_SECRET_DIR=/volume1/docker/papagui/config
+mkdir -p "$PAPAGUI_SECRET_DIR"
+chmod 700 "$PAPAGUI_SECRET_DIR"
+umask 077
+docker run --rm --entrypoint python papagui-server:0.4.2 \
+  -c 'import secrets; print(secrets.token_urlsafe(32))' \
+  > "$PAPAGUI_SECRET_DIR/api-token"
+read -r -s -p 'Adminpasswort: ' PAPAGUI_ADMIN_PASSWORD_INPUT
+printf '%s' "$PAPAGUI_ADMIN_PASSWORD_INPUT" \
+  | docker run --rm -i papagui-server:0.4.2 hash-password --stdin \
+  > "$PAPAGUI_SECRET_DIR/admin-password-hash"
+unset PAPAGUI_ADMIN_PASSWORD_INPUT
+chmod 600 "$PAPAGUI_SECRET_DIR/api-token" \
+  "$PAPAGUI_SECRET_DIR/admin-password-hash"
+```
+
+Nun starten und prüfen:
+
+```bash
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml up -d
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml ps
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml logs -f papagui-server
+```
+
+Der Healthcheck prüft `GET /health`. Fachlicher Indexfortschritt und letzte
+Fehler stehen unter `/v2/server/status` und im Client-Tray.
+
+## Beenden und Neustarten
+
+```bash
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml stop papagui-server
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml start papagui-server
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml down
+```
+
+Die Compose-Interpolation für `down` verwendet sichere Defaults und darf nicht
+von einer aktuell gemounteten Datenquelle abhängen. Das Tray kann einen
+kontrollierten Prozessneustart anfordern; `restart: unless-stopped` startet den
+Container anschließend wieder.
+
+Der gleiche Pfad wird vor einem Release mit `bash tools/docker_smoke.sh`
+geprüft. Der Smoke-Test beobachtet den Prozess-Exitcode 75, den anschließenden
+automatischen Containerneustart und den Fortbestand von Indexgenerationen und
+Servereinstellungen. Außerdem stellt er sicher, dass weder Qt, `app` noch das
+Clientpaket im Serverimage importierbar sind.
+
+## Erstkonfiguration
+
+- Den Wert aus `api-token` über einen geschützten Kanal in die
+  Clientkonfigurationen übernehmen. Die Datei selbst nicht in eine gemeinsame
+  Benutzerfreigabe legen.
+- Für Docker/NAS ausschließlich die Hashdatei verwenden. Direkte Variablen
+  `PAPAGUI_API_TOKEN`, `PAPAGUI_ADMIN_PASSWORD_HASH` und die Bootstrap-Variable
+  `PAPAGUI_ADMIN_PASSWORD` sind nur für gezielte manuelle Starts kompatibel;
+  Umgebungswerte sind über Containerinspektion sichtbar.
+- Automatisches Indexintervall zwischen 15 Minuten und 48 Stunden wählen.
+- Reverse Proxy und HTTPS konfigurieren, bevor die API außerhalb eines
+  vertrauenswürdigen Netzes erreichbar ist.
+
+Beim ersten erfolgreichen Lauf speichert der Server in
+`/config/source-identity.json` eine Identität des nicht leeren Quellroots. Ein
+leerer oder erkennbar ausgetauschter Mount wird danach abgewiesen und niemals
+als Löschung aller Dokumente veröffentlicht. Bei einem absichtlichen Wechsel
+zuerst Backup anlegen, den neuen Mount manuell prüfen und die bestehende
+Identitätsdatei in eine `.previous`-Datei umbenennen; erst dann darf sie durch
+einen beaufsichtigten Lauf neu angelegt werden.
+
+## Backup und Restore
+
+Die integrierte Generationenverwaltung hält aktiv plus drei Vorgänger. Sie
+ersetzt kein externes NAS-Backup.
+
+Für ein konsistentes externes Backup:
+
+1. Laufenden Indexjob beenden oder abschließen lassen.
+2. Container stoppen.
+3. `/data` und `/config` gemeinsam sichern.
+4. Container wieder starten und Healthcheck prüfen.
+
+Beispiel für eine wiederherstellbare gemeinsame Sicherung auf dem NAS (den
+Zeitstempel im Dateinamen bewusst setzen):
+
+```bash
+PAPAGUI_BACKUP_FILE=/volume1/backups/papagui/server-0.4.2-20260902T2100.tar.gz
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml stop papagui-server
+tar -C /volume1/docker -czf "$PAPAGUI_BACKUP_FILE" papagui/data papagui/config
+tar -tzf "$PAPAGUI_BACKUP_FILE"
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml start papagui-server
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml ps
+```
+
+Restore:
+
+1. Container stoppen.
+2. Aktuelle Volumes zusätzlich sichern.
+3. Gewünschte Sicherung nach `/data` und `/config` zurückspielen.
+4. Eigentümer und Rechte kontrollieren.
+5. Server starten, SQLite-Integrität und `/health` prüfen.
+
+Die vorhandenen Verzeichnisse beim Restore nicht löschen, sondern zunächst
+umbenennen. Damit ist ein fehlgeschlagener Restore direkt rücknehmbar:
+
+```bash
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml stop papagui-server
+mv /volume1/docker/papagui/data /volume1/docker/papagui/data.before-restore
+mv /volume1/docker/papagui/config /volume1/docker/papagui/config.before-restore
+tar -C /volume1/docker -xzf /volume1/backups/papagui/server-0.4.2-20260902T2100.tar.gz
+chown -R 1026:100 /volume1/docker/papagui/data /volume1/docker/papagui/config
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml up -d
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml exec papagui-server \
+  python -c "import sqlite3; c=sqlite3.connect('/data/customers.db'); assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'"
+```
+
+Erst nach erfolgreichem Healthcheck, SQLite-Prüfung und einem Testclient dürfen
+die `.before-restore`-Verzeichnisse nach der betrieblichen Aufbewahrungsfrist
+entfernt werden.
+
+Der Docker-Smoke validiert `snapshot_sqlite` und den atomaren Restore an
+temporären Kopien der Kundendatenbank. Er überschreibt dabei niemals die aktive
+`customers.db`; der betriebliche Restore bleibt weiterhin ein bewusstes
+Offline-Verfahren nach den obigen Schritten.
+
+## Upgrade und Rollback
+
+Vor einem Upgrade werden beide Volumes gesichert. Datenmigrationen laufen
+idempotent und aktivieren neue Generationen erst nach vollständiger Prüfung.
+Ein Rollback auf 0.4.1 benötigt das dazugehörige alte Volume-Backup; das
+Generationsschema v2 wird vom Legacyserver nicht geschrieben.
+
+Konkreter Upgradeablauf für ein lokal gebautes, noch nicht veröffentlichtes
+Image:
+
+1. Server-/Configbackup wie oben erstellen und validieren.
+2. Gewünschten `server-v<version>`-Quellstand auschecken.
+3. `docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml build --pull`.
+4. `docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml up -d`.
+5. Health, Serverversion, letzten Indexstatus und einen Clientdownload prüfen.
+
+Rollback bedeutet immer Code **und** das vor dem Upgrade gemeinsam gesicherte
+`data`/`config`-Paar zurückzunehmen. Nur das alte Image gegen bereits migrierte
+Volumes zu starten ist nicht freigegeben. Den Restore wie oben mit umbenannten
+aktuellen Verzeichnissen durchführen und anschließend das vorherige Image neu
+bauen/starten.
+
+## Synology
+
+Das Zielimage wird für `linux/amd64` und `linux/arm64` vorbereitet. ARMv7 ist
+nicht vorgesehen. Über SSH liefert `id <dienstkonto>` die numerische UID/GID.
+Diese Werte werden in `.env` eingetragen; danach gehören Daten und Config dem
+Dienstkonto, die Quelle benötigt nur Leserechte:
+
+```bash
+id papagui
+mkdir -p /volume1/docker/papagui/data /volume1/docker/papagui/config
+chown -R 1026:100 /volume1/docker/papagui/data /volume1/docker/papagui/config
+chmod 750 /volume1/docker/papagui/data /volume1/docker/papagui/config
+chmod 600 /volume1/docker/papagui/config/api-token \
+  /volume1/docker/papagui/config/admin-password-hash
+```
+
+Im Container Manager werden dieselben absoluten NAS-Pfade eingetragen;
+`/source` bleibt read-only. Empfohlene DSM-Konfiguration:
+
+1. Unter **Systemsteuerung → Sicherheit → Zertifikat** ein gültiges Zertifikat
+   für den Servernamen importieren oder per Let's Encrypt ausstellen.
+2. Unter **Anmeldeportal → Erweitert → Reverse Proxy** eine HTTPS-Quelle auf
+   Port 443 und als Ziel `http://127.0.0.1:8765` anlegen; dort das Zertifikat
+   zuordnen.
+3. In der DSM-Firewall TCP 443 nur für die benötigten Clientnetze erlauben.
+   Port 8765 nicht freigeben; `PAPAGUI_API_BIND_ADDRESS=127.0.0.1` beibehalten.
+4. Clients auf die HTTPS-URL konfigurieren und Zertifikatsprüfung nicht
+   deaktivieren.
+
+Falls ein separates Reverse-Proxy-System den NAS über das LAN erreichen muss,
+darf die Bind-Adresse gezielt auf eine interne NAS-IP oder `0.0.0.0` gesetzt
+werden. Dann Port 8765 per DSM-Firewall ausschließlich für die Proxy-IP öffnen;
+direkter unverschlüsselter Clientzugriff bleibt nicht freigegeben.
+
+Die Quelldisk darf zeitweise fehlen. In diesem Zustand startet kein Indexlauf,
+der Server darf den letzten gültigen Stand aber weiterhin ausliefern und darf
+das Fehlen nicht als Massendeletion interpretieren.
+
+## Diagnose
+
+- `GET /health`: Prozess erreichbar
+- `GET /v2/system/info`: Versionen und Fähigkeiten
+- `GET /v2/server/status`: Laufphase, Fortschritt und Fehler
+- Containerlogs: technische Start- und Laufzeitfehler
+- Generationsmanifeste: Komponentenversionen und Prüfsummen
+
+Nützliche Befehle:
+
+```bash
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml ps
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml logs --tail=200 papagui-server
+docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml logs -f papagui-server
+docker inspect --format '{{json .State.Health}}' papagui-server-papagui-server-1
+```
+
+Compose rotiert den lokalen `json-file`-Log bei 10 MiB und bewahrt drei Dateien.
+DSM-Log Center/Container Manager kann zusätzlich eine zentrale, zugriffsgeschützte
+Aufbewahrung übernehmen. Vor Supportexporten Secrets, Kundennamen und Quellpfade
+prüfen und nötigenfalls schwärzen.
+
+Tokens, Passwörter und vollständige Dokumentinhalte dürfen nicht in Logs
+geschrieben werden.

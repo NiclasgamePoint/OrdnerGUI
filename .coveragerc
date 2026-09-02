@@ -4,8 +4,9 @@ disable_warnings =
     module-not-imported
     no-data-collected
 source =
-    app
-    main
+    papagui_contracts
+    papagui_server
+    papagui_client
 
 [report]
 # HTTP/process adapters are additionally exercised by the real Docker smoke test.

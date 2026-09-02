@@ -1,0 +1,7 @@
+# Complete build frontend/backend environment used with ``python -m build --no-isolation``.
+build==1.6.0
+colorama==0.4.6; os_name == "nt"
+packaging==26.2
+pyproject-hooks==1.2.0
+setuptools==84.0.0
+wheel==0.48.0

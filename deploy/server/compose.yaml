@@ -1,0 +1,42 @@
+services:
+  papagui-server:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    image: papagui-server:0.4.2
+    init: true
+    restart: unless-stopped
+    user: "${PAPAGUI_UID:-1000}:${PAPAGUI_GID:-1000}"
+    environment:
+      PAPAGUI_SOURCE_DIR: /source
+      PAPAGUI_SOURCE_ID: ${PAPAGUI_SOURCE_ID:-primary}
+      PAPAGUI_DATA_DIR: /data
+      PAPAGUI_CONFIG_DIR: /config
+      PAPAGUI_API_TOKEN_FILE: /config/api-token
+      PAPAGUI_ADMIN_PASSWORD_HASH_FILE: /config/admin-password-hash
+      PAPAGUI_INDEX_INTERVAL_SECONDS: ${PAPAGUI_INDEX_INTERVAL_SECONDS:-86400}
+      PAPAGUI_INITIALIZE_SOURCE_IDENTITY: ${PAPAGUI_INITIALIZE_SOURCE_IDENTITY:-true}
+    volumes:
+      - type: bind
+        source: ${PAPAGUI_SOURCE_PATH:-../../Bauvorhaben}
+        target: /source
+        read_only: true
+      - type: bind
+        source: ${PAPAGUI_SERVER_DATA_PATH:-../../docker-data}
+        target: /data
+      - type: bind
+        source: ${PAPAGUI_SERVER_CONFIG_PATH:-../../docker-config}
+        target: /config
+    ports:
+      - "${PAPAGUI_API_BIND_ADDRESS:-127.0.0.1}:${PAPAGUI_API_PORT:-8765}:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

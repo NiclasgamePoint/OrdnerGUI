@@ -1,31 +1,38 @@
+# Compatibility Dockerfile for `docker build .`; canonical file: deploy/server/Dockerfile.
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
+
+LABEL org.opencontainers.image.title="PapaGUI Server" \
+      org.opencontainers.image.version="0.4.2"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive \
     PIP_ROOT_USER_ACTION=ignore \
-    QT_QPA_PLATFORM=offscreen \
-    PAPAGUI_DATA_DIR=/data \
     PAPAGUI_SOURCE_DIR=/source \
-    PAPAGUI_SETTINGS_DIR=/config
+    PAPAGUI_DATA_DIR=/data \
+    PAPAGUI_CONFIG_DIR=/config
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
         antiword \
         catdoc \
-        libreoffice-writer \
         poppler-utils \
         tesseract-ocr \
         tesseract-ocr-deu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/papagui
-
-COPY requirements-indexer-lock.txt ./
-RUN python -m pip install --no-cache-dir -r requirements-indexer-lock.txt
-
-COPY app ./app
+COPY packages/contracts ./packages/contracts
+COPY packages/server ./packages/server
+RUN python -m pip install --no-cache-dir -r ./packages/server/requirements-lock.txt \
+    && python -m pip install --no-cache-dir --no-deps ./packages/contracts \
+    && python -m pip install --no-cache-dir --no-deps ./packages/server \
+    && python -m pip check
 
 VOLUME ["/data", "/config"]
-ENTRYPOINT ["python", "-m", "app.services.index_service"]
-CMD ["--source", "/source", "--data", "/data", "--interval-seconds", "86400"]
+EXPOSE 8765
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
+    CMD ["python", "-c", "import json,urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3))"]
+
+ENTRYPOINT ["papagui-server"]
+CMD ["serve", "--source", "/source", "--data", "/data", "--config", "/config", "--port", "8765"]

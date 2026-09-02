@@ -1,18 +1,10 @@
-# Graphify
+# Entwicklungswerkzeuge
 
-https://github.com/Graphify-Labs/graphify
-```Bash
-pipx install graphifyy
-graphify install  
-graphify codex install
-```
+Die bisher hier abgelegte Graphify-Kurzanleitung wurde geprüft und in die
+reguläre Entwicklungsdokumentation übernommen:
 
-```Chat
-/graphify .
-```
+- [Graphify verwenden](docs/development/graphify.md)
+- [Entwicklungsumgebung](docs/development.md)
 
-```Bash
-python3 -m http.server 8000 --directory graphify-out
-```
-
-![Programm Preview](image.png)
+Dadurch existiert nur noch eine gepflegte Quelle für Installation,
+Aktualisierung und lokale HTML-Ansicht.

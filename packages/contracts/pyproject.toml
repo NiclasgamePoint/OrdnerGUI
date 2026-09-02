@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "papagui-contracts"
+dynamic = ["version"]
+description = "Dependency-free API and data contracts shared by PapaGUI client and server"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "PapaGUI"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Typing :: Typed",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+papagui_contracts = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = {attr = "papagui_contracts.__version__"}

@@ -1,0 +1,12 @@
+# Runtime lock for the full GUI extra of papagui-client 0.4.2.
+et_xmlfile==2.0.0
+lxml==6.1.1
+olefile==0.47
+openpyxl==3.1.5
+PySide6==6.11.1
+PySide6_Addons==6.11.1
+PySide6_Essentials==6.11.1
+python-docx==1.2.0
+shiboken6==6.11.1
+typing_extensions==4.16.0
+xlrd==2.0.2

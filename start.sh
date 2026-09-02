@@ -1,121 +1,163 @@
-#!/bin/bash
-# PapaGUI Startup-Script
+#!/usr/bin/env bash
+# Local convenience start: daemonized server build + independent tray + client.
 
+set -u
+umask 077
 cd "$(dirname "$0")"
 
-# Activate virtual environment (.venv preferred, then venv)
-if [ -f ".venv/bin/activate" ]; then
-	source .venv/bin/activate
-elif [ -f "venv/bin/activate" ]; then
-	source venv/bin/activate
+if [ -x ".venv/bin/python" ]; then
+  PAPAGUI_PYTHON="$PWD/.venv/bin/python"
+elif [ -x "venv/bin/python" ]; then
+  PAPAGUI_PYTHON="$PWD/venv/bin/python"
 else
-	echo "Keine virtuelle Umgebung gefunden (.venv oder venv)."
-	exit 1
+  echo "Keine virtuelle Umgebung gefunden (.venv oder venv)."
+  exit 1
 fi
 
-export PAPAGUI_EXTERNAL_INDEXER=1
+export PYTHONPATH="$PWD/packages/contracts/src:$PWD/packages/server/src:$PWD/packages/client/src${PYTHONPATH:+:$PYTHONPATH}"
 export PAPAGUI_INDEX_SERVER_URL="${PAPAGUI_INDEX_SERVER_URL:-http://127.0.0.1:8765}"
-export PAPAGUI_CLIENT_ROOT="${PAPAGUI_CLIENT_ROOT:-$PWD/client-data}"
-export PAPAGUI_CONFIG_PATH="${PAPAGUI_CONFIG_PATH:-$PWD/docker-config}"
-mkdir -p "$PAPAGUI_CONFIG_PATH"
-if [ -z "$PAPAGUI_API_TOKEN" ]; then
-	TOKEN_FILE="$PAPAGUI_CONFIG_PATH/api-token"
-	if [ ! -f "$TOKEN_FILE" ]; then
-		python -c 'import secrets,sys; open(sys.argv[1], "w", encoding="utf-8").write(secrets.token_urlsafe(32))' "$TOKEN_FILE"
-		chmod 600 "$TOKEN_FILE"
-	fi
-	PAPAGUI_API_TOKEN=$(<"$TOKEN_FILE")
-	export PAPAGUI_API_TOKEN
-fi
+export PAPAGUI_CLIENT_DATA_ROOT="${PAPAGUI_CLIENT_DATA_ROOT:-$PWD/client-data}"
+export PAPAGUI_SERVER_DATA_PATH="${PAPAGUI_SERVER_DATA_PATH:-$PWD/docker-server-data}"
+export PAPAGUI_SERVER_CONFIG_PATH="${PAPAGUI_SERVER_CONFIG_PATH:-$PWD/docker-config}"
+export PAPAGUI_SOURCE_ID="${PAPAGUI_SOURCE_ID:-primary}"
+mkdir -p "$PAPAGUI_CLIENT_DATA_ROOT" "$PAPAGUI_SERVER_DATA_PATH/logs" "$PAPAGUI_SERVER_CONFIG_PATH"
 
-# Docker owns catalog, customer recognition and content indexing. The GUI only
-# reads the persistent result, so both processes never write the same index.
-start_docker_indexer() {
-	if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-		echo "Docker Compose nicht verfügbar – PapaGUI startet ohne Docker-Indexer."
-		return
-	fi
-
-	if ! docker info >/dev/null 2>&1; then
-		echo "Docker läuft nicht – PapaGUI startet ohne Docker-Indexer."
-		return
-	fi
-
-	if [ -z "$PAPAGUI_SOURCE_PATH" ]; then
-		PAPAGUI_SOURCE_PATH=$(python -c 'from app.core.config import get_configured_index_source; print(get_configured_index_source().resolve())')
-	fi
-	if [ ! -d "$PAPAGUI_SOURCE_PATH" ]; then
-		echo "Docker-Indexer wartet: Datenquelle nicht gefunden: $PAPAGUI_SOURCE_PATH"
-		return
-	fi
-
-	export PAPAGUI_SOURCE_PATH
-	export PAPAGUI_INDEX_PATH="${PAPAGUI_INDEX_PATH:-$PWD/docker-server-data}"
-	export PAPAGUI_UID="${PAPAGUI_UID:-$(id -u)}"
-	export PAPAGUI_GID="${PAPAGUI_GID:-$(id -g)}"
-	mkdir -p "$PAPAGUI_INDEX_PATH/logs" "$PAPAGUI_CONFIG_PATH"
-
-	(
-		if docker buildx version >/dev/null 2>&1; then
-			docker compose up -d --build indexer
-		else
-			echo "Docker Buildx fehlt – verwende den klassischen Docker-Builder."
-			DOCKER_BUILDKIT=0 docker build -t papagui-indexer:0.4.1 . && \
-				docker compose up -d --no-build indexer
-		fi
-	) >"$PAPAGUI_INDEX_PATH/logs/docker-indexer-startup.log" 2>&1 &
-	echo "Docker-Indexer wird im Hintergrund gebaut und gestartet."
+protect_secret_file() {
+  local secret_file="$1"
+  if [ -e "$secret_file" ] && ! chmod 600 "$secret_file"; then
+    echo "Sichere Dateirechte konnten nicht gesetzt werden: $secret_file" >&2
+    exit 1
+  fi
 }
 
-start_docker_indexer
+write_secret_file() {
+  local secret_file="$1"
+  local secret_value="$2"
+  printf '%s' "$secret_value" | "$PAPAGUI_PYTHON" -c \
+    'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.stdin.read(), encoding="utf-8")' \
+    "$secret_file"
+  protect_secret_file "$secret_file"
+}
 
-# Pull the newest complete generation. If the server is unavailable, the last
-# verified local generation remains active. Existing v0.4 data seeds the cache
-# exactly once during migration.
-if python -c 'import os,urllib.request; request=urllib.request.Request(os.environ["PAPAGUI_INDEX_SERVER_URL"].rstrip("/")+"/v1/index/current"); token=os.environ.get("PAPAGUI_API_TOKEN", ""); token and request.add_header("Authorization", "Bearer "+token); urllib.request.urlopen(request, timeout=1).close()' 2>/dev/null; then
-	python -m app.services.index_client \
-		--server "$PAPAGUI_INDEX_SERVER_URL" \
-		--client-root "$PAPAGUI_CLIENT_ROOT" \
-		--bootstrap-from "$PWD/data" \
-		--timeout-seconds 3 || true
-else
-	echo "Docker-Indexer erstellt noch die erste Generation – Synchronisation folgt automatisch."
-	python -m app.services.index_client \
-		--server "$PAPAGUI_INDEX_SERVER_URL" \
-		--client-root "$PAPAGUI_CLIENT_ROOT" \
-		--bootstrap-from "$PWD/data" \
-		--timeout-seconds 0.01 >/dev/null 2>&1 || true
+secret_from_file() {
+  local secret_name="$1"
+  local secret_file="$PAPAGUI_SERVER_CONFIG_PATH/$2"
+  local current_value="${!secret_name:-}"
+  protect_secret_file "$secret_file"
+  if [ -z "$current_value" ]; then
+    if [ ! -s "$secret_file" ]; then
+      current_value="$($PAPAGUI_PYTHON -c 'import secrets; print(secrets.token_urlsafe(32), end="")')"
+      write_secret_file "$secret_file" "$current_value"
+    else
+      current_value="$(<"$secret_file")"
+    fi
+    printf -v "$secret_name" '%s' "$current_value"
+  else
+    # Keep the mounted server secret and the token used by this client process
+    # identical even when the caller supplied the value through the environment.
+    write_secret_file "$secret_file" "$current_value"
+  fi
+}
+
+secret_from_file PAPAGUI_API_TOKEN api-token
+export PAPAGUI_API_TOKEN
+
+# The generated development password remains in the ignored, mode-0600 file so
+# it can still be entered in the tray. Only a mounted hash file reaches Docker.
+protect_secret_file "$PAPAGUI_SERVER_CONFIG_PATH/admin-password"
+if [ -z "${PAPAGUI_ADMIN_PASSWORD_HASH:-}" ]; then
+  secret_from_file PAPAGUI_ADMIN_PASSWORD admin-password
+  PAPAGUI_ADMIN_PASSWORD_VALUE="$PAPAGUI_ADMIN_PASSWORD"
+  unset PAPAGUI_ADMIN_PASSWORD
+  PAPAGUI_ADMIN_PASSWORD_HASH="$(printf '%s' "$PAPAGUI_ADMIN_PASSWORD_VALUE" | "$PAPAGUI_PYTHON" -m papagui_server hash-password --stdin)"
+  unset PAPAGUI_ADMIN_PASSWORD_VALUE
+fi
+write_secret_file "$PAPAGUI_SERVER_CONFIG_PATH/admin-password-hash" "$PAPAGUI_ADMIN_PASSWORD_HASH"
+unset PAPAGUI_ADMIN_PASSWORD PAPAGUI_ADMIN_PASSWORD_HASH
+
+if [ -z "${PAPAGUI_SOURCE_PATH:-}" ]; then
+  if [ -s "$PAPAGUI_SERVER_CONFIG_PATH/source-path" ]; then
+    PAPAGUI_SOURCE_PATH="$(<"$PAPAGUI_SERVER_CONFIG_PATH/source-path")"
+  else
+    PAPAGUI_SOURCE_PATH="$PWD/Bauvorhaben"
+  fi
+fi
+export PAPAGUI_SOURCE_PATH
+export PAPAGUI_UID="${PAPAGUI_UID:-$(id -u)}"
+export PAPAGUI_GID="${PAPAGUI_GID:-$(id -g)}"
+
+if [ -z "${PAPAGUI_SOURCE_MAPPINGS:-}" ]; then
+  PAPAGUI_SOURCE_MAPPINGS="$($PAPAGUI_PYTHON -c 'import json,sys; print(json.dumps({sys.argv[1]: {"linux": sys.argv[2], "macos": sys.argv[2]}}))' "$PAPAGUI_SOURCE_ID" "$PAPAGUI_SOURCE_PATH")"
+  export PAPAGUI_SOURCE_MAPPINGS
 fi
 
-if [ -L "$PAPAGUI_CLIENT_ROOT/current" ]; then
-	export PAPAGUI_DATA_DIR="$PAPAGUI_CLIENT_ROOT/current"
-else
-	echo "Keine gültige lokale Indexgeneration vorhanden – verwende Altbestand."
-	export PAPAGUI_DATA_DIR="$PWD/data"
+start_server_in_background() {
+  PAPAGUI_SERVER_START_PID=""
+  if [ "${PAPAGUI_SKIP_DOCKER:-0}" = "1" ]; then
+    echo "Docker-Start wurde über PAPAGUI_SKIP_DOCKER=1 übersprungen."
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    echo "Docker Compose nicht verfügbar; der Client verwendet seinen letzten lokalen Stand."
+    return
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker läuft nicht; der Client verwendet seinen letzten lokalen Stand."
+    return
+  fi
+  if [ ! -d "$PAPAGUI_SOURCE_PATH" ]; then
+    echo "Serverstart übersprungen: Datenquelle nicht gefunden: $PAPAGUI_SOURCE_PATH"
+    return
+  fi
+
+  (
+    docker compose -f deploy/server/compose.yaml up -d --build papagui-server
+  ) >"$PAPAGUI_SERVER_DATA_PATH/logs/docker-server-startup.log" 2>&1 &
+  PAPAGUI_SERVER_START_PID="$!"
+  echo "PapaGUI-Server wird im Hintergrund gebaut und gestartet."
+}
+
+start_server_in_background
+
+wait_for_server_health() {
+  if [ -z "${PAPAGUI_SERVER_START_PID:-}" ]; then
+    return
+  fi
+  echo "Warte auf den Server-Healthcheck …"
+  attempt=0
+  while [ "$attempt" -lt 600 ]; do
+    if "$PAPAGUI_PYTHON" -c 'import json,sys,urllib.request; json.load(urllib.request.urlopen(sys.argv[1].rstrip("/")+"/health", timeout=1))' "$PAPAGUI_INDEX_SERVER_URL" >/dev/null 2>&1; then
+      echo "PapaGUI-Server ist erreichbar."
+      return
+    fi
+    if ! kill -0 "$PAPAGUI_SERVER_START_PID" 2>/dev/null; then
+      wait "$PAPAGUI_SERVER_START_PID" 2>/dev/null || true
+      if ! docker compose -f deploy/server/compose.yaml ps --status running --quiet papagui-server 2>/dev/null | grep -q .; then
+        echo "Serverstart fehlgeschlagen; Details: $PAPAGUI_SERVER_DATA_PATH/logs/docker-server-startup.log"
+        return
+      fi
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  echo "Server-Healthcheck nach 10 Minuten noch nicht erfolgreich; Client startet offline."
+}
+
+wait_for_server_health
+
+PAPAGUI_DISPLAY_PID=""
+if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ] && command -v Xvfb >/dev/null 2>&1; then
+  export DISPLAY=:99
+  Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
+  PAPAGUI_DISPLAY_PID="$!"
 fi
 
-# Virtuellen Display starten (falls kein echter Display vorhanden)
-if [ -z "$DISPLAY" ]; then
-	export DISPLAY=:99
-	export PAPAGUI_FORCE_FULLSCREEN=1
-	Xvfb :99 -screen 0 1920x1080x24 &
-	XVFB_PID=$!
-	echo "Virtueller Display gestartet (PID $XVFB_PID)"
+"$PAPAGUI_PYTHON" -m papagui_client.entrypoints.tray --background \
+  >"$PAPAGUI_SERVER_CONFIG_PATH/index-tray.log" 2>&1 &
+"$PAPAGUI_PYTHON" -m papagui_client "$@"
+PAPAGUI_EXIT_CODE=$?
 
-	# noVNC starten, damit die GUI im Browser erreichbar ist (Port 6080)
-	x11vnc -display :99 -forever -nopw -quiet &
-	X11VNC_PID=$!
-	websockify --web /usr/share/novnc 6080 localhost:5900 &
-	NOVNC_PID=$!
-	echo "GUI erreichbar unter: http://localhost:6080/vnc.html"
+if [ -n "$PAPAGUI_DISPLAY_PID" ]; then
+  kill "$PAPAGUI_DISPLAY_PID" 2>/dev/null || true
 fi
-
-# The index-server tray is its own process. It therefore remains available if
-# the main window is closed and later launches only activate the existing tray.
-python -m app.index_tray_app --background >"$PAPAGUI_CONFIG_PATH/index-tray.log" 2>&1 &
-
-# Start GUI
-python main.py
-
-# Aufräumen
-[ -n "$XVFB_PID" ] && kill $XVFB_PID $X11VNC_PID $NOVNC_PID 2>/dev/null
+exit "$PAPAGUI_EXIT_CODE"

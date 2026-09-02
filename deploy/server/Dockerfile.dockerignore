@@ -1,0 +1,11 @@
+**
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/server/
+!packages/server/**
+packages/**/__pycache__/
+packages/**/*.py[cod]
+packages/**/build/
+packages/**/dist/
+packages/**/*.egg-info/

@@ -1,8 +1,8 @@
 """Hermetic process environment shared by all project tests.
 
-Importing a ``tests.*`` module imports this package first.  That makes this the
-earliest reliable place to redirect application data and Qt settings before a
-test can import :mod:`app.core.config` or create a ``QSettings`` instance.
+Importing a ``tests.*`` module imports this package first. That makes this the
+earliest reliable place to redirect package data and Qt settings before a
+client test can load its configuration or create a ``QSettings`` instance.
 ``tests.run_ci`` supplies a private root for every test module.  Direct unittest
 invocations receive a process-private temporary root here as a safe fallback.
 """
@@ -46,7 +46,12 @@ def _prepare_directories(root: Path) -> dict[str, Path]:
 def _configure_qsettings(config_directory: Path) -> None:
     # Local import is intentional: all path environment variables must exist
     # before Qt is imported and allowed to resolve a platform settings backend.
-    from PySide6.QtCore import QSettings
+    try:
+        from PySide6.QtCore import QSettings
+    except ModuleNotFoundError:
+        # Contracts and server tests deliberately run in a Qt-free environment.
+        # Client GUI test jobs install the GUI extra and take this branch.
+        return
 
     settings_format = QSettings.Format.IniFormat
     QSettings.setDefaultFormat(settings_format)

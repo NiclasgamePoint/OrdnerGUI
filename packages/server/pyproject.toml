@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "papagui-server"
+dynamic = ["version"]
+description = "Headless PapaGUI index and customer server"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "argon2-cffi>=23.1,<26",
+    "fastapi>=0.115,<1",
+    "papagui-contracts==0.4.2",
+    "pydantic>=2.8,<3",
+    "uvicorn[standard]>=0.30,<1",
+]
+
+[project.scripts]
+papagui-server = "papagui_server.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["papagui_server*"]
+
+[tool.setuptools.package-data]
+papagui_server = ["resources/*.txt", "resources/*.md"]
+
+[tool.setuptools.dynamic]
+version = {attr = "papagui_server.__version__"}

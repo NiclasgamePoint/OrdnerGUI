@@ -23,7 +23,7 @@ def test_modules(test_root: Path) -> list[str]:
     ]
 
 
-def _module_environment(test_root: Path) -> dict[str, str]:
+def _module_environment(test_root: Path, project_root: Path | None = None) -> dict[str, str]:
     directories = {
         "data": test_root / "data",
         "source": test_root / "source",
@@ -33,6 +33,16 @@ def _module_environment(test_root: Path) -> dict[str, str]:
         directory.mkdir(parents=True, exist_ok=True)
 
     environment = os.environ.copy()
+    root = project_root or Path(__file__).resolve().parent.parent
+    package_sources = [
+        root / "packages" / "contracts" / "src",
+        root / "packages" / "server" / "src",
+        root / "packages" / "client" / "src",
+    ]
+    existing_pythonpath = environment.get("PYTHONPATH", "")
+    pythonpath_parts = [str(path) for path in package_sources if path.is_dir()]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
     environment.update(
         {
             "PAPAGUI_TEST_ROOT": str(test_root),
@@ -42,6 +52,7 @@ def _module_environment(test_root: Path) -> dict[str, str]:
             "XDG_CONFIG_HOME": str(directories["config"]),
             "APPDATA": str(directories["config"]),
             "LOCALAPPDATA": str(directories["config"]),
+            "PYTHONPATH": os.pathsep.join(pythonpath_parts),
         }
     )
     environment.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -57,13 +68,14 @@ def run_module(
     command = [sys.executable]
     if coverage:
         command += ["-m", "coverage", "run", "--parallel-mode"]
-    command += ["-m", "unittest", module, "-v"]
+    module_path = Path(*module.split(".")).with_suffix(".py")
+    command += ["-m", "pytest", str(module_path), "-q"]
 
     safe_name = module.replace(".", "-")
     try:
         with TemporaryDirectory(prefix=f"papagui-{safe_name}-") as directory:
             test_root = Path(directory).resolve()
-            environment = _module_environment(test_root)
+            environment = _module_environment(test_root, project_root)
             try:
                 return subprocess.run(
                     command,

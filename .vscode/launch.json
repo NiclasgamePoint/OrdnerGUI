@@ -2,13 +2,52 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "PapaGUI starten",
+      "name": "PapaGUI Client",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/main.py",
+      "module": "papagui_client",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "justMyCode": true
+      "justMyCode": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/packages/contracts/src${pathSeparator}${workspaceFolder}/packages/client/src",
+        "PAPAGUI_INDEX_SERVER_URL": "http://127.0.0.1:8765",
+        "PAPAGUI_API_TOKEN": "${env:PAPAGUI_API_TOKEN}"
+      }
+    },
+    {
+      "name": "PapaGUI Admin-Tray",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "papagui_client.entrypoints.tray",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/packages/contracts/src${pathSeparator}${workspaceFolder}/packages/client/src",
+        "PAPAGUI_INDEX_SERVER_URL": "http://127.0.0.1:8765",
+        "PAPAGUI_API_TOKEN": "${env:PAPAGUI_API_TOKEN}"
+      }
+    },
+    {
+      "name": "PapaGUI Server (lokal)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "papagui_server",
+      "args": [
+        "serve",
+        "--source", "${workspaceFolder}/Bauvorhaben",
+        "--data", "${workspaceFolder}/docker-server-data",
+        "--config", "${workspaceFolder}/docker-config"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/packages/contracts/src${pathSeparator}${workspaceFolder}/packages/server/src",
+        "PAPAGUI_API_TOKEN": "${env:PAPAGUI_API_TOKEN}",
+        "PAPAGUI_ADMIN_PASSWORD_HASH": "${env:PAPAGUI_ADMIN_PASSWORD_HASH}"
+      }
     }
   ]
 }

@@ -1,0 +1,20 @@
+{
+  "backups": 3,
+  "generation": {
+    "generation": "legacy-20260902"
+  },
+  "job": {
+    "current_path": "/source/Beratung/2024/Beispiel GmbH, Berlin/Vertrag.pdf",
+    "error": "",
+    "job_id": "legacy-run-1",
+    "phase": "completed",
+    "processed_count": 2,
+    "status": "completed"
+  },
+  "server": {
+    "interval_seconds": 86400,
+    "source": "/source",
+    "status": "online",
+    "version": "0.4.1"
+  }
+}

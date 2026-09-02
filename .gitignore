@@ -44,6 +44,7 @@ AGENTS.md
 # Environment files
 .env
 .env.*
+!deploy/server/.env.example
 
 # Editor/OS files
 .idea/

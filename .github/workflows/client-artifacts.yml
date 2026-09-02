@@ -1,0 +1,63 @@
+name: Unsigned client artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x64
+          - os: windows-latest
+            artifact: windows-x64
+          - os: macos-15-intel
+            artifact: macos-x64
+          - os: macos-14
+            artifact: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install packaging environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packages/client/requirements-lock.txt -r packaging/client/requirements-build-lock.txt -r requirements-test.txt
+          python -m pip install --no-deps -e packages/contracts -e packages/client
+      - name: Test source packages and packaging contracts
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/contracts tests/client tests/architecture tests/tools/test_check_frozen_client.py tests/tools/test_client_packaging.py tests/tools/test_start_scripts.py -q
+      - name: Parse POSIX launchers
+        if: runner.os != 'Windows'
+        run: bash -n start.sh start.command index-tray.sh tools/docker_smoke.sh
+      - name: Parse PowerShell launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'start.ps1'), [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count) { $errors | Format-List; exit 1 }
+      - name: Build unsigned client and tray
+        run: |
+          pyinstaller --clean --noconfirm packaging/client/pyinstaller/papagui-client.spec
+          pyinstaller --clean --noconfirm packaging/client/pyinstaller/papagui-tray.spec
+      - name: Inspect and launch frozen products
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tools/check_frozen_client.py dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: papagui-client-0.4.2-${{ matrix.artifact }}-unsigned
+          path: dist/*

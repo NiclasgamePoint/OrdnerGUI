@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.4.2 - Client/Server Split
+
+- Repository in die unabhängigen Pakete `papagui-client`, `papagui-server` und
+  das interne `papagui-contracts` gegliedert; der frühere Monolith gehört nicht
+  mehr zu einem Produktartefakt.
+- Headless FastAPI-Server als alleinigen Writer für portable Indexgenerationen,
+  Kundenerkennung und die maßgebliche `customers.db` eingeführt.
+- Komponentenweise Generationsmanifeste, SHA-256-Prüfung, atomare Aktivierung
+  und jeweils drei gültige Vorgängergenerationen auf Server und Client ergänzt.
+- Read-only-Desktopclient mit Start-/Intervallsynchronisation, plattformneutralem
+  Quellpfadmapping und vollständigem Offlinebetrieb ergänzt.
+- Kundenänderungen über eine dauerhafte Outbox, Idempotency-Keys und
+  Revisionskonflikte mit expliziter 409-Auflösung abgesichert.
+- Eigenständiges Admin-Tray mit Live-Serverstatus, Indexsteuerung,
+  serverseitigen Einstellungen und ausschließlich speicherresidenten
+  Adminsitzungen ergänzt.
+- Leere oder vertauschte Quellmounts durch eine persistente Quellenidentität
+  abgesichert und Secretdateien/Clientkonfiguration plattformgerecht gehärtet.
+- Getrennte Docker-, native Client- und CI-Builddefinitionen sowie Architektur-,
+  OpenAPI-, Artefakt- und Graphify-Driftprüfungen ergänzt.
+
 ## 0.4.1 - Pre-Refactor Checkpoint
 
 - Systemtray-Indexfenster zur Docker-Serverkonsole mit Live-Status, Jobfortschritt,
