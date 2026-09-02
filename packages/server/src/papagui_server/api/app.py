@@ -20,7 +20,7 @@ from papagui_contracts import (
 )
 
 from papagui_server import __version__
-from papagui_server.api import schemas as api_models
+import papagui_server.api.schemas as api_models
 from papagui_server.api.http import (
     archive_response as _archive_response,
     error_response as _error,
