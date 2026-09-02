@@ -26,6 +26,7 @@ from app.gui.widgets import AppButton, BusyIndicator
 from app.core.config import (
     CustomerRecognitionOptions,
     IndexOptions,
+    external_indexer_enabled,
     save_index_options as persist_index_options,
 )
 from app.core.index_diagnostics import IndexDiagnostics
@@ -142,6 +143,7 @@ class SettingsPopup(QFrame):
     rebuildContentIndexRequested = Signal()
     optimizeContentIndexRequested = Signal()
     clearContentIndexRequested = Signal()
+    indexServerRequested = Signal()
 
     def __init__(
         self,
@@ -406,6 +408,8 @@ class SettingsPopup(QFrame):
             self.loadBackupRequested.emit(str(backup_path))
 
     def _build_index_page(self) -> QWidget:
+        if external_indexer_enabled():
+            return self._build_client_index_page()
         page = QWidget()
         page.setObjectName("SettingsPage")
         page_layout = QVBoxLayout(page)
@@ -819,6 +823,59 @@ class SettingsPopup(QFrame):
         self.set_indexing(self.indexing)
         return page
 
+    def _build_client_index_page(self) -> QWidget:
+        """Keep only settings that belong to the read-only desktop client."""
+        page = QWidget()
+        page.setObjectName("SettingsPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+        heading = QLabel("Lokale Suche und Synchronisation")
+        heading.setObjectName("PopupSectionTitle")
+        layout.addWidget(heading)
+        note = QLabel(
+            "Indexaufbau, OCR, Ressourcenprofil und Wartung werden jetzt im "
+            "Indexserver-Fenster über das Systemtray verwaltet."
+        )
+        note.setObjectName("PopupCaption")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.result_limit_spin = QSpinBox()
+        self.result_limit_spin.setRange(20, 2000)
+        self.result_limit_spin.setValue(self.index_options.result_limit)
+        form.addRow(self._form_label("Maximale Suchtreffer"), self.result_limit_spin)
+        self.content_search_checkbox = QCheckBox("Dokument-Volltextsuche anzeigen")
+        self.content_search_checkbox.setChecked(self.index_options.content_search_enabled)
+        form.addRow(self._form_label("Volltextsuche"), self.content_search_checkbox)
+        self.parallel_shards_spin = QSpinBox()
+        self.parallel_shards_spin.setRange(1, 16)
+        self.parallel_shards_spin.setValue(self.index_options.maximum_parallel_shards)
+        form.addRow(self._form_label("Parallele Suchbereiche"), self.parallel_shards_spin)
+        self.remote_sync_interval_spin = QSpinBox()
+        self.remote_sync_interval_spin.setRange(1, 1440)
+        self.remote_sync_interval_spin.setSuffix(" Minuten")
+        self.remote_sync_interval_spin.setValue(
+            self.index_options.remote_sync_interval_minutes
+        )
+        form.addRow(
+            self._form_label("Server-Synchronisation", "remote_sync_interval"),
+            self.remote_sync_interval_spin,
+        )
+        self._register_help("remote_sync_interval", self.remote_sync_interval_spin)
+        layout.addLayout(form)
+        row = QHBoxLayout()
+        open_status = AppButton("Indexserver öffnen", AppButton.SECONDARY)
+        open_status.clicked.connect(self.indexServerRequested.emit)
+        row.addWidget(open_status)
+        row.addStretch()
+        save = AppButton("Clienteinstellungen speichern")
+        save.clicked.connect(self.save_index_options)
+        row.addWidget(save)
+        layout.addLayout(row)
+        layout.addStretch()
+        return page
+
     def _build_search_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("SettingsPage")
@@ -1218,6 +1275,18 @@ class SettingsPopup(QFrame):
         )
 
     def save_index_options(self):
+        if external_indexer_enabled():
+            new_options = IndexOptions(**{
+                **self.index_options.__dict__,
+                "result_limit": self.result_limit_spin.value(),
+                "content_search_enabled": self.content_search_checkbox.isChecked(),
+                "maximum_parallel_shards": self.parallel_shards_spin.value(),
+                "remote_sync_interval_minutes": self.remote_sync_interval_spin.value(),
+            })
+            persist_index_options(new_options)
+            self.index_options = new_options
+            self.indexOptionsChanged.emit(new_options)
+            return
         extensions: set[str] = set()
         for checkbox, values in self.content_format_checkboxes.values():
             if checkbox.isChecked():

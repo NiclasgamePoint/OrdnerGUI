@@ -54,6 +54,23 @@ Generation. So erhalten andere Clients nicht erst beim nächsten nächtlichen
 Indexlauf den neuen Stand. Fehlt lokal das Docker-Buildx-Plugin, fällt
 `start.sh` automatisch auf den klassischen Docker-Builder zurück.
 
+## Steuerung über das Systemtray
+
+Der Eintrag **Indexserver** im PapaGUI-Systemtray öffnet die zentrale
+Bedienoberfläche für den Docker-Dienst. Sie zeigt den Live-Zustand des Servers,
+die aktuelle Katalog-/Inhaltsphase, Worker, Fortschritt, Generation und die drei
+Serverbackups. Dort lassen sich ein inkrementeller Lauf, ein vollständiger
+Neuaufbau, Abbruch, Löschen mit anschließendem Neuaufbau und ein kontrollierter
+Containerneustart auslösen.
+
+OCR, Ressourcenprofil, Dateiformate, Größenlimits, Ausschlüsse, Priorisierung und
+das automatische Laufintervall werden ebenfalls dort serverseitig gespeichert.
+Die Hauptanwendung enthält im Docker-Modus nur noch echte Clientoptionen wie
+Suchumfang und Abrufintervall. Die Steuerbefehle laufen authentifiziert über die
+Server-API und funktionieren daher später unverändert gegen die Synology. Für den
+Containerneustart beendet sich der Dienst kontrolliert; die Compose-Richtlinie
+`restart: unless-stopped` startet ihn anschließend erneut.
+
 ## Lokaler Probelauf
 
 Zuerst lokale Ausgabe- und Konfigurationsverzeichnisse mit der UID/GID des

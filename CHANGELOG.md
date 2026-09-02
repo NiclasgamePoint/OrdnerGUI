@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Systemtray-Indexfenster zur Docker-Serverkonsole mit Live-Status, Jobfortschritt,
+  Generationen, Wartungsaktionen und kontrolliertem Containerneustart umgebaut.
+- Servereinstellungen für OCR, Ressourcen, Formate, Priorisierung und Laufintervall
+  aus der Haupt-GUI in die authentifizierte Indexserver-Konsole verschoben.
+
 - Docker-Indexer zur alleinigen Indexquelle erweitert.
 - Unveränderliche, SHA-256-geprüfte Generationen mit drei Serverbackups ergänzt.
 - Automatischen Clientdownload, atomare Aktivierung, drei lokale Backups und

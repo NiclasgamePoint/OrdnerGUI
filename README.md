@@ -8,6 +8,8 @@
 - Docker-Indexserver als Single Source of Truth mit geprüften Generationen
 - automatischer Client-Synchronisation, drei Backups und Offline-Fallback
 - revisionierter Kunden-API ohne stilles Überschreiben paralleler Änderungen
+- zentraler Indexserver-Konsole im Systemtray für Live-Status, Wartung,
+  Docker-Neustart und serverseitige Indexeinstellungen
 
 - Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“

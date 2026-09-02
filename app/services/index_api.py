@@ -9,10 +9,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import threading
+from collections.abc import Callable
 from urllib.parse import unquote, urlparse
 
 from app.core.customer_models import Contact, Customer
-from app.core.config import load_customer_recognition_options
+from app.core.config import (
+    IndexOptions,
+    load_customer_recognition_options,
+    load_index_options,
+    save_index_options,
+)
 from app.core.customer_recognition_models import RecognitionCandidate
 from app.core.customer_repository import CustomerConflictError, CustomerRepository
 from app.core.index_layout import IndexLayout
@@ -32,6 +38,8 @@ class IndexApiServer:
         host: str = "0.0.0.0",
         port: int = 8765,
         token: str = "",
+        status_provider: Callable[[], dict[str, object]] | None = None,
+        action_handler: Callable[[str], dict[str, object]] | None = None,
     ) -> None:
         self.data_path = data_path.resolve()
         self.host = host
@@ -41,6 +49,8 @@ class IndexApiServer:
             _IndexApiHandler,
             data_path=self.data_path,
             token=self.token,
+            status_provider=status_provider,
+            action_handler=action_handler,
         )
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -70,9 +80,19 @@ class IndexApiServer:
 class _IndexApiHandler(BaseHTTPRequestHandler):
     server_version = "PapaGUIIndex/1"
 
-    def __init__(self, *args, data_path: Path, token: str, **kwargs):
+    def __init__(
+        self,
+        *args,
+        data_path: Path,
+        token: str,
+        status_provider=None,
+        action_handler=None,
+        **kwargs,
+    ):
         self.data_path = data_path
         self.token = token
+        self.status_provider = status_provider
+        self.action_handler = action_handler
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
@@ -81,6 +101,15 @@ class _IndexApiHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/health":
             self._json(HTTPStatus.OK, {"status": "ok"})
+            return
+        if path == "/v1/server/status":
+            if self.status_provider is None:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "Status nicht verfügbar.")
+            else:
+                self._json(HTTPStatus.OK, self.status_provider())
+            return
+        if path == "/v1/server/settings":
+            self._json(HTTPStatus.OK, {"settings": asdict(load_index_options())})
             return
         if path == "/v1/index/current":
             self._serve_file(self.data_path / "publications" / "current.json", "application/json")
@@ -111,6 +140,20 @@ class _IndexApiHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         path = urlparse(self.path).path
+        if path == "/v1/server/actions":
+            payload = self._read_json()
+            if payload is None:
+                return
+            if self.action_handler is None:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "Steuerung nicht verfügbar.")
+                return
+            try:
+                result = self.action_handler(str(payload.get("action", "")))
+            except ValueError as exc:
+                self._error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._json(HTTPStatus.ACCEPTED, result)
+            return
         if path == "/v1/customer-actions":
             payload = self._read_json()
             if payload is not None:
@@ -176,6 +219,30 @@ class _IndexApiHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         path = urlparse(self.path).path
+        if path == "/v1/server/settings":
+            payload = self._read_json()
+            if payload is None:
+                return
+            values = payload.get("settings")
+            if not isinstance(values, dict):
+                self._error(HTTPStatus.BAD_REQUEST, "Indexeinstellungen fehlen.")
+                return
+            defaults = load_index_options()
+            allowed = IndexOptions.__dataclass_fields__
+            options = IndexOptions(
+                **{
+                    key: values.get(key, getattr(defaults, key))
+                    for key in allowed
+                }
+            )
+            save_index_options(options)
+            if "interval_seconds" in values and self.action_handler is not None:
+                self.action_handler(f"interval:{float(values['interval_seconds'])}")
+            encoded = asdict(options)
+            if "interval_seconds" in values:
+                encoded["interval_seconds"] = values["interval_seconds"]
+            self._json(HTTPStatus.OK, {"settings": encoded})
+            return
         journal = self._journal_target(path)
         if journal is not None and journal[1] is not None:
             payload = self._read_json()

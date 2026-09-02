@@ -125,6 +125,41 @@ class IndexServiceTests(PapaGuiTestCase):
         self.assertTrue(arguments.full_rebuild)
         self.assertEqual(arguments.interval_seconds, 60)
 
+    def test_server_status_and_control_requests_are_coordinated(self):
+        service = IndexService(self.source, self.data, interval_seconds=120)
+        service.layout.ensure_directories()
+        status = service.status()
+        self.assertEqual(status["server"]["status"], "online")
+        self.assertEqual(status["backups"], 0)
+
+        self.assertTrue(service.control("run")["accepted"])
+        self.assertTrue(service._requested_run)
+        service.control("rebuild")
+        self.assertTrue(service._requested_full_rebuild)
+        service.control("delete")
+        self.assertTrue(service._requested_delete)
+        service.control("interval:300")
+        self.assertEqual(service.interval_seconds, 300)
+        with self.assertRaisesRegex(ValueError, "mindestens"):
+            service.control("interval:10")
+        with self.assertRaisesRegex(ValueError, "Unbekannte"):
+            service.control("unknown")
+
+    def test_delete_index_keeps_authoritative_customer_database(self):
+        service = IndexService(self.source, self.data)
+        (self.data / "index").mkdir(parents=True)
+        (self.data / "index" / "old.db").write_text("old", encoding="utf-8")
+        (self.data / "publications").mkdir()
+        (self.data / "publications" / "current.json").write_text("{}", encoding="utf-8")
+        customer_database = self.data / "customers.db"
+        customer_database.write_text("customers", encoding="utf-8")
+
+        service._delete_index_data()
+
+        self.assertTrue(customer_database.exists())
+        self.assertFalse((self.data / "publications").exists())
+        self.assertTrue(service.layout.root.is_dir())
+
     def test_main_routes_once_and_service_modes_and_installs_signal_handlers(self):
         service = Mock()
         service.run_once.return_value = 3

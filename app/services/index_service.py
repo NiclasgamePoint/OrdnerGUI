@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
 import signal
+import shutil
 import threading
 import uuid
 
-from app.core.index_job_state import utc_now, write_state
+from app.core.index_job_state import cancel_path, read_state, utc_now, write_state
 from app.core.index_layout import IndexLayout
 from app.core.logging_config import configure_logging
 from app.services.content_index_job import ContentIndexJobRunner
@@ -43,11 +45,80 @@ class IndexService:
         self.service_state_dir = self.layout.jobs_dir / "service"
         self.publisher = IndexGenerationPublisher(self.data_path)
         self._stopped = threading.Event()
+        self._wake = threading.Event()
+        self._control_lock = threading.Lock()
+        self._requested_run = False
+        self._requested_full_rebuild = False
+        self._requested_delete = False
+        self._started_at = utc_now()
         self._state: dict[str, object] = {}
 
     def stop(self) -> None:
         """Request a graceful stop between durable indexing phases."""
         self._stopped.set()
+        self._wake.set()
+
+    def status(self) -> dict[str, object]:
+        """Return one API payload for server, catalog, content and publication."""
+        current_manifest = self.data_path / "publications" / "current.json"
+        try:
+            generation = json.loads(current_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            generation = {}
+        return {
+            "server": {
+                "status": "stopping" if self._stopped.is_set() else "online",
+                "started_at": self._started_at,
+                "source": str(self.source_path),
+                "interval_seconds": self.interval_seconds,
+                "queued_action": self._state.get("queued_action", ""),
+            },
+            "job": read_state(self.service_state_dir),
+            "catalog": read_state(self.catalog_state_dir),
+            "content": read_state(self.content_state_dir),
+            "generation": generation,
+            "backups": max(
+                0,
+                len(list((self.data_path / "publications" / "generations").glob("*.zip"))) - 1,
+            ),
+        }
+
+    def control(self, action: str) -> dict[str, object]:
+        """Queue safe service actions; the indexing loop remains the sole writer."""
+        with self._control_lock:
+            if action.startswith("interval:"):
+                interval = float(action.partition(":")[2])
+                if interval < 60:
+                    raise ValueError(
+                        "Das Indexintervall muss mindestens 60 Sekunden betragen."
+                    )
+                self.interval_seconds = interval
+            elif action == "run":
+                self._requested_run = True
+            elif action == "rebuild":
+                self._requested_run = True
+                self._requested_full_rebuild = True
+            elif action == "delete":
+                self._requested_delete = True
+                self._requested_run = True
+                self._requested_full_rebuild = True
+                for directory in (self.catalog_state_dir, self.content_state_dir):
+                    directory.mkdir(parents=True, exist_ok=True)
+                    cancel_path(directory).touch()
+            elif action == "cancel":
+                for directory in (self.catalog_state_dir, self.content_state_dir):
+                    directory.mkdir(parents=True, exist_ok=True)
+                    cancel_path(directory).touch()
+            elif action == "restart":
+                for directory in (self.catalog_state_dir, self.content_state_dir):
+                    directory.mkdir(parents=True, exist_ok=True)
+                    cancel_path(directory).touch()
+                threading.Timer(0.25, self.stop).start()
+            else:
+                raise ValueError("Unbekannte Indexaktion.")
+            self._state["queued_action"] = action
+        self._wake.set()
+        return {"accepted": True, "action": action}
 
     def run_once(self, *, full_rebuild: bool = False) -> int:
         """Build/refresh the catalog, enrich customers, then index contents."""
@@ -101,14 +172,34 @@ class IndexService:
         """Run immediately and then refresh at a fixed interval until stopped."""
         first_run = True
         while not self._stopped.is_set():
-            result = self.run_once(full_rebuild=full_rebuild and first_run)
+            with self._control_lock:
+                delete_requested = self._requested_delete
+                requested_full_rebuild = self._requested_full_rebuild
+                self._requested_delete = False
+                self._requested_full_rebuild = False
+                self._requested_run = False
+                self._state["queued_action"] = ""
+            if delete_requested:
+                self._delete_index_data()
+            result = self.run_once(
+                full_rebuild=(full_rebuild and first_run) or requested_full_rebuild
+            )
             first_run = False
             if result not in {0, 2}:
                 logger.error("Indexdienst-Lauf fehlgeschlagen (Exit-Code %s)", result)
-            if self._stopped.wait(self.interval_seconds):
+            self._wake.wait(self.interval_seconds)
+            self._wake.clear()
+            if self._stopped.wait(0):
                 break
         self._write_state(status="stopped", completed_at=utc_now())
         return 0
+
+    def _delete_index_data(self) -> None:
+        for target in (self.data_path / "index", self.data_path / "publications"):
+            if target.exists():
+                shutil.rmtree(target)
+        self.layout.ensure_directories()
+        self._write_state(status="deleted", phase="maintenance")
 
     def _validate_mounts(self) -> None:
         if not self.source_path.is_dir():
@@ -156,6 +247,8 @@ def main() -> int:
         host=arguments.api_host,
         port=arguments.api_port,
         token=os.getenv("PAPAGUI_API_TOKEN", ""),
+        status_provider=service.status,
+        action_handler=service.control,
     )
     api.start()
     try:

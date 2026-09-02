@@ -253,6 +253,50 @@ def build_stylesheet(
         border-radius: 10px;
     }}
 
+    QDialog#IndexControlWindow {{
+        background-color: {bg};
+        color: {text};
+    }}
+
+    QFrame#IndexControlCard {{
+        background-color: {card};
+        border: 1px solid {border};
+        border-radius: 14px;
+    }}
+
+    QLabel#IndexControlTitle {{
+        color: {text};
+        font-size: {scaled(22)}px;
+        font-weight: 700;
+    }}
+
+    QLabel#IndexCardTitle {{
+        color: {text};
+        font-size: {scaled(15)}px;
+        font-weight: 700;
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ServerStatusBadge {{
+        color: {muted};
+        background-color: {surface};
+        border: 1px solid {border};
+        border-radius: 12px;
+        padding: 6px 10px;
+        font-weight: 700;
+    }}
+
+    QLabel#ServerStatusBadge[status="online"] {{
+        color: {accent};
+        border-color: {accent};
+    }}
+
+    QLabel#ServerStatusBadge[status="offline"] {{
+        color: #d95c5c;
+        border-color: #d95c5c;
+    }}
+
     QLineEdit#GlobalSearchInput {{
         border-radius: 17px;
         padding-left: 13px;

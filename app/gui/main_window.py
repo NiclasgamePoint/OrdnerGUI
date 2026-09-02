@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu(self)
         open_action = tray_menu.addAction("PapaGUI öffnen")
         open_action.triggered.connect(self._show_from_tray)
-        index_action = tray_menu.addAction("Indexierungsstatus")
+        index_action = tray_menu.addAction("Indexserver")
         index_action.triggered.connect(self._show_index_tray_window)
         tray_menu.addSeparator()
         close_action = tray_menu.addAction("Beenden")
@@ -492,6 +492,9 @@ class MainWindow(QMainWindow):
                 self.index_controller.state_dir,
                 parent=self,
                 content_state_dir=self.content_job_controller.state_dir,
+                server_url=os.getenv("PAPAGUI_INDEX_SERVER_URL", "")
+                if external_indexer_enabled() else "",
+                api_token=os.getenv("PAPAGUI_API_TOKEN", ""),
             )
             self.index_tray_window.cancelRequested.connect(
                 self.cancel_background_indexing
@@ -882,6 +885,9 @@ class MainWindow(QMainWindow):
         )
         self.settings_popup.reindexRequested.connect(
             self.on_settings_reindex_requested
+        )
+        self.settings_popup.indexServerRequested.connect(
+            self._show_index_tray_window
         )
         self.settings_popup.cancelIndexRequested.connect(
             self.cancel_background_indexing
