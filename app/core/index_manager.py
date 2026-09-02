@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import logging
 import warnings
+from app import __version__
 from app.core.config import IndexOptions, RIPGREP_AVAILABLE
 from app.core.folder_structure import FolderStructureClassifier
 from app.core.search_models import SearchFilters, SearchPage
@@ -32,7 +33,7 @@ class IndexManager:
     EXTRACTOR_VERSION = "5"
     LEGACY_XLS_TIMEOUT_SECONDS = 15
     LEGACY_DOC_TIMEOUT_SECONDS = 20
-    APP_VERSION = "0.2"
+    APP_VERSION = __version__
     _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     def __init__(

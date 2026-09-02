@@ -60,7 +60,7 @@ start_docker_indexer() {
 			docker compose up -d --build indexer
 		else
 			echo "Docker Buildx fehlt – verwende den klassischen Docker-Builder."
-			DOCKER_BUILDKIT=0 docker build -t papagui-indexer:0.4 . && \
+			DOCKER_BUILDKIT=0 docker build -t papagui-indexer:0.4.1 . && \
 				docker compose up -d --no-build indexer
 		fi
 	) >"$PAPAGUI_INDEX_PATH/logs/docker-indexer-startup.log" 2>&1 &

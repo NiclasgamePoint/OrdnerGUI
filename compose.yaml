@@ -2,7 +2,7 @@ services:
   indexer:
     build:
       context: .
-    image: papagui-indexer:0.4
+    image: papagui-indexer:0.4.1
     init: true
     restart: unless-stopped
     user: "${PAPAGUI_UID:-1000}:${PAPAGUI_GID:-1000}"

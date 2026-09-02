@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.1 - Pre-Refactor Checkpoint
+
 - Systemtray-Indexfenster zur Docker-Serverkonsole mit Live-Status, Jobfortschritt,
   Generationen, Wartungsaktionen und kontrolliertem Containerneustart umgebaut.
 - Servereinstellungen für OCR, Ressourcen, Formate, Priorisierung und Laufintervall
