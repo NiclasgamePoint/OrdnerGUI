@@ -6,6 +6,19 @@
   Generationen, Wartungsaktionen und kontrolliertem Containerneustart umgebaut.
 - Servereinstellungen für OCR, Ressourcen, Formate, Priorisierung und Laufintervall
   aus der Haupt-GUI in die authentifizierte Indexserver-Konsole verschoben.
+- Indexserver-Konsole als eigenständige, vom MainWindow unabhängige Tray-Anwendung
+  mit Einmalinstanz-Aktivierung, automatischem Start durch `start.sh` und
+  separatem `index-tray.sh`-Launcher ergänzt.
+- Tab-Leiste der Indexserver-Konsole eingerückt, damit sie nicht mehr mit der
+  abgerundeten linken Fensterkante überlappt.
+- Qt-Absturz beim Schließen der eigenständigen Indexserver-Konsole behoben:
+  Das Fenster wird ins Tray ausgeblendet und laufende Serverabfragen werden beim
+  echten Beenden kontrolliert abgeschlossen.
+- Server-Badge mit grünem Onlinepunkt, rotem Offlinepunkt, orangem Problemstatus
+  und animiertem grünem Halbkreis während eines Indexlaufs ergänzt.
+- Automatisches Laufintervall in Zahlenfeld und Minuten-/Stundenauswahl getrennt,
+  auf 15 Minuten bis 48 Stunden begrenzt und serverseitig dauerhaft gespeichert;
+  Live-Aktualisierungen überschreiben ungespeicherte Eingaben nicht mehr.
 
 - Docker-Indexer zur alleinigen Indexquelle erweitert.
 - Unveränderliche, SHA-256-geprüfte Generationen mit drei Serverbackups ergänzt.

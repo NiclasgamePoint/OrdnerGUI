@@ -138,10 +138,14 @@ class IndexServiceTests(PapaGuiTestCase):
         self.assertTrue(service._requested_full_rebuild)
         service.control("delete")
         self.assertTrue(service._requested_delete)
-        service.control("interval:300")
-        self.assertEqual(service.interval_seconds, 300)
-        with self.assertRaisesRegex(ValueError, "mindestens"):
+        service.control("interval:900")
+        self.assertEqual(service.interval_seconds, 900)
+        restarted = IndexService(self.source, self.data, interval_seconds=86_400)
+        self.assertEqual(restarted.interval_seconds, 900)
+        with self.assertRaisesRegex(ValueError, "15 Minuten"):
             service.control("interval:10")
+        with self.assertRaisesRegex(ValueError, "48 Stunden"):
+            service.control("interval:172801")
         with self.assertRaisesRegex(ValueError, "Unbekannte"):
             service.control("unknown")
 

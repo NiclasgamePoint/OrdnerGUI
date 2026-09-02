@@ -110,6 +110,10 @@ if [ -z "$DISPLAY" ]; then
 	echo "GUI erreichbar unter: http://localhost:6080/vnc.html"
 fi
 
+# The index-server tray is its own process. It therefore remains available if
+# the main window is closed and later launches only activate the existing tray.
+python -m app.index_tray_app --background >"$PAPAGUI_CONFIG_PATH/index-tray.log" 2>&1 &
+
 # Start GUI
 python main.py
 

@@ -10,7 +10,7 @@ if __name__ == "__main__" and __package__ is None:  # pragma: no cover - direct 
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QProcess, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -487,6 +487,21 @@ class MainWindow(QMainWindow):
         self.tray_icon.show()
 
     def _show_index_tray_window(self):
+        if external_indexer_enabled():
+            project_root = str(Path(__file__).resolve().parents[2])
+            start_result = QProcess.startDetached(
+                sys.executable,
+                ["-m", "app.index_tray_app"],
+                project_root,
+            )
+            started = start_result[0] if isinstance(start_result, tuple) else start_result
+            if not started:
+                QMessageBox.warning(
+                    self,
+                    "Indexserver",
+                    "Die eigenständige Indexserver-Anwendung konnte nicht gestartet werden.",
+                )
+            return
         if self.index_tray_window is None:
             self.index_tray_window = IndexTrayWindow(
                 self.index_controller.state_dir,

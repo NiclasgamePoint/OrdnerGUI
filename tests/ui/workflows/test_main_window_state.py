@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -698,6 +699,27 @@ class MainWindowStateTests(QtTestCase):
         tray_window.show_status.assert_called_once_with()
         self.window._show_index_tray_window()
         self.assertEqual(tray_window.show_status.call_count, 2)
+
+        with (
+            patch("app.gui.main_window.external_indexer_enabled", return_value=True),
+            patch(
+                "app.gui.main_window.QProcess.startDetached",
+                return_value=(True, 123),
+            ) as start,
+        ):
+            self.window._show_index_tray_window()
+        executable, arguments, working_directory = start.call_args.args
+        self.assertEqual(executable, sys.executable)
+        self.assertEqual(arguments, ["-m", "app.index_tray_app"])
+        self.assertTrue(working_directory.endswith("03_PapaGUI"))
+
+        with (
+            patch("app.gui.main_window.external_indexer_enabled", return_value=True),
+            patch("app.gui.main_window.QProcess.startDetached", return_value=(False, 0)),
+            patch("app.gui.main_window.QMessageBox.warning") as warning,
+        ):
+            self.window._show_index_tray_window()
+        warning.assert_called_once()
 
         with patch.object(self.window, "showNormal") as normal, \
                 patch.object(self.window, "raise_") as raise_window, \

@@ -9,7 +9,7 @@
 - automatischer Client-Synchronisation, drei Backups und Offline-Fallback
 - revisionierter Kunden-API ohne stilles Überschreiben paralleler Änderungen
 - zentraler Indexserver-Konsole im Systemtray für Live-Status, Wartung,
-  Docker-Neustart und serverseitige Indexeinstellungen
+  Docker-Neustart und persistente serverseitige Indexeinstellungen
 
 - Gemeinsame, scrollbare Suchübersicht für Kunden und Ordner
 - Parallele Kunden- und Ordnersuche beim Tippen sowie mit Enter oder „Suchen“
@@ -39,6 +39,7 @@
 
 ```text
 app/
+├── index_tray_app.py              Eigenständiger Prozess für Server-Tray und -Konsole
 ├── core/
 │   ├── config.py                 Konfiguration und persistente Optionen
 │   ├── index_manager.py          Gemeinsame Metadaten- und Legacy-Suchoperationen
@@ -68,6 +69,7 @@ app/
     ├── widgets/                  App-Rahmen, Ergebniszeilen und Suchwidgets
     ├── workers/                  Suche und Steuerung des Indexprozesses
     ├── navigation.py             Seitenverlauf und Zurück-Navigation
+    ├── index_tray_window.py         Serverstatus, Indexaktionen und Einstellungen
     ├── main_window.py
     ├── settings_popup.py
     └── theme.py
@@ -153,9 +155,15 @@ Alternative Startskripte:
 - Windows PowerShell: `start.ps1`
 
 Unter Linux ist `./start.sh` der gemeinsame Einstiegspunkt. Es startet den
-Docker-Indexserver im Hintergrund, synchronisiert bestmöglich die neueste
-Generation und öffnet die GUI. Ohne erreichbaren Server verwendet PapaGUI den
-letzten lokal geprüften Stand. Die GUI baut selbst keinen Index mehr auf.
+Docker-Indexserver und die eigenständige Indexserver-Tray-Anwendung im
+Hintergrund, synchronisiert bestmöglich die neueste Generation und öffnet die
+GUI. Wird das Hauptfenster beendet, bleibt die Indexserver-Steuerung im
+Systemtray verfügbar. Ohne erreichbaren Server verwendet PapaGUI den letzten
+lokal geprüften Stand. Die GUI baut selbst keinen Index mehr auf.
+
+Die Indexserver-Konsole lässt sich unabhängig vom Hauptfenster mit
+`./index-tray.sh` starten. `./index-tray.sh --background` öffnet zunächst nur das
+Systemtray-Icon; ein weiterer Aufruf aktiviert die bereits laufende Konsole.
 
 Werkzeuge:
 

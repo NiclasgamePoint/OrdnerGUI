@@ -112,6 +112,60 @@ class IndexTrayWindowTests(unittest.TestCase):
             self.assertIn("legacy-running.pdf", window.worker_output.toPlainText())
             window.close()
 
+    def test_server_badge_colors_and_animates_live_states(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = IndexTrayWindow(root / "catalog", server_url="http://server")
+            payload = {
+                "server": {"status": "online", "interval_seconds": 3600},
+                "job": {"status": "completed"},
+                "content": {"status": "completed"},
+            }
+            window._apply_status(payload)
+            self.assertIn("#27a989", window.server_badge.text())
+            self.assertIn("ONLINE", window.server_badge.text())
+
+            payload["job"] = {"status": "running"}
+            window._apply_status(payload)
+            self.assertIn("INDEXLAUF", window.server_badge.text())
+            self.assertTrue(window.server_badge._animation.isActive())
+
+            payload["job"] = {"status": "error"}
+            window._apply_status(payload)
+            self.assertIn("#df9328", window.server_badge.text())
+            self.assertIn("PROBLEM", window.server_badge.text())
+
+            window._error("status", "nicht erreichbar")
+            self.assertIn("#d95c5c", window.server_badge.text())
+            self.assertIn("OFFLINE", window.server_badge.text())
+            window.deleteLater()
+
+    def test_interval_editor_is_protected_from_refresh_and_queues_save(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = IndexTrayWindow(root / "catalog", server_url="http://server")
+            window._set_interval(86_400)
+            self.assertEqual(window.interval_value.value(), 24)
+            self.assertEqual(window.interval_unit.currentData(), 3600)
+
+            window.interval_value.setValue(12)
+            window._apply_status({
+                "server": {"status": "online", "interval_seconds": 3600},
+                "job": {},
+                "content": {},
+            })
+            self.assertEqual(window.interval_value.value(), 12)
+
+            busy_worker = Mock()
+            busy_worker.isRunning.return_value = True
+            window._worker = busy_worker
+            window._save_settings()
+            operation, values = window._pending_operation
+            self.assertEqual(operation, "save_settings")
+            self.assertEqual(values["interval_seconds"], 43_200)
+            window._worker = None
+            window.deleteLater()
+
     def test_status_edges_worker_payloads_and_window_lifecycle(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -151,7 +205,7 @@ class IndexTrayWindowTests(unittest.TestCase):
             self.assertTrue(window.timer.isActive())
             event = Mock()
             window.closeEvent(event)
-            event.accept.assert_called_once()
+            event.ignore.assert_called_once()
             self.assertFalse(window.timer.isActive())
             window.deleteLater()
 

@@ -297,6 +297,10 @@ def build_stylesheet(
         border-color: #d95c5c;
     }}
 
+    QTabWidget#IndexControlTabs::tab-bar {{
+        left: 14px;
+    }}
+
     QLineEdit#GlobalSearchInput {{
         border-radius: 17px;
         padding-left: 13px;

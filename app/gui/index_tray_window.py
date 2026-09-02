@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
@@ -40,6 +40,48 @@ class _ServerWorker(QThread):
             self.completed.emit(self.operation, result)
 
 
+class ServerStatusBadge(QLabel):
+    """Compact server state badge with an animated indexing indicator."""
+
+    _frames = ("◐", "◓", "◑", "◒")
+    _colors = {
+        "online": "#27a989",
+        "offline": "#d95c5c",
+        "problem": "#df9328",
+        "indexing": "#27a989",
+        "connecting": "#718096",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._state = "connecting"
+        self._text = "VERBINDE …"
+        self._frame = 0
+        self._animation = QTimer(self)
+        self._animation.setInterval(160)
+        self._animation.timeout.connect(self._advance)
+        self.setObjectName("ServerStatusBadge")
+        self.set_state("connecting", self._text)
+
+    def set_state(self, state: str, text: str):
+        self._state, self._text = state, text
+        if state == "indexing":
+            self._animation.start()
+        else:
+            self._animation.stop()
+            self._frame = 0
+        self._render()
+
+    def _advance(self):
+        self._frame = (self._frame + 1) % len(self._frames)
+        self._render()
+
+    def _render(self):
+        marker = self._frames[self._frame] if self._state == "indexing" else "●"
+        color = self._colors.get(self._state, self._colors["connecting"])
+        self.setText(f'<span style="color:{color}">{marker}</span> {self._text}')
+
+
 class IndexTrayWindow(QDialog):
     """Control center for the remote Docker index service."""
 
@@ -54,7 +96,11 @@ class IndexTrayWindow(QDialog):
         )
         self.server_client = IndexServerClient(server_url, api_token, 2) if server_url else None
         self._worker = None
+        self._pending_operation = None
         self._settings_loaded = False
+        self._shutting_down = False
+        self._interval_dirty = False
+        self._interval_unit_seconds = 60
         self.setObjectName("IndexControlWindow")
         self.setWindowTitle("PapaGUI · Indexserver")
         self.setWindowFlag(Qt.WindowType.Tool, True)
@@ -71,11 +117,11 @@ class IndexTrayWindow(QDialog):
         caption.setObjectName("PopupCaption")
         heading.addWidget(caption)
         header.addLayout(heading, 1)
-        self.server_badge = QLabel("● VERBINDE …")
-        self.server_badge.setObjectName("ServerStatusBadge")
+        self.server_badge = ServerStatusBadge()
         header.addWidget(self.server_badge, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("IndexControlTabs")
         self.tabs.addTab(self._status_tab(), "Übersicht")
         self.tabs.addTab(self._settings_tab(), "Indexeinstellungen")
         self.tabs.addTab(self._log_tab(), "Aktivität")
@@ -209,8 +255,16 @@ class IndexTrayWindow(QDialog):
         hint.setObjectName("PopupCaption")
         layout.addWidget(hint)
         form = QFormLayout()
-        self.interval_spin = self._spin(5, 10080, " Minuten")
-        form.addRow("Automatischer Lauf", self.interval_spin)
+        interval_row = QHBoxLayout()
+        self.interval_value = self._spin(15, 2880)
+        self.interval_unit = QComboBox()
+        self.interval_unit.addItem("Minuten", 60)
+        self.interval_unit.addItem("Stunden", 3600)
+        interval_row.addWidget(self.interval_value, 1)
+        interval_row.addWidget(self.interval_unit)
+        form.addRow("Automatischer Lauf", interval_row)
+        self.interval_value.valueChanged.connect(self._mark_interval_dirty)
+        self.interval_unit.currentIndexChanged.connect(self._change_interval_unit)
         self.content_enabled = QCheckBox("Dokumentinhalte indexieren")
         form.addRow("Inhaltssuche", self.content_enabled)
         self.resource_profile = QComboBox()
@@ -244,9 +298,9 @@ class IndexTrayWindow(QDialog):
         layout.addLayout(form)
         row = QHBoxLayout()
         row.addStretch()
-        button = QPushButton("Servereinstellungen speichern")
-        button.clicked.connect(self._save_settings)
-        row.addWidget(button)
+        self.save_settings_button = QPushButton("Servereinstellungen speichern")
+        self.save_settings_button.clicked.connect(self._save_settings)
+        row.addWidget(self.save_settings_button)
         layout.addLayout(row)
         outer.addWidget(card)
         outer.addStretch()
@@ -259,6 +313,40 @@ class IndexTrayWindow(QDialog):
         widget.setRange(minimum, maximum)
         widget.setSuffix(suffix)
         return widget
+
+    def _mark_interval_dirty(self, *_args):
+        self._interval_dirty = True
+
+    def _change_interval_unit(self, *_args):
+        seconds = self.interval_value.value() * self._interval_unit_seconds
+        unit_seconds = int(self.interval_unit.currentData() or 60)
+        self._interval_unit_seconds = unit_seconds
+        minimum, maximum = ((15, 2880) if unit_seconds == 60 else (1, 48))
+        value = max(minimum, min(maximum, round(seconds / unit_seconds)))
+        with QSignalBlocker(self.interval_value):
+            self.interval_value.setRange(minimum, maximum)
+            self.interval_value.setValue(value)
+        self._interval_dirty = True
+
+    def _set_interval(self, seconds: int):
+        seconds = max(900, min(172_800, int(seconds or 86_400)))
+        use_hours = seconds % 3600 == 0
+        unit_seconds = 3600 if use_hours else 60
+        unit_index = self.interval_unit.findData(unit_seconds)
+        minimum, maximum = ((1, 48) if use_hours else (15, 2880))
+        with QSignalBlocker(self.interval_unit), QSignalBlocker(self.interval_value):
+            self.interval_unit.setCurrentIndex(max(0, unit_index))
+            self.interval_value.setRange(minimum, maximum)
+            self.interval_value.setValue(seconds // unit_seconds)
+        self._interval_unit_seconds = unit_seconds
+
+    @staticmethod
+    def _format_interval(seconds: int) -> str:
+        if seconds % 3600 == 0:
+            hours = seconds // 3600
+            return f"{hours} Stunde" if hours == 1 else f"{hours} Stunden"
+        minutes = max(15, seconds // 60)
+        return f"{minutes} Minuten"
 
     def _log_tab(self):
         page = QWidget()
@@ -285,12 +373,16 @@ class IndexTrayWindow(QDialog):
         if self.server_client:
             self._start("status")
         else:
-            self.server_badge.setText("● LOKAL")
+            self.server_badge.set_state("online", "LOKAL")
             self._apply_job(read_state(self.state_dir))
             self._apply_content(read_state(self.content_state_dir) if self.content_state_dir else {})
 
     def _start(self, operation, payload=None):
-        if not self.server_client or (self._worker and self._worker.isRunning()):
+        if self._shutting_down or not self.server_client:
+            return
+        if self._worker and self._worker.isRunning():
+            if operation != "status":
+                self._pending_operation = (operation, payload)
             return
         worker = _ServerWorker(self.server_client, operation, payload, self)
         worker.completed.connect(self._result)
@@ -304,6 +396,10 @@ class IndexTrayWindow(QDialog):
         if worker is self._worker:
             self._worker = None
         worker.deleteLater()
+        if self._pending_operation and not self._shutting_down:
+            operation, payload = self._pending_operation
+            self._pending_operation = None
+            QTimer.singleShot(0, lambda: self._start(operation, payload))
 
     def _result(self, operation, payload):
         if operation == "status":
@@ -311,29 +407,64 @@ class IndexTrayWindow(QDialog):
         elif operation in {"settings", "save_settings"}:
             self._apply_settings(dict(payload))
             self._settings_loaded = True
+            if operation == "save_settings":
+                self._interval_dirty = False
             self.last_refresh_label.setText("Servereinstellungen gespeichert" if operation == "save_settings" else "Einstellungen geladen")
         else:
             self.last_refresh_label.setText("Aktion angenommen")
             QTimer.singleShot(400, self.refresh)
 
     def _error(self, operation, message):
-        self.server_badge.setText("● OFFLINE")
-        self.server_badge.setProperty("status", "offline")
-        self.server_status_label.setText("Indexserver nicht erreichbar")
+        unreachable = operation in {"status", "settings"}
+        self.server_badge.set_state(
+            "offline" if unreachable else "problem",
+            "OFFLINE" if unreachable else "PROBLEM",
+        )
+        self.server_status_label.setText(
+            "Indexserver nicht erreichbar"
+            if unreachable
+            else "Bei der Serveraktion ist ein Problem aufgetreten"
+        )
         self.server_detail_label.setText(message)
         if operation not in {"status", "settings"}:
             QMessageBox.warning(self, "Serveraktion fehlgeschlagen", message)
 
     def _apply_status(self, payload):
         server = dict(payload.get("server") or {})
-        self.server_badge.setText("● ONLINE")
-        self.server_badge.setProperty("status", "online")
+        job = dict(payload.get("job") or {})
+        catalog = dict(payload.get("catalog") or {})
+        content = dict(payload.get("content") or {})
+        job_status = str(job.get("status") or "")
+        catalog_status = str(catalog.get("status") or "")
+        content_status = str(content.get("status") or "")
+        active = (
+            job_status in {"catalog", "content", "publishing", *ACTIVE_STATUSES}
+            or content_status in ACTIVE_STATUSES
+            or content_status == "running"
+        )
+        if str(server.get("status") or "online") != "online":
+            self.server_badge.set_state("problem", "PROBLEM")
+        elif (
+            "error" in {job_status, catalog_status, content_status}
+            or any(state.get("error") for state in (job, catalog, content))
+            or int(content.get("failed_documents") or 0) > 0
+            or int(content.get("failed_count") or 0) > 0
+        ):
+            self.server_badge.set_state("problem", "PROBLEM")
+        elif active:
+            self.server_badge.set_state("indexing", "INDEXLAUF")
+        else:
+            self.server_badge.set_state("online", "ONLINE")
         self.server_status_label.setText("Docker-Indexdienst ist erreichbar")
         interval = int(server.get("interval_seconds") or 0)
-        self.server_detail_label.setText(f"Quelle: {server.get('source') or '–'}\nAutomatischer Lauf: alle {max(1, interval // 60)} Minuten")
-        self.interval_spin.setValue(max(5, interval // 60))
-        self._apply_job(dict(payload.get("job") or {}))
-        self._apply_content(dict(payload.get("content") or {}))
+        self.server_detail_label.setText(
+            f"Quelle: {server.get('source') or '–'}\n"
+            f"Automatischer Lauf: alle {self._format_interval(interval)}"
+        )
+        if not self._interval_dirty:
+            self._set_interval(interval)
+        self._apply_job(job)
+        self._apply_content(content)
         generation = dict(payload.get("generation") or {})
         name = str(generation.get("generation") or "")
         self.generation_label.setText(f"Generation {name}" if name else "Noch keine Generation verfügbar")
@@ -424,6 +555,8 @@ class IndexTrayWindow(QDialog):
             self._action("delete")
 
     def _apply_settings(self, v):
+        if "interval_seconds" in v:
+            self._set_interval(int(v["interval_seconds"]))
         self.content_enabled.setChecked(bool(v.get("content_indexing_enabled", True)))
         self.resource_profile.setCurrentIndex(max(0, self.resource_profile.findData(v.get("resource_profile", "balanced"))))
         for widget, key, default in ((self.max_file_size, "max_file_size_mb", 100), (self.max_characters, "max_extracted_characters", 2000000), (self.priority_documents, "priority_documents_per_project", 24), (self.ocr_pages, "ocr_max_pages", 5), (self.ocr_extended_pages, "ocr_extended_max_pages", 25), (self.ocr_threshold, "ocr_extension_threshold", 500), (self.ocr_timeout, "ocr_timeout_seconds", 10), (self.pdf_timeout, "pdf_text_timeout_seconds", 45)):
@@ -435,7 +568,7 @@ class IndexTrayWindow(QDialog):
         self.ocr_enabled.setChecked(bool(v.get("ocr_enabled", True)))
 
     def _save_settings(self):
-        values = {"interval_seconds": self.interval_spin.value() * 60, "content_indexing_enabled": self.content_enabled.isChecked(), "resource_profile": self.resource_profile.currentData(), "max_file_size_mb": self.max_file_size.value(), "max_extracted_characters": self.max_characters.value(), "content_extensions": self.extensions.text().strip(), "excluded_folders": self.excluded_folders.text().strip(), "preferred_document_patterns": self.preferred_patterns.text().strip(), "priority_documents_per_project": self.priority_documents.value(), "newest_years_first": self.newest_first.isChecked(), "ocr_enabled": self.ocr_enabled.isChecked(), "ocr_max_pages": self.ocr_pages.value(), "ocr_extended_max_pages": self.ocr_extended_pages.value(), "ocr_extension_threshold": self.ocr_threshold.value(), "ocr_timeout_seconds": self.ocr_timeout.value(), "pdf_text_timeout_seconds": self.pdf_timeout.value()}
+        values = {"interval_seconds": self.interval_value.value() * int(self.interval_unit.currentData() or 60), "content_indexing_enabled": self.content_enabled.isChecked(), "resource_profile": self.resource_profile.currentData(), "max_file_size_mb": self.max_file_size.value(), "max_extracted_characters": self.max_characters.value(), "content_extensions": self.extensions.text().strip(), "excluded_folders": self.excluded_folders.text().strip(), "preferred_document_patterns": self.preferred_patterns.text().strip(), "priority_documents_per_project": self.priority_documents.value(), "newest_years_first": self.newest_first.isChecked(), "ocr_enabled": self.ocr_enabled.isChecked(), "ocr_max_pages": self.ocr_pages.value(), "ocr_extended_max_pages": self.ocr_extended_pages.value(), "ocr_extension_threshold": self.ocr_threshold.value(), "ocr_timeout_seconds": self.ocr_timeout.value(), "pdf_text_timeout_seconds": self.pdf_timeout.value()}
         self._start("save_settings", values)
 
     def _refresh_log(self):
@@ -448,4 +581,14 @@ class IndexTrayWindow(QDialog):
 
     def closeEvent(self, event: QCloseEvent):
         self.timer.stop()
-        event.accept()
+        self.hide()
+        event.ignore()
+
+    def shutdown(self):
+        """Stop polling and let an in-flight server request finish before Qt cleanup."""
+        self._shutting_down = True
+        self.timer.stop()
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            worker.wait(3_000)

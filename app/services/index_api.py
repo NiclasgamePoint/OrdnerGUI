@@ -109,7 +109,11 @@ class _IndexApiHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.status_provider())
             return
         if path == "/v1/server/settings":
-            self._json(HTTPStatus.OK, {"settings": asdict(load_index_options())})
+            settings = asdict(load_index_options())
+            if self.status_provider is not None:
+                server = dict(self.status_provider().get("server") or {})
+                settings["interval_seconds"] = server.get("interval_seconds")
+            self._json(HTTPStatus.OK, {"settings": settings})
             return
         if path == "/v1/index/current":
             self._serve_file(self.data_path / "publications" / "current.json", "application/json")
@@ -227,6 +231,19 @@ class _IndexApiHandler(BaseHTTPRequestHandler):
             if not isinstance(values, dict):
                 self._error(HTTPStatus.BAD_REQUEST, "Indexeinstellungen fehlen.")
                 return
+            if "interval_seconds" in values:
+                try:
+                    interval = float(values["interval_seconds"])
+                except (TypeError, ValueError):
+                    self._error(HTTPStatus.BAD_REQUEST, "Ungültiges Indexintervall.")
+                    return
+                if not 900 <= interval <= 172_800:
+                    self._error(
+                        HTTPStatus.BAD_REQUEST,
+                        "Das Indexintervall muss zwischen 15 Minuten und "
+                        "48 Stunden liegen.",
+                    )
+                    return
             defaults = load_index_options()
             allowed = IndexOptions.__dataclass_fields__
             options = IndexOptions(

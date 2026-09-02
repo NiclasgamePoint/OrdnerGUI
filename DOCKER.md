@@ -16,9 +16,11 @@ Unter Linux genügt:
 
 Das Skript liest die bereits in PapaGUI gewählte Datenquelle, erzeugt einmalig ein
 lokales API-Token, baut beziehungsweise aktualisiert das Image und startet den
-Indexdienst per Docker Compose im Hintergrund. Serverdaten liegen getrennt in
-`docker-server-data`, der verifizierte Clientcache in `client-data`. Die GUI baut
-niemals selbst einen Index. Der Build- und Startlog liegt unter
+Indexdienst per Docker Compose sowie die eigenständige Indexserver-Steuerung im
+Hintergrund. Sie bleibt auch nach dem Schließen des Hauptfensters im Systemtray
+verfügbar. Serverdaten liegen getrennt in `docker-server-data`, der verifizierte
+Clientcache in `client-data`. Die GUI baut niemals selbst einen Index. Der
+Build- und Startlog liegt unter
 `docker-server-data/logs/docker-indexer-startup.log`; Laufzeitlogs zeigt
 weiterhin
 `docker compose logs -f indexer`.
@@ -56,8 +58,22 @@ Indexlauf den neuen Stand. Fehlt lokal das Docker-Buildx-Plugin, fällt
 
 ## Steuerung über das Systemtray
 
-Der Eintrag **Indexserver** im PapaGUI-Systemtray öffnet die zentrale
-Bedienoberfläche für den Docker-Dienst. Sie zeigt den Live-Zustand des Servers,
+`./start.sh` startet das separate Indexserver-Tray automatisch. Der Eintrag
+**Indexserver** im PapaGUI-Systemtray aktiviert dieselbe zentrale
+Bedienoberfläche für den Docker-Dienst. Die Oberfläche ist nicht an das
+PapaGUI-Hauptfenster gebunden und kann unter Linux auch eigenständig gestartet
+werden:
+
+```bash
+./index-tray.sh
+```
+
+Mit `./index-tray.sh --background` startet sie zunächst nur als Tray-Icon. Ein
+weiterer Aufruf öffnet die bereits laufende Instanz, statt ein zweites Tray zu
+erzeugen. Das Hauptprogramm muss dafür nicht laufen; benötigt werden nur eine
+erreichbare Server-API und das API-Token in `docker-config/api-token`.
+
+Die Konsole zeigt den Live-Zustand des Servers,
 die aktuelle Katalog-/Inhaltsphase, Worker, Fortschritt, Generation und die drei
 Serverbackups. Dort lassen sich ein inkrementeller Lauf, ein vollständiger
 Neuaufbau, Abbruch, Löschen mit anschließendem Neuaufbau und ein kontrollierter
@@ -65,6 +81,9 @@ Containerneustart auslösen.
 
 OCR, Ressourcenprofil, Dateiformate, Größenlimits, Ausschlüsse, Priorisierung und
 das automatische Laufintervall werden ebenfalls dort serverseitig gespeichert.
+Das Laufintervall besteht aus Zahlenfeld und Einheit (Minuten oder Stunden), ist
+auf 15 Minuten bis 48 Stunden begrenzt und bleibt in
+`docker-server-data/index-server-settings.json` über Containerneustarts erhalten.
 Die Hauptanwendung enthält im Docker-Modus nur noch echte Clientoptionen wie
 Suchumfang und Abrufintervall. Die Steuerbefehle laufen authentifiziert über die
 Server-API und funktionieren daher später unverändert gegen die Synology. Für den

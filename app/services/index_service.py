@@ -37,7 +37,8 @@ class IndexService:
             raise ValueError("Das Indexintervall muss größer als null sein.")
         self.source_path = source_path.resolve()
         self.data_path = data_path.resolve()
-        self.interval_seconds = interval_seconds
+        self._settings_path = self.data_path / "index-server-settings.json"
+        self.interval_seconds = self._load_interval(interval_seconds)
         self.layout = IndexLayout(self.data_path / "index")
         self.customer_database_path = self.data_path / "customers.db"
         self.catalog_state_dir = self.layout.jobs_dir / "catalog"
@@ -52,6 +53,23 @@ class IndexService:
         self._requested_delete = False
         self._started_at = utc_now()
         self._state: dict[str, object] = {}
+
+    def _load_interval(self, default: float) -> float:
+        try:
+            payload = json.loads(self._settings_path.read_text(encoding="utf-8"))
+            interval = float(payload["interval_seconds"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return default
+        return interval if 900 <= interval <= 172_800 else default
+
+    def _save_interval(self, interval: float) -> None:
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        temporary = self.data_path / f".index-server-settings-{uuid.uuid4().hex}.json"
+        temporary.write_text(
+            json.dumps({"interval_seconds": interval}, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(self._settings_path)
 
     def stop(self) -> None:
         """Request a graceful stop between durable indexing phases."""
@@ -88,11 +106,13 @@ class IndexService:
         with self._control_lock:
             if action.startswith("interval:"):
                 interval = float(action.partition(":")[2])
-                if interval < 60:
+                if not 900 <= interval <= 172_800:
                     raise ValueError(
-                        "Das Indexintervall muss mindestens 60 Sekunden betragen."
+                        "Das Indexintervall muss zwischen 15 Minuten und "
+                        "48 Stunden liegen."
                     )
                 self.interval_seconds = interval
+                self._save_interval(interval)
             elif action == "run":
                 self._requested_run = True
             elif action == "rebuild":
