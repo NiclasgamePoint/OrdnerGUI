@@ -107,6 +107,7 @@ veröffentlicht.
 
 - [Architektur](docs/architecture.md)
 - [Client und Offlinebetrieb](docs/client.md)
+- [Wiederhergestelltes v0.4.1-GUI-Design und Feature-Migration](docs/gui-design-restoration.md)
 - [Serverbetrieb, Docker und Synology](docs/server/operations.md)
 - [API v2](docs/api.md)
 - [Datenformate und Migration](docs/data-and-migrations.md)

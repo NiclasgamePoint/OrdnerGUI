@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Das vollständige v0.4.1-Erscheinungsbild von Hauptfenster,
+  Einstellungs-Popup, Kundenmasken, Viewer und Indexserver-Tray auf die getrennte
+  0.4.2-Clientarchitektur zurückportiert; Client und Server bleiben vollständig
+  getrennt und sämtliche Indexaktionen laufen weiterhin nur über die API.
+- Die vollständige read-only-Katalogschnittstelle im SearchCoordinator
+  freigelegt, damit die wiederhergestellte Karten-/Ordnernavigation keine
+  Adapter oder Index-Writer direkt kennt.
+- GUI-Migrationsmatrix für neue Offline-, Generations-, Pfad-, Konflikt- und
+  Adminfunktionen ergänzt.
+- Statistik-Seite wieder mit lokalen Kunden- und Suchkennzahlen gespeist und
+  den alten **Indexserver öffnen**-Button als reine Tray-Weiterleitung ergänzt.
+
 ## 0.4.2 - Client/Server Split
 
 - Repository in die unabhängigen Pakete `papagui-client`, `papagui-server` und

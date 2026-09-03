@@ -14,7 +14,10 @@ from papagui_client.application.catalog import CatalogSearchService
 from papagui_client.application.customers import OfflineFirstCustomerStore
 from papagui_client.application.journals import OfflineFirstJournalStore
 from papagui_client.application.models import (
+    CatalogFolderDetails,
+    CatalogFolderHit,
     CatalogHit,
+    CatalogProjectRootHit,
     CatalogQuery,
     CustomerView,
     CustomerWriteResult,
@@ -25,6 +28,8 @@ from papagui_client.application.models import (
     PendingCustomerMutation,
     ReplayResult,
     SyncResult,
+    GlobalSearchPage,
+    GlobalSearchQuery,
 )
 from papagui_client.application.sync import SyncCoordinator as GenerationSyncCoordinator
 
@@ -127,6 +132,46 @@ class SearchCoordinator:
             self._data_session.current.catalog_search.search(self.last_query)
         )
         return list(self.last_results)
+
+    # The visual shell consumes the complete read-only catalog port.  Keep the
+    # forwarding here so widgets never have to reach through the composition
+    # root to an adapter (and, crucially, never gain access to an index writer).
+    def global_search(self, query: GlobalSearchQuery) -> GlobalSearchPage:
+        return self._catalog.global_search(query)
+
+    def facets(self, source_id: str | None = None):
+        return self._catalog.facets(source_id)
+
+    def folders(
+        self,
+        source_id: str | None = None,
+        *,
+        query: str = "",
+        project_only: bool = False,
+    ) -> tuple[CatalogFolderHit, ...]:
+        return self._catalog.folders(
+            source_id,
+            query=query,
+            project_only=project_only,
+        )
+
+    def folder(self, source_id: str, relative_path: str) -> CatalogFolderDetails:
+        return self._catalog.folder(source_id, relative_path)
+
+    def project_roots(
+        self, source_id: str | None = None
+    ) -> tuple[CatalogProjectRootHit, ...]:
+        return self._catalog.project_roots(source_id)
+
+    def history(self) -> tuple[str, ...]:
+        return self._catalog.history()
+
+    def clear_history(self) -> None:
+        self._catalog.clear_history()
+
+    @property
+    def _catalog(self) -> CatalogSearchService:
+        return self._data_session.current.catalog_search
 
 
 class NavigationCoordinator:

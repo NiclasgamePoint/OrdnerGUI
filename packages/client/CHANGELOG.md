@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Vollständiges v0.4.1-Kartenlayout für Hauptfenster, Suche, Ordner, Kunden,
+  Einstellungen, Viewer und eigenständiges Server-Tray wiederhergestellt, ohne
+  die Client-/Server-Paketgrenzen oder den read-only Indexzugriff aufzuweichen.
+- Neue 0.4.2-Synchronisations-, Offline-, Konflikt-, Pfad- und Adminfunktionen in
+  die wiederhergestellten Bedienelemente integriert und verbleibende UX-Punkte
+  dokumentiert.
+- Alte Statistikansicht mit lokalen Kunden- und Suchkennzahlen sowie die
+  Weiterleitung **Indexserver öffnen** zum eigenständigen Tray wiederhergestellt.
+
 ## 0.4.2
 
 - Erstes eigenständig versioniertes Clientpaket mit Hauptanwendung und

@@ -53,6 +53,14 @@ Der Server darf Contracts importieren, aber niemals Client oder PySide6.
 Der Client darf Contracts importieren, aber weder Servermodule noch einen
 Index-Writer oder Kundenerkennungsjob.
 
+Die `gui`-Schicht verwendet wieder die sichtbaren v0.4.1-Komponenten
+(`AppHeader`, Karten-Seiten, Einstellungs-Popup, Kunden-/Ordner-Splitter und
+Indexserver-Tray). Diese Komponenten sind ausschließlich Views und lokale
+Presentermodelle. Datenzugriff und Änderungen laufen weiter über
+`SearchCoordinator`, `CustomerCoordinator`, `JournalCoordinator`,
+`SyncCoordinator` und den `ServerControlGateway`; der Design-Rückbau erzeugt
+keine Kompatibilitätsverbindung zum alten Monolithen.
+
 ## OOP-Leitlinien
 
 - Views zeigen Zustand an und senden Benutzerabsichten; Coordinatoren führen

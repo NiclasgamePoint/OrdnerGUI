@@ -9,7 +9,8 @@ import sys
 
 
 class TrayProcessLauncher:
-    def command(self) -> list[str]:
+    def command(self, *, background: bool = True) -> list[str]:
+        arguments = ["--background"] if background else []
         if getattr(sys, "frozen", False):
             executable = Path(sys.executable)
             if sys.platform == "darwin":
@@ -22,11 +23,11 @@ class TrayProcessLauncher:
                         / "MacOS"
                         / "papagui-tray"
                     )
-                    return [str(tray), "--background"]
+                    return [str(tray), *arguments]
             suffix = ".exe" if os.name == "nt" else ""
             sibling = executable.with_name(f"papagui-tray{suffix}")
-            return [str(sibling), "--background"]
-        return [sys.executable, "-m", "papagui_client.entrypoints.tray", "--background"]
+            return [str(sibling), *arguments]
+        return [sys.executable, "-m", "papagui_client.entrypoints.tray", *arguments]
 
     @staticmethod
     def _macos_bundle(executable: Path) -> Path | None:
@@ -39,6 +40,14 @@ class TrayProcessLauncher:
         return None
 
     def start(self) -> None:
+        self._start(self.command())
+
+    def show(self) -> None:
+        """Open the tray window or signal the already running tray instance."""
+        self._start(self.command(background=False))
+
+    @staticmethod
+    def _start(command: list[str]) -> None:
         options: dict[str, object] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
@@ -51,4 +60,4 @@ class TrayProcessLauncher:
             )
         else:
             options["start_new_session"] = True
-        subprocess.Popen(self.command(), **options)
+        subprocess.Popen(command, **options)

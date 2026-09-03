@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -26,7 +25,8 @@ from papagui_client.viewers.documents import (
 )
 from papagui_client.viewers.models import ConversionOutcome, PreviewKind
 
-from .buttons import viewer_button
+from papagui_client.gui.widgets.buttons import AppButton, BusyIndicator
+
 from .conversion_worker import FileConversionWorker
 from .image import ImageViewerWidget
 from .pdf import PdfViewerWidget
@@ -67,8 +67,8 @@ class FileViewerWidget(QWidget):
         self.file_info_label = QLabel("Keine Datei geladen")
         self.file_info_label.setObjectName("ViewerFileInfo")
         header.addWidget(self.file_info_label, 1)
-        self.open_folder_button = viewer_button("Ordner")
-        self.open_external_button = viewer_button("Extern öffnen")
+        self.open_folder_button = AppButton("Ordner", AppButton.SECONDARY)
+        self.open_external_button = AppButton("Extern öffnen", AppButton.SECONDARY)
         self.open_folder_button.clicked.connect(self.open_containing_folder)
         self.open_external_button.clicked.connect(self.open_externally)
         self.open_folder_button.setEnabled(False)
@@ -82,18 +82,17 @@ class FileViewerWidget(QWidget):
         self.empty_label = QLabel("Keine Datei geladen")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loading_widget = QWidget()
+        self.loading_widget.setObjectName("ViewerLoading")
         loading_layout = QVBoxLayout(self.loading_widget)
+        loading_layout.setContentsMargins(24, 24, 24, 24)
         loading_layout.addStretch()
-        self.loading_indicator = QProgressBar()
-        self.loading_indicator.setRange(0, 0)
-        self.loading_indicator.setTextVisible(False)
-        self.loading_indicator.setMaximumWidth(220)
+        self.loading_indicator = BusyIndicator()
+        self.loading_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loading_label = QLabel("Datei wird vorbereitet …")
+        self.loading_label.setObjectName("ViewerLoadingText")
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loading_label.setWordWrap(True)
-        loading_layout.addWidget(
-            self.loading_indicator, alignment=Qt.AlignmentFlag.AlignCenter
-        )
+        loading_layout.addWidget(self.loading_indicator, alignment=Qt.AlignmentFlag.AlignCenter)
         loading_layout.addWidget(self.loading_label)
         loading_layout.addStretch()
         self.pdf_viewer = PdfViewerWidget()
@@ -154,6 +153,7 @@ class FileViewerWidget(QWidget):
         self._load_generation += 1
         self._cancel_conversions()
         self._cleanup_active_converter()
+        self.loading_indicator.stop()
         self._word_preview_error = ""
         self.pdf_viewer.close_document()
         self.current_file = path
@@ -190,6 +190,7 @@ class FileViewerWidget(QWidget):
         )
 
     def _start_conversion(self, operation: str, path: Path, message: str) -> None:
+        self.loading_indicator.start()
         self.loading_label.setText(message)
         self.stack.setCurrentWidget(self.loading_widget)
         self.conversion_meta_label.setText(
@@ -219,6 +220,7 @@ class FileViewerWidget(QWidget):
         try:
             if generation != self._load_generation:
                 return
+            self.loading_indicator.stop()
             if error:
                 if error != "abgebrochen":
                     self._handle_conversion_error(operation, error)
@@ -340,6 +342,7 @@ class FileViewerWidget(QWidget):
 
     def shutdown(self) -> None:
         self._load_generation += 1
+        self.loading_indicator.stop()
         self._cancel_conversions()
         for worker in tuple(self._conversion_workers):
             worker.wait()

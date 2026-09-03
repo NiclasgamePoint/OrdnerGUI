@@ -165,7 +165,7 @@ class ClientContainer:
 
     @property
     def onboarding_required(self) -> bool:
-        return not self.settings.source_mappings
+        return not self.settings.server_url.strip() or not self.settings.source_mappings
 
     def save_client_settings(self, settings: ClientSettings) -> ClientSettings:
         """Persist preferences, then re-apply environment overrides visibly."""

@@ -6,6 +6,13 @@ Der Desktop-Client zeigt und bearbeitet Kunden, durchsucht den lokalen
 Dokumentkatalog und synchronisiert Snapshots mit dem Server. Er baut selbst
 keinen Index auf und schreibt niemals in eine heruntergeladene Generation.
 
+Die sichtbare Oberfläche verwendet wieder vollständig das Karten- und
+Navigationsdesign von v0.4.1. Diese Präsentationsschicht ist über die
+Client-Application-Ports mit der getrennten 0.4.2-Architektur verbunden. Eine
+detaillierte Zuordnung der wiederhergestellten Ansichten und der noch
+ausstehenden neuen Bedienoberflächen steht unter
+[Wiederherstellung des v0.4.1-GUI-Designs](gui-design-restoration.md).
+
 ## Lokaler Zustand
 
 Der Clientdatenordner enthält:
@@ -147,13 +154,19 @@ Beide Apps müssen deshalb gemeinsam installiert oder verschoben werden. Es gibt
 keine eingebettete zweite Tray-Kopie; Server und Docker sind in keinem Bundle
 enthalten.
 
-Die Einstellungen sind über **Client-Einstellungen** im Hauptfenster erreichbar
-und auf die Seiten Verbindung, Pfadzuordnungen sowie Synchronisation/Design
-verteilt. Ohne Server-URL oder ohne Pfadzuordnung startet automatisch das
-Onboarding. Speichern verdrahtet HTTP-Gateways und `SourcePathResolver` neu und
-plant einen bereits laufenden Sync-Timer sofort mit dem neuen Intervall. Zulässig
-sind 15 Minuten bis 48 Stunden. Ein Wechsel des Clientdatenordners erfordert
-bewusst einen Neustart.
+Die Einstellungen sind über die Zahnrad-Schaltfläche der alten Kopfzeile
+erreichbar. Das wiederhergestellte Popup verwendet die Bereiche **Allgemein**,
+**Indexierung**, **Suche**, **Kundenerkennung**, **Statistik** und **Aussehen**;
+Serververbindung, Pfadzuordnungen und lokale Synchronisation sind in dieses
+Raster eingeordnet. Die Statistik-Seite zeigt wieder die aus der lokalen
+Kundenkopie und dem aktiven Suchkatalog ermittelten Kennzahlen; darunter bleibt
+die 0.4.2-Zusammenfassung der Clientkonfiguration sichtbar. **Indexserver
+öffnen** startet ausschließlich den unabhängigen Tray-Prozess und führt keinen
+Indexcode im Client aus. Ohne Server-URL oder ohne Pfadzuordnung startet
+automatisch das Onboarding. Speichern verdrahtet HTTP-Gateways und
+`SourcePathResolver` neu und plant einen bereits laufenden Sync-Timer sofort mit
+dem neuen Intervall. Zulässig sind 15 Minuten bis 48 Stunden. Ein Wechsel des
+Clientdatenordners erfordert bewusst einen Neustart.
 
 Umgebungsvariablen haben Vorrang vor persistierten Werten. Die Oberfläche zeigt
 diese Herkunft durch gesperrte Eingaben mit Hinweistext, sodass ein scheinbar
@@ -198,3 +211,7 @@ Recognition-/Vorschlags-Review, das eigenständige Server-Tray sowie die
 persistente grafische Clientkonfiguration. Der Client enthält weiterhin weder
 Index-Writer noch Kundenerkennung; diese Verantwortlichkeiten bleiben
 ausschließlich auf dem Server.
+
+Der nachträgliche Design-Rückbau ersetzt keine dieser Funktionen. Er stellt
+die v0.4.1-Interaktion wieder her und führt die neuen 0.4.2-Funktionen dahinter
+über Ports, Gateways und Presentermodelle aus.

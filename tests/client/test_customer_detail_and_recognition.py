@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from papagui_contracts import (
@@ -22,7 +24,12 @@ from papagui_contracts.recognition import (
 from papagui_client.adapters.http_api import HttpServerControlGateway
 from papagui_client.adapters.http_review import HttpReviewGateway
 from papagui_client.application.models import CustomerSyncState, JournalEntryView
-from papagui_client.gui.customer_detail import CustomerDetailWidget, JournalEditorDialog
+from papagui_client.gui.customer_detail import (
+    CustomerDataSuggestionsDialog,
+    CustomerDetailWidget,
+    JournalEditorDialog,
+)
+from papagui_client.gui.customer_editor import CustomerEditorDialog
 from papagui_client.gui.recognition_review import RecognitionReviewDialog
 from papagui_client.gui.main import ClientMainWindow
 from papagui_client.application.models import (
@@ -436,3 +443,240 @@ def test_main_window_customer_detail_journal_review_and_global_navigation(
 
     assert not hasattr(container, "server_control")
     window.close()
+
+
+def test_restored_customer_cards_inline_actions_and_portable_projects(
+    application, monkeypatch
+):
+    widget = CustomerDetailWidget()
+    customer = _customer()
+    customer_events = []
+    journal_events = []
+    folder_events = []
+    widget.customerSaveRequested.connect(customer_events.append)
+    widget.journalCreateRequested.connect(journal_events.append)
+    widget.folderActivated.connect(folder_events.append)
+
+    widget.set_customer(
+        customer,
+        {
+            "archive:2026/Beratung/Muster": {
+                "local_path": "/mnt/archive/2026/Beratung/Muster",
+                "file_count": 4,
+                "last_modified": "2026-04-05T12:30:00",
+            }
+        },
+    )
+    assert widget.objectName() == "CustomerPage"
+    assert widget.splitter.count() == 2
+    assert widget.customer_tabs.tabText(0) == "Notizen"
+    assert widget.customer_tabs.tabText(1) == "Journal"
+    assert widget.tags.item(0).text() == "A"
+    assert widget.contacts.item(0, 0).text() == "Ada"
+    assert widget.projects.count() == 1
+
+    widget._folder_rows[0].activated.emit(widget._folder_rows[0].payload)
+    assert folder_events == ["archive:2026/Beratung/Muster"]
+
+    widget.notes.setPlainText("Geändert")
+    widget._emit_notes_change()
+    assert customer_events[-1].notes == ("Geändert",)
+    widget._emit_notes_change()
+    assert "gespeichert" not in widget.notes_status.text().casefold()
+
+    widget._create_journal_entry()
+    assert "Text" in widget.journal_status.text()
+    widget.journal_title_input.setText("Termin")
+    widget.journal_input.setPlainText("Besprechung")
+    widget._create_journal_entry()
+    assert journal_events[-1].title == "Termin"
+    assert journal_events[-1].customer_id == 7
+
+    project_without_source = CustomerProject(service_type="Messung")
+    widget.set_customer(replace(customer, projects=(project_without_source,)))
+    assert "keine Quelle" in widget.projects.item(0).text()
+    widget.set_customer(replace(customer, entity_type="Privatperson"))
+    assert widget.contacts.isColumnHidden(1)
+    widget.close()
+
+
+def test_restored_journal_cards_and_suggestion_cards_cover_actions(
+    application, monkeypatch
+):
+    widget = CustomerDetailWidget()
+    widget.set_customer(_customer())
+    journal = JournalEntryView(
+        "4",
+        CustomerJournalEntry(
+            id=4,
+            customer_id=7,
+            entry_number=2,
+            title="Termin",
+            body="Text",
+            created_at="2026-01-02T03:04:00",
+        ),
+        CustomerSyncState.CONFLICT,
+    )
+    widget.set_journal((journal,))
+    assert "2026" in widget.format_journal_date("2026-01-02T03:04:00")
+    assert widget.format_journal_date("") == "-"
+    assert widget.format_journal_date("bad") == "bad"
+
+    class FakeMenu:
+        choice = "Bearbeiten"
+
+        def __init__(self, _parent):
+            self.actions = []
+
+        def addAction(self, text):
+            action = SimpleNamespace(text=text)
+            self.actions.append(action)
+            return action
+
+        def exec(self, _position):
+            if self.choice is None:
+                return None
+            return next(item for item in self.actions if item.text == self.choice)
+
+    edits = []
+    deletes = []
+    widget.journalEditRequested.connect(edits.append)
+    widget.journalDeleteRequested.connect(deletes.append)
+    monkeypatch.setattr("papagui_client.gui.customer_detail.QMenu", FakeMenu)
+    card = widget._journal_cards[0]
+    card._open_context_menu(QPoint())
+    assert edits == [journal]
+    FakeMenu.choice = "Löschen"
+    card._open_context_menu(QPoint())
+    assert deletes == [journal]
+    FakeMenu.choice = None
+    card._open_context_menu(QPoint())
+
+    suggestion = _suggestion()
+    contact_suggestion = replace(
+        suggestion,
+        id=5,
+        suggestion_type="contact",
+        contact=Contact("Bea", "Einkauf", "bea@example.test", "555"),
+    )
+    events = []
+    dialog = CustomerDataSuggestionsDialog((suggestion, contact_suggestion), 3)
+    dialog.decisionRequested.connect(
+        lambda value, action, revision: events.append((value.id, action, revision))
+    )
+    dialog._decide(suggestion, "accept")
+    assert events == [(4, "accept", 3)]
+    dialog.close()
+    empty = CustomerDataSuggestionsDialog((), 0)
+    empty.close()
+
+    widget.set_suggestions((suggestion,), 3)
+    opened = []
+
+    class SuggestionDialog:
+        def __init__(self, *_args):
+            self.decisionRequested = SimpleNamespace(connect=lambda callback: opened.append(callback))
+
+        def exec(self):
+            opened.append("exec")
+
+    monkeypatch.setattr(
+        "papagui_client.gui.customer_detail._CustomerSuggestionsDialog",
+        SuggestionDialog,
+    )
+    widget._open_suggestions()
+    assert opened[-1] == "exec"
+    widget.set_suggestions((), 0)
+    widget._open_suggestions()
+    widget.close()
+
+
+def test_restored_customer_editor_four_tabs_validation_and_read_only_projects(
+    application, monkeypatch
+):
+    no_source = CustomerProject(service_type="Messung", year=2025)
+    original = replace(_customer(), projects=(_customer().projects[0], no_source))
+    dialog = CustomerEditorDialog(original, explanation="Konflikt manuell zusammenführen")
+    assert [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())] == [
+        "Stammdaten",
+        "Kontakte",
+        "Notiz",
+        "Dateien",
+    ]
+    assert dialog.selected_folders_table.rowCount() == 2
+    assert not dialog.selected_folders_table.editTriggers()
+    assert not dialog.found_folders_table.isEnabled()
+    assert dialog._project_source(no_source) == ""
+
+    dialog.entity_type.setCurrentText("Privatperson")
+    assert dialog.contacts_table.isColumnHidden(1)
+    dialog._append_contact(Contact("Neu", phone="99"))
+    dialog.contacts_table.setCurrentCell(dialog.contacts_table.rowCount() - 1, 0)
+    dialog._remove_contact()
+    dialog.contacts_table.setCurrentCell(-1, -1)
+    dialog._remove_contact()
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    blank = CustomerEditorDialog()
+    blank.company.clear()
+    blank.display_name.clear()
+    blank._save()
+    assert warnings
+
+    dialog.company.setText("Neue GmbH")
+    dialog.note_text.clear()
+    dialog.service_types.setText("Planung, Beratung")
+    changed = dialog.customer()
+    assert changed.display_name == "Neue GmbH"
+    assert changed.notes == ()
+    assert changed.service_types == ("Planung", "Beratung")
+
+    answers = iter((QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: next(answers))
+    deleted = []
+    dialog.deleteRequested.connect(deleted.append)
+    dialog._request_delete()
+    dialog._request_delete()
+    assert deleted == [original]
+
+    legacy = CustomerEditorDialog(
+        Customer(display_name="Alt", folder_path="legacy/path")
+    )
+    assert "legacy/path" in legacy.folder_summary.text()
+    assert "legacy/path" in legacy._project_tooltip()
+    legacy.close()
+    blank.close()
+    dialog.close()
+
+
+def test_restored_recognition_search_selection_and_unavailable_split(
+    application, monkeypatch
+):
+    control = ReviewControl()
+    with_id = SimpleNamespace(customer=_customer())
+    without_id = SimpleNamespace(customer=Customer(display_name="Lokal"))
+    dialog = RecognitionReviewDialog(control, (without_id, with_id))
+    assert dialog.splitter.count() == 2
+    assert dialog.case_list.objectName() == "RecognitionCaseList"
+    assert dialog.assign_button.text() == "Ordner zuordnen"
+    assert dialog.together_button.text() == "Gemeinsam neu anlegen"
+    assert dialog.ignore_button.text() == "Nicht verarbeiten"
+    assert not dialog.separate_button.isEnabled()
+
+    dialog.customer_search.setText("nicht vorhanden")
+    assert "Keine passenden" in dialog.customer_list.item(0).text()
+    dialog.customer_search.clear()
+    assert dialog._select_customer(7)
+    assert not dialog._select_customer(999)
+    assert dialog._selected_customer_view().customer.id == 7
+    dialog._customer_selected(None)
+
+    information = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: information.append(args))
+    dialog._separate_not_supported()
+    assert information
+    dialog.case_list.setCurrentRow(-1)
+    dialog._show_case(-1)
+    assert dialog.selected_case() is None
+    dialog.close()

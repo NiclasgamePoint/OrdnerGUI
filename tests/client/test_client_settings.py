@@ -271,6 +271,7 @@ def test_client_container_persists_rewires_and_reschedules_active_sync(tmp_path,
     repository = JsonClientConfigRepository(tmp_path / "client-config.json", data_root=tmp_path)
     initial = configured(tmp_path, theme=ClientTheme.SYSTEM)
     container = ClientContainer(initial, config_repository=repository)
+    assert not container.onboarding_required
 
     class Timer:
         def __init__(self):
@@ -302,6 +303,12 @@ def test_client_container_persists_rewires_and_reschedules_active_sync(tmp_path,
     assert timer.stops == 1
     assert timer.starts[-1] == (7200, callback)
     assert repository.load() == updated
+
+    container.settings = configured(tmp_path, source_mappings=())
+    assert container.onboarding_required
+    container.settings = configured(tmp_path, server_url="")
+    assert container.onboarding_required
+    container.settings = updated
 
     with pytest.raises(ValueError, match="Neustart"):
         container.reconfigure(configured(tmp_path / "elsewhere"))
@@ -439,8 +446,9 @@ def test_main_window_settings_save_cancel_failure_and_onboarding(application, tm
     window.open_settings()
     assert not saved
     Dialog.result = Dialog.DialogCode.Accepted
+    monkeypatch.setattr("papagui_client.gui.main.OnboardingDialog", Dialog)
     window.open_settings(onboarding=True)
-    assert saved and "gespeichert" in window.status.text()
+    assert saved and "abgeschlossen" in window.status.text()
     assert "https://server.test" in window.server_label.text()
 
     warnings = []
