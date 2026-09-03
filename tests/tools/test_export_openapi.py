@@ -11,7 +11,8 @@ def test_generated_openapi_has_versioned_products_and_health() -> None:
     assert payload["info"]["version"] == "0.4.2"
     assert "/health" in payload["paths"]
     assert "/v2/generations/current" in payload["paths"]
-    assert "/v2/admin/session" in payload["paths"]
+    assert "/v2/admin/session" not in payload["paths"]
+    assert "/v2/admin/settings" in payload["paths"]
 
 
 def test_check_reports_drift_and_accepts_exact_snapshot(tmp_path) -> None:

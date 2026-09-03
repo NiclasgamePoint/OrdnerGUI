@@ -28,7 +28,6 @@ def generate() -> dict[str, object]:
                 data_path=temporary / "data",
                 config_path=temporary / "config",
                 client_token="openapi-snapshot-token",
-                bootstrap_admin_password="openapi-snapshot-admin-password",
             )
         )
         return create_app(container, manage_lifecycle=False).openapi()

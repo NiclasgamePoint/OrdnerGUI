@@ -26,7 +26,6 @@ class Capability(str, Enum):
     SOURCE_RELATIVE_PATHS = "source_relative_paths"
     CUSTOMER_REVISIONS = "customer_revisions"
     IDEMPOTENT_MUTATIONS = "idempotent_mutations"
-    ADMIN_SESSIONS = "admin_sessions"
     OFFLINE_CUSTOMER_SYNC = "offline_customer_sync"
 
 

@@ -18,7 +18,6 @@ def _container(tmp_path: Path):
             data_path=tmp_path / "data",
             config_path=tmp_path / "config",
             client_token="client-token-123",
-            bootstrap_admin_password="admin-password-123",
         )
     )
 
@@ -48,59 +47,42 @@ def test_health_system_info_and_client_authentication(tmp_path: Path) -> None:
     _run(scenario())
 
 
-def test_admin_session_protects_settings_and_actions(tmp_path: Path) -> None:
+def test_client_token_protects_settings_and_actions_without_password(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = create_app(_container(tmp_path), manage_lifecycle=False)
         client_headers = {"Authorization": "Bearer client-token-123"}
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            assert (
-                await client.get("/v2/admin/settings", headers=client_headers)
-            ).status_code == 403
+            assert (await client.get("/v2/admin/settings")).status_code == 401
             assert (
                 await client.post(
-                    "/v2/admin/session",
-                    headers=client_headers,
-                    json={"password": "wrong"},
+                    "/v2/admin/session", headers=client_headers, json={"password": "old"}
                 )
-            ).status_code == 401
-            login = await client.post(
-                "/v2/admin/session",
-                headers=client_headers,
-                json={"password": "admin-password-123"},
-            )
-            assert login.status_code == 200
-            admin_headers = {
-                **client_headers,
-                "X-PapaGUI-Admin-Session": login.json()["token"],
-            }
+            ).status_code == 404
             updated = await client.put(
                 "/v2/admin/settings",
-                headers=admin_headers,
+                headers=client_headers,
                 json={"settings": {"interval_seconds": 900}},
             )
             assert updated.status_code == 200
             assert updated.json()["settings"]["interval_seconds"] == 900
             invalid = await client.put(
                 "/v2/admin/settings",
-                headers=admin_headers,
+                headers=client_headers,
                 json={"settings": {"interval_seconds": 899}},
             )
             assert invalid.status_code == 400
             queued = await client.post(
                 "/v2/admin/index-runs",
-                headers=admin_headers,
+                headers=client_headers,
                 json={"full_rebuild": True},
             )
             assert queued.status_code == 202
             assert queued.json()["accepted"] is True
             assert (
-                await client.delete("/v2/admin/session", headers=admin_headers)
-            ).status_code == 204
-            assert (
-                await client.get("/v2/admin/settings", headers=admin_headers)
-            ).status_code == 403
+                await client.get("/v2/admin/settings", headers=client_headers)
+            ).status_code == 200
 
     _run(scenario())
 

@@ -135,8 +135,6 @@ def test_journal_editor_preserves_identity_and_edits_text(application):
 
 
 class ReviewControl:
-    admin_unlocked = True
-
     def __init__(self):
         self.decisions = []
         self.started = 0
@@ -200,7 +198,7 @@ def test_recognition_review_shows_provenance_and_decides_with_revision(
     dialog.close()
 
 
-def test_recognition_review_offline_empty_auth_and_error_edges(application, monkeypatch):
+def test_recognition_review_offline_empty_and_error_edges(application, monkeypatch):
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
 
@@ -216,38 +214,17 @@ def test_recognition_review_offline_empty_auth_and_error_edges(application, monk
     offline.close()
 
     class EmptyControl(ReviewControl):
-        admin_unlocked = False
-
         def recognition_cases(self, _status):
             return ()
 
         def recognition_runs(self, _limit):
             return ()
 
-        def login_admin(self, _password):
-            if getattr(self, "fail_login", False):
-                raise ValueError("bad password")
-            self.admin_unlocked = True
-
     control = EmptyControl()
     empty = RecognitionReviewDialog(control)
     assert "Keine offenen" in empty.details.toPlainText()
-    monkeypatch.setattr(
-        "papagui_client.gui.recognition_review.QInputDialog.getText",
-        lambda *_args: ("", False),
-    )
     empty.start_run()
-    assert control.started == 0
-    monkeypatch.setattr(
-        "papagui_client.gui.recognition_review.QInputDialog.getText",
-        lambda *_args: ("secret", True),
-    )
-    assert empty._ensure_admin()
-    control.admin_unlocked = False
-    control.fail_login = True
-    assert not empty._ensure_admin()
-
-    control.admin_unlocked = True
+    assert control.started == 1
     control.start_recognition = Mock(side_effect=OSError("run failed"))
     empty.start_run()
     assert any("run failed" in str(args) for args in warnings)
@@ -264,7 +241,6 @@ def test_recognition_review_offline_empty_auth_and_error_edges(application, monk
 def test_server_control_recognition_and_suggestion_wire_contract():
     gateway = HttpServerControlGateway("http://server")
     gateway._transport = Mock()
-    gateway._admin_session = "admin"
     case = ReviewControl().recognition_cases("pending")[0]
     gateway._transport.json.return_value = {"cases": [case.to_dict()]}
     assert gateway.recognition_cases()[0].signature == "sig-1"

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Separate Adminpasswörter und flüchtige Adminsitzungen entfernt. Sämtliche
+  Servereinstellungen und Wartungsaktionen verwenden nur noch den Client-Token.
+
 ## 0.4.2
 
 - Erstes eigenständig versioniertes, Qt-freies Serverpaket mit FastAPI/Uvicorn.
@@ -13,12 +16,11 @@
   Idempotenz und sicheren Parallelkonflikten.
 - Getrennte Index- und Kundengenerationen mit aktivem Stand plus drei
   Vorgängern.
-- Clienttoken, Argon2id-Adminpasswort und kurzlebige speicherresidente
-  Adminsitzungen.
+- Clienttoken und ursprünglich getrennte Adminauthentifizierung.
 - API v2 und enger, authentifizierter v1-Kompatibilitätsadapter.
 - Wiederholbare v0.4.1-Datenmigration für Projekte, Recognition-Fälle und
   Vorschläge sowie Mount-Identitätsschutz gegen leere oder vertauschte Quellen.
-- Persistente Retention-Diagnose und argv-sichere Adminpasswort-Erzeugung.
+- Persistente Retention-Diagnose.
 - Multiarch-Dockerdefinition für `linux/amd64` und `linux/arm64`.
 
 Historische gemeinsame Änderungen bis einschließlich 0.4.1 stehen im

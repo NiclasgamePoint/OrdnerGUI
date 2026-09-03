@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 import os
 from pathlib import Path
 
@@ -12,11 +11,7 @@ from papagui_server.adapters.catalog_reader import SqliteCatalogReader
 from papagui_server.adapters.generations import GenerationV2Publisher
 from papagui_server.adapters.migration import migrate_customer_database
 from papagui_server.adapters.recognition import load_identity_policy
-from papagui_server.adapters.security import (
-    AdminSessionManager,
-    ClientTokenAuthenticator,
-    SecurityConfigurationStore,
-)
+from papagui_server.adapters.security import ClientTokenAuthenticator
 from papagui_server.adapters.run_state import JsonRunStateRepository
 from papagui_server.adapters.source_guard import PersistentSourceIdentityGuard
 from papagui_server.adapters.settings import JsonSettingsRepository
@@ -36,10 +31,7 @@ class RuntimeConfiguration:
     config_path: Path
     source_id: str = "primary"
     client_token: str = ""
-    admin_password_hash: str = ""
-    bootstrap_admin_password: str = ""
     allow_insecure_no_client_token: bool = False
-    admin_session_minutes: int = 480
     default_interval_seconds: int = 86_400
     initialize_source_identity: bool = True
 
@@ -53,16 +45,8 @@ class RuntimeConfiguration:
             client_token=_environment_secret(
                 "PAPAGUI_API_TOKEN", "PAPAGUI_API_TOKEN_FILE"
             ),
-            admin_password_hash=_environment_secret(
-                "PAPAGUI_ADMIN_PASSWORD_HASH",
-                "PAPAGUI_ADMIN_PASSWORD_HASH_FILE",
-            ),
-            bootstrap_admin_password=os.getenv("PAPAGUI_ADMIN_PASSWORD", ""),
             allow_insecure_no_client_token=_environment_bool(
                 "PAPAGUI_ALLOW_INSECURE_NO_AUTH"
-            ),
-            admin_session_minutes=int(
-                os.getenv("PAPAGUI_ADMIN_SESSION_MINUTES", "480")
             ),
             default_interval_seconds=int(
                 os.getenv("PAPAGUI_INDEX_INTERVAL_SECONDS", "86400")
@@ -77,7 +61,6 @@ class RuntimeConfiguration:
 class ServerContainer:
     configuration: RuntimeConfiguration
     client_auth: ClientTokenAuthenticator
-    admin_sessions: AdminSessionManager
     settings: SettingsApplicationService
     customers: CustomerApplicationService
     suggestions: CustomerSuggestionApplicationService
@@ -133,25 +116,13 @@ def build_container(configuration: RuntimeConfiguration) -> ServerContainer:
     settings = SettingsApplicationService(
         settings_repository, changed=coordinator.settings_changed
     )
-    security_store = SecurityConfigurationStore(
-        configuration.config_path / "security.json"
-    )
-    password_hash = security_store.initialize(
-        configured_hash=configuration.admin_password_hash,
-        bootstrap_password=configuration.bootstrap_admin_password,
-    )
     client_auth = ClientTokenAuthenticator(
         configuration.client_token,
         allow_insecure=configuration.allow_insecure_no_client_token,
     )
-    admin_sessions = AdminSessionManager(
-        password_hash,
-        ttl=timedelta(minutes=configuration.admin_session_minutes),
-    )
     return ServerContainer(
         configuration=configuration,
         client_auth=client_auth,
-        admin_sessions=admin_sessions,
         settings=settings,
         customers=CustomerApplicationService(unit_of_work, publisher),
         suggestions=CustomerSuggestionApplicationService(unit_of_work, publisher),

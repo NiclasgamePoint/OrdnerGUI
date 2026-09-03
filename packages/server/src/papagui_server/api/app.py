@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from papagui_contracts import (
     Capabilities,
@@ -31,7 +31,6 @@ from papagui_server.api.http import (
 from papagui_server.api.v1_compat import install_v1_routes
 from papagui_server.composition import ServerContainer
 from papagui_server.domain.errors import (
-    AdminAuthenticationError,
     CustomerConflictError,
     IdempotencyConflictError,
     ProjectAssignmentConflictError,
@@ -66,7 +65,6 @@ def create_app(
         responses={
             400: {"model": api_models.ErrorResponse, "description": "Invalid request"},
             401: {"model": api_models.ErrorResponse, "description": "Client authentication required"},
-            403: {"model": api_models.ErrorResponse, "description": "Admin session required"},
             404: {"model": api_models.ErrorResponse, "description": "Resource not found"},
             409: {"model": api_models.ErrorResponse, "description": "Concurrent or state conflict"},
             422: {"model": api_models.ErrorResponse, "description": "Request validation failed"},
@@ -87,19 +85,6 @@ def create_app(
                 detail="Client-Authentifizierung erforderlich.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-
-    async def require_admin(
-        _client: None = Depends(require_client),
-        session: str | None = Header(
-            default=None, alias="X-PapaGUI-Admin-Session"
-        ),
-    ) -> str:
-        if not container.admin_sessions.accepts(session):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Eine gültige Adminsitzung ist erforderlich.",
-            )
-        return str(session)
 
     @app.exception_handler(CustomerConflictError)
     async def customer_conflict(
@@ -204,25 +189,11 @@ def create_app(
     async def server_status() -> dict[str, Any]:
         return container.coordinator.status()
 
-    @app.post("/v2/admin/session", dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.AdminSessionResponse)
-    async def create_admin_session(payload: api_models.AdminSessionRequest) -> dict[str, Any]:
-        password = payload.password
-        try:
-            token, expires_at = container.admin_sessions.login(password)
-        except AdminAuthenticationError as error:
-            raise HTTPException(status_code=401, detail=str(error)) from error
-        return {"token": token, "expires_at": expires_at}
-
-    @app.delete("/v2/admin/session", status_code=204, tags=["admin"])
-    async def delete_admin_session(session: str = Depends(require_admin)) -> Response:
-        container.admin_sessions.revoke(session)
-        return Response(status_code=204)
-
-    @app.get("/v2/admin/settings", dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.SettingsResponse)
+    @app.get("/v2/admin/settings", dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.SettingsResponse)
     async def get_admin_settings() -> dict[str, Any]:
         return {"settings": container.settings.get().to_dict()}
 
-    @app.put("/v2/admin/settings", dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.SettingsResponse)
+    @app.put("/v2/admin/settings", dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.SettingsResponse)
     async def update_admin_settings(payload: api_models.SettingsUpdateRequest) -> dict[str, Any]:
         return {
             "settings": container.settings.update(
@@ -230,21 +201,21 @@ def create_app(
             ).to_dict()
         }
 
-    @app.post("/v2/admin/index-runs", status_code=202, dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.ActionResponse)
+    @app.post("/v2/admin/index-runs", status_code=202, dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.ActionResponse)
     async def start_index_run(payload: api_models.IndexRunRequest | None = None) -> dict[str, Any]:
         return container.index_admin.start(
             full_rebuild=payload.full_rebuild if payload is not None else False
         )
 
-    @app.post("/v2/admin/index-runs/current/cancel", status_code=202, dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.ActionResponse)
+    @app.post("/v2/admin/index-runs/current/cancel", status_code=202, dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.ActionResponse)
     async def cancel_index_run() -> dict[str, Any]:
         return container.index_admin.cancel()
 
-    @app.delete("/v2/admin/index", status_code=202, dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.ActionResponse)
+    @app.delete("/v2/admin/index", status_code=202, dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.ActionResponse)
     async def delete_index(rebuild: bool = Query(default=True)) -> dict[str, Any]:
         return container.index_admin.delete(rebuild=rebuild)
 
-    @app.post("/v2/admin/server/restart", status_code=202, dependencies=[Depends(require_admin)], tags=["admin"], response_model=api_models.ActionResponse)
+    @app.post("/v2/admin/server/restart", status_code=202, dependencies=[Depends(require_client)], tags=["admin"], response_model=api_models.ActionResponse)
     async def restart_server() -> dict[str, Any]:
         return container.index_admin.restart()
 
@@ -591,7 +562,7 @@ def create_app(
     ) -> dict[str, Any]:
         return {"runs": container.recognition.list_runs(limit=limit)}
 
-    @app.post("/v2/admin/recognition/runs", dependencies=[Depends(require_admin)], tags=["admin", "recognition"], response_model=api_models.RecognitionRunResponse)
+    @app.post("/v2/admin/recognition/runs", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionRunResponse)
     def run_recognition() -> dict[str, Any]:
         return {
             "summary": container.recognition.run_now(
@@ -601,7 +572,7 @@ def create_app(
 
     @app.post(
         "/v2/admin/recognition/cases/{signature}/decision",
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_client)],
         tags=["admin", "recognition"],
         response_model=api_models.RecognitionDecisionResponse,
         responses={409: {"model": api_models.CustomerConflictResponse}},
@@ -620,7 +591,7 @@ def create_app(
         )
         return _mutation_response(result)
 
-    install_v1_routes(app, container, require_client, require_admin)
+    install_v1_routes(app, container, require_client)
     return app
 
 

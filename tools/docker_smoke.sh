@@ -38,18 +38,14 @@ fi
 
 docker compose -f "${PROJECT_ROOT}/deploy/server/compose.yaml" config --quiet
 
-PASSWORD_HASH="$(printf '%s' 'smoke-admin-password-123' | docker run --rm -i "${IMAGE}" hash-password --stdin)"
-[[ "${PASSWORD_HASH}" == \$argon2id\$* ]]
 printf '%s' "${TOKEN}" > "${CONFIG_ROOT}/api-token"
-printf '%s' "${PASSWORD_HASH}" > "${CONFIG_ROOT}/admin-password-hash"
-chmod 600 "${CONFIG_ROOT}/api-token" "${CONFIG_ROOT}/admin-password-hash"
+chmod 600 "${CONFIG_ROOT}/api-token"
 docker run --rm --entrypoint tesseract "${IMAGE}" --version >/dev/null
 
 run_index_once() {
     docker run --rm \
         --user "$(id -u):$(id -g)" \
         -e "PAPAGUI_API_TOKEN_FILE=/config/api-token" \
-        -e "PAPAGUI_ADMIN_PASSWORD_HASH_FILE=/config/admin-password-hash" \
         -v "${SOURCE_ROOT}:/source:ro" \
         -v "${DATA_ROOT}:/data" \
         -v "${CONFIG_ROOT}:/config" \
@@ -63,7 +59,6 @@ start_container() {
         --restart unless-stopped \
         --user "$(id -u):$(id -g)" \
         -e "PAPAGUI_API_TOKEN_FILE=/config/api-token" \
-        -e "PAPAGUI_ADMIN_PASSWORD_HASH_FILE=/config/admin-password-hash" \
         -v "${SOURCE_ROOT}:/source:ro" \
         -v "${DATA_ROOT}:/data" \
         -v "${CONFIG_ROOT}:/config" \
@@ -104,8 +99,7 @@ wait_until_ready
 
 CONTAINER_ENVIRONMENT="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${CONTAINER}")"
 grep -q '^PAPAGUI_API_TOKEN_FILE=/config/api-token$' <<<"${CONTAINER_ENVIRONMENT}"
-grep -q '^PAPAGUI_ADMIN_PASSWORD_HASH_FILE=/config/admin-password-hash$' <<<"${CONTAINER_ENVIRONMENT}"
-if grep -Fq "${TOKEN}" <<<"${CONTAINER_ENVIRONMENT}" || grep -Fq "${PASSWORD_HASH}" <<<"${CONTAINER_ENVIRONMENT}"; then
+if grep -Fq "${TOKEN}" <<<"${CONTAINER_ENVIRONMENT}"; then
     echo "Ein Klartext-Secret ist in docker inspect sichtbar." >&2
     exit 1
 fi
@@ -168,10 +162,6 @@ test "$(sha256sum "${DATA_ROOT}/customers.db" | awk '{print $1}')" = \
 
 test "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "${CONTAINER}")" = "unless-stopped"
 RESTART_COUNT_BEFORE="$(docker inspect --format '{{.RestartCount}}' "${CONTAINER}")"
-ADMIN_SESSION_BEFORE="$(docker exec "${CONTAINER}" python -c \
-    "import json,urllib.request; payload=json.dumps({'password':'smoke-admin-password-123'}).encode(); request=urllib.request.Request('http://127.0.0.1:8765/v2/admin/session', data=payload, headers={'Authorization':'Bearer ${TOKEN}','Content-Type':'application/json'}, method='POST'); print(json.load(urllib.request.urlopen(request, timeout=3))['token'])")"
-test -n "${ADMIN_SESSION_BEFORE}"
-
 # Docker arms restart policies only after a container has stayed up successfully.
 RESTART_POLICY_ARMED=""
 for attempt in $(seq 1 20); do
@@ -193,7 +183,7 @@ EVENT_PID="$!"
 sleep 1
 
 docker exec "${CONTAINER}" python -c \
-    "import json,urllib.request; base='http://127.0.0.1:8765'; common={'Authorization':'Bearer ${TOKEN}','X-PapaGUI-Admin-Session':'${ADMIN_SESSION_BEFORE}','Content-Type':'application/json'}; payload=json.dumps({'settings':{'interval_seconds':900}}).encode(); request=urllib.request.Request(base+'/v2/admin/settings', data=payload, headers=common, method='PUT'); assert json.load(urllib.request.urlopen(request, timeout=3))['settings']['interval_seconds']==900; request=urllib.request.Request(base+'/v2/admin/server/restart', data=b'{}', headers=common, method='POST'); assert json.load(urllib.request.urlopen(request, timeout=3))['restart'] is True"
+    "import json,urllib.request; base='http://127.0.0.1:8765'; common={'Authorization':'Bearer ${TOKEN}','Content-Type':'application/json'}; payload=json.dumps({'settings':{'interval_seconds':900}}).encode(); request=urllib.request.Request(base+'/v2/admin/settings', data=payload, headers=common, method='PUT'); assert json.load(urllib.request.urlopen(request, timeout=3))['settings']['interval_seconds']==900; request=urllib.request.Request(base+'/v2/admin/server/restart', data=b'{}', headers=common, method='POST'); assert json.load(urllib.request.urlopen(request, timeout=3))['restart'] is True"
 
 for attempt in $(seq 1 60); do
     RESTART_COUNT_AFTER="$(docker inspect --format '{{.RestartCount}}' "${CONTAINER}" 2>/dev/null || true)"
@@ -222,27 +212,9 @@ kill "${EVENT_PID}" >/dev/null 2>&1 || true
 wait "${EVENT_PID}" >/dev/null 2>&1 || true
 EVENT_PID=""
 
-# Admin sessions are process-local, while settings and generations survive restart.
+# Settings and generations survive the controlled process restart.
 docker exec "${CONTAINER}" python -c \
-    "
-import urllib.error
-import urllib.request
-
-request = urllib.request.Request(
-    'http://127.0.0.1:8765/v2/admin/settings',
-    headers={
-        'Authorization': 'Bearer ${TOKEN}',
-        'X-PapaGUI-Admin-Session': '${ADMIN_SESSION_BEFORE}',
-    },
-)
-try:
-    urllib.request.urlopen(request, timeout=3)
-    raise AssertionError('old admin session survived restart')
-except urllib.error.HTTPError as error:
-    assert error.code == 403
-"
-docker exec "${CONTAINER}" python -c \
-    "import json,urllib.request; base='http://127.0.0.1:8765'; payload=json.dumps({'password':'smoke-admin-password-123'}).encode(); login=urllib.request.Request(base+'/v2/admin/session', data=payload, headers={'Authorization':'Bearer ${TOKEN}','Content-Type':'application/json'}, method='POST'); session=json.load(urllib.request.urlopen(login, timeout=3))['token']; settings=urllib.request.Request(base+'/v2/admin/settings', headers={'Authorization':'Bearer ${TOKEN}','X-PapaGUI-Admin-Session':session}); assert json.load(urllib.request.urlopen(settings, timeout=3))['settings']['interval_seconds']==900"
+    "import json,urllib.request; base='http://127.0.0.1:8765'; settings=urllib.request.Request(base+'/v2/admin/settings', headers={'Authorization':'Bearer ${TOKEN}'}); assert json.load(urllib.request.urlopen(settings, timeout=3))['settings']['interval_seconds']==900"
 
 GENERATION_AFTER="$(generation_id)"
 test "${GENERATION_AFTER}" = "${GENERATION_BEFORE}"

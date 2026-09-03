@@ -37,12 +37,10 @@ from papagui_client.application.models import (
 )
 from papagui_client.application.paths import SourceMapping, SourcePathResolver
 from papagui_client.application.sync import SyncCoordinator
-from papagui_server.adapters.security import hash_admin_password
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT_TOKEN = "wire-client-token-123"
-ADMIN_PASSWORD = "wire-admin-password-123"
 SOURCE_ID = "wire-source"
 T = TypeVar("T")
 
@@ -123,10 +121,8 @@ def _running_server(tmp_path: Path) -> Iterator[RunningServer]:
             "PYTHONPATH": os.pathsep.join(python_path),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PAPAGUI_API_TOKEN": CLIENT_TOKEN,
-            "PAPAGUI_ADMIN_PASSWORD_HASH": hash_admin_password(ADMIN_PASSWORD),
         }
     )
-    assert environment["PAPAGUI_ADMIN_PASSWORD_HASH"].startswith("$argon2id$")
     command = [
         sys.executable,
         "-m",
@@ -341,9 +337,6 @@ def test_client_and_server_interoperate_over_real_http(tmp_path: Path) -> None:
         assert [entry.id for entry in listed_after_conflict] == [journal_created.entry.id]
 
         control = HttpServerControlGateway(server.base_url, CLIENT_TOKEN, timeout_seconds=3)
-        assert not control.admin_unlocked
-        control.login_admin(ADMIN_PASSWORD)
-        assert control.admin_unlocked
         settings = control.settings()
         assert settings["settings"]["interval_seconds"] == 86400
         updated = control.save_settings({"interval_seconds": 900})

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Passwortdialoge und Adminsitzungszustand aus Tray und Kundenerkennungsprüfung
+  entfernt; Serveraktionen sind nach gültiger Client-Token-Verbindung direkt
+  bedienbar.
+
 - Vollständiges v0.4.1-Kartenlayout für Hauptfenster, Suche, Ordner, Kunden,
   Einstellungen, Viewer und eigenständiges Server-Tray wiederhergestellt, ohne
   die Client-/Server-Paketgrenzen oder den read-only Indexzugriff aufzuweichen.
@@ -25,8 +29,7 @@
   bewusster Auflösung von Revisionskonflikten.
 - Eigene Journal-Outbox sowie Review-Oberflächen für serverseitige
   Kundenerkennung und dokumentbasierte Vorschläge.
-- Eigenständige Tray-Composition-Root mit ausschließlich speicherresidenten
-  Adminsitzungen und zwei benachbarten macOS-App-Bundles.
+- Eigenständige Tray-Composition-Root und zwei benachbarte macOS-App-Bundles.
 - Geschützte Clientkonfiguration mit POSIX-Modus `0600`, Windows-ACL-Härtung
   und diagnostizierbarer Generationsbereinigung.
 - Dokumentvorschauen für PDF, Text, Office-, Tabellen- und Bilddateien.

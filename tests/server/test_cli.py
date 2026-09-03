@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import io
 import runpy
 from types import SimpleNamespace
 
@@ -25,42 +24,6 @@ def _runtime_args(tmp_path: Path) -> list[str]:
         "--interval-seconds",
         "900",
     ]
-
-
-def test_hash_password_interactive_prompt_and_short_error(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO())
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "prompted-password")
-    assert cli.main(["hash-password"]) == 0
-    assert capsys.readouterr().out.startswith("$argon2id$")
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "short")
-    with pytest.raises(ValueError, match="mindestens"):
-        cli.main(["hash-password"])
-
-
-def test_hash_password_stdin_avoids_argv_and_rejects_empty(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("stdin-password-123"))
-    assert cli.main(["hash-password", "--stdin"]) == 0
-    assert capsys.readouterr().out.startswith("$argon2id$")
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(""))
-    with pytest.raises(ValueError, match="nicht leer"):
-        cli.main(["hash-password", "--stdin"])
-    with pytest.raises(SystemExit) as error:
-        cli.main(["hash-password", "positional-password", "--stdin"])
-    assert error.value.code == 2
-
-
-def test_hash_password_rejects_argv_and_noninteractive_implicit_input(
-    monkeypatch, capsys
-) -> None:
-    with pytest.raises(SystemExit) as error:
-        cli.main(["hash-password", "plaintext-secret"])
-    assert error.value.code == 2
-    assert "unrecognized arguments" in capsys.readouterr().err
-
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("not-read-implicitly"))
-    with pytest.raises(ValueError, match="--stdin"):
-        cli.main(["hash-password"])
 
 
 def test_once_openapi_output_stdout_and_start_error(tmp_path: Path, monkeypatch, capsys) -> None:

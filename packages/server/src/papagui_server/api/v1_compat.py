@@ -1,4 +1,4 @@
-"""Read-mostly v1 compatibility routes; destructive actions still require admin."""
+"""Compatibility routes protected by the same client token as API v2."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ def install_v1_routes(
     app: FastAPI,
     container: ServerContainer,
     require_client: Any,
-    require_admin: Any,
 ) -> None:
     @app.get("/v1/server/status", dependencies=[Depends(require_client)], deprecated=True)
     async def legacy_status() -> dict[str, Any]:
@@ -57,7 +56,7 @@ def install_v1_routes(
         values["automatic_monitoring_enabled"] = values["automatic_runs_enabled"]
         return {"settings": values}
 
-    @app.put("/v1/server/settings", dependencies=[Depends(require_admin)], deprecated=True)
+    @app.put("/v1/server/settings", dependencies=[Depends(require_client)], deprecated=True)
     async def update_legacy_settings(payload: dict[str, Any]) -> dict[str, Any]:
         values = mapping(payload.get("settings", payload), "settings")
         if "automatic_monitoring_enabled" in values:
@@ -69,7 +68,7 @@ def install_v1_routes(
     @app.post(
         "/v1/server/actions",
         status_code=202,
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_client)],
         deprecated=True,
     )
     async def legacy_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -153,7 +152,7 @@ def install_v1_routes(
 
     @app.delete(
         "/v1/customers/{customer_id}",
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_client)],
         deprecated=True,
     )
     async def legacy_delete_customer(

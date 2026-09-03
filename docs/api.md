@@ -14,15 +14,11 @@ getrackten Snapshot.
   `Authorization: Bearer <client-token>`.
 - Das Annehmen oder Ablehnen eines Dokumentvorschlags ist eine normale,
   revisionierte Kundenänderung und benötigt nur den Client-Token.
-- Adminaktionen benötigen zusätzlich einen kurzlebigen, nur im Tray-Speicher
-  gehaltenen Adminsitzungstoken. Dazu gehören Indexwartung,
-  Erkennungsläufe und Entscheidungen über mehrdeutige Erkennungsfälle.
-- Der Server legt in seiner Security-Konfiguration nur den Argon2id-Hash des
-  Adminpassworts ab. Der lokale Entwicklungsstarter verwendet derzeit
-  zusätzlich eine Git-ignorierte Bootstrap-Secretdatei; im NAS-Betrieb soll
-  ausschließlich `PAPAGUI_API_TOKEN_FILE` und
-  `PAPAGUI_ADMIN_PASSWORD_HASH_FILE` auf Dateien im Configvolume zeigen.
-  Nicht-leere direkte Env-Werte haben Vorrang. Eine explizit konfigurierte,
+- Einstellungen, Indexwartung, Erkennungsläufe und Entscheidungen über
+  mehrdeutige Erkennungsfälle benötigen ebenfalls nur den Client-Token. Ein
+  zusätzliches Kennwort oder eine Adminsitzung existiert nicht.
+- Im NAS-Betrieb soll `PAPAGUI_API_TOKEN_FILE` auf die geschützte Tokendatei im
+  Configvolume zeigen. Nicht-leere direkte Env-Werte haben Vorrang. Eine explizit konfigurierte,
   unlesbare oder leere Secretdatei bricht den Start sicher ab.
 
 Im Synology-Betrieb muss die API hinter einem HTTPS-Reverse-Proxy liegen.
@@ -52,8 +48,6 @@ Im Synology-Betrieb muss die API hinter einem HTTPS-Reverse-Proxy liegen.
 | `GET /v2/recognition/runs` | Erkennungslaufhistorie lesen |
 | `POST /v2/admin/recognition/runs` | Erkennungslauf manuell starten |
 | `POST /v2/admin/recognition/cases/{signature}/decision` | Fall annehmen, zuweisen oder ablehnen |
-| `POST /v2/admin/session` | Adminsitzung anlegen |
-| `DELETE /v2/admin/session` | Adminsitzung widerrufen |
 | `GET/PUT /v2/admin/settings` | Serverseitige Indexeinstellungen |
 | `POST /v2/admin/index-runs` | Indexlauf starten; `full_rebuild` ist optional |
 | `POST /v2/admin/index-runs/current/cancel` | Lauf abbrechen |
@@ -76,7 +70,7 @@ ohne Stammdatenänderung wiederholbar. Vorschlags-`accept` verlangt Revision und
 Key; `reject` ist ebenfalls idempotent. Manuell gepflegte Felder werden nie
 überschrieben.
 
-Alle v2 Request-/Responseformen, Enums sowie 400/401/403/404/409/422-Fehler sind
+Alle v2 Request-/Responseformen, Enums sowie 400/401/404/409/422-Fehler sind
 als Pydantic-Schemas im OpenAPI-Dokument referenziert. Der getrackte Snapshot
 verhindert unbemerkte Wire-Drift.
 
@@ -85,7 +79,7 @@ verhindert unbemerkte Wire-Drift.
 Der 0.4.2-Server stellt einen begrenzten Übergangsadapter bereit:
 
 - `GET /v1/server/status` und `GET /v1/server/settings`
-- admin-geschütztes `PUT /v1/server/settings` und `POST /v1/server/actions`
+- token-geschütztes `PUT /v1/server/settings` und `POST /v1/server/actions`
 - `GET /v1/index/current` und `GET /v1/index/generations/{archive_name}`
 - `GET /v1/customers/{id}`, `POST /v1/customers` sowie
   `PUT/DELETE /v1/customers/{id}`

@@ -47,14 +47,14 @@ class ClientContainer:
         *,
         config_repository: JsonClientConfigRepository | None = None,
         config_sources: Mapping[str, str] | None = None,
-        admin_control: bool = False,
+        server_control: bool = False,
     ):
         self.settings = settings
         self.config_repository = config_repository or JsonClientConfigRepository(
             settings.data_root / "client-config.json", data_root=settings.data_root
         )
         self.config_sources = dict(config_sources or {})
-        self._admin_control_enabled = admin_control
+        self._server_control_enabled = server_control
         self._migrate_storage_layout()
         self.generation_store = FilesystemGenerationStore(settings.cache_root)
         self.generation_gateway = HttpGenerationGateway(
@@ -102,7 +102,7 @@ class ClientContainer:
                 token=settings.api_token,
                 timeout_seconds=settings.timeout_seconds,
             )
-            if admin_control
+            if server_control
             else None
         )
 
@@ -181,12 +181,6 @@ class ClientContainer:
         """Rewire client-only adapters without ever touching server implementation."""
         if settings.data_root.resolve() != self.settings.data_root.resolve():
             raise ValueError("Ein Wechsel des Clientdatenordners erfordert einen Neustart")
-        previous_control = self.server_control
-        if previous_control is not None:
-            try:
-                previous_control.logout_admin()
-            except Exception:
-                pass
         self.settings = settings
         self.generation_gateway = HttpGenerationGateway(
             settings.server_url,
@@ -216,7 +210,7 @@ class ClientContainer:
                 token=settings.api_token,
                 timeout_seconds=settings.timeout_seconds,
             )
-            if self._admin_control_enabled
+            if self._server_control_enabled
             else None
         )
         self.data_session.rebind(force=True)
@@ -293,9 +287,9 @@ def build_client(settings: ClientSettings | None = None) -> ClientContainer:
 
 
 def build_tray(settings: ClientSettings | None = None) -> ClientContainer:
-    """Build the only composition root allowed to own an admin session."""
+    """Build the composition root that exposes remote server controls."""
     if settings is not None:
-        return ClientContainer(settings, admin_control=True)
+        return ClientContainer(settings, server_control=True)
     environment = os.environ
     data_root = (
         Path(environment["PAPAGUI_CLIENT_DATA_ROOT"])
@@ -311,5 +305,5 @@ def build_tray(settings: ClientSettings | None = None) -> ClientContainer:
         resolved.settings,
         config_repository=repository,
         config_sources=resolved.sources,
-        admin_control=True,
+        server_control=True,
     )

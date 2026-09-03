@@ -6,7 +6,7 @@
 - Integrität von Index- und Kundengenerationen
 - Nachvollziehbarkeit automatischer Kundenzuordnungen
 - Verfügbarkeit des letzten gültigen Offlinebestands
-- Client-, Admin- und zukünftige Release-Schlüssel
+- Client- und zukünftige Release-Schlüssel
 
 ## Vertrauensgrenzen
 
@@ -23,20 +23,14 @@ direkten Zugriff auf diese Volumes und keine Dockerberechtigung.
 
 - `/health` enthält keine vertraulichen Daten und ist ohne Token erreichbar.
 - Reguläre API-Aufrufe benötigen einen zufälligen Client-Bearer-Token.
-- Indexaktionen, Einstellungen und Serverneustart benötigen eine separate
-  Adminsitzung.
-- Die persistente Security-Konfiguration enthält einen Argon2id-Hash.
-  Klartextpasswörter und Sitzungstokens werden nicht protokolliert oder in
-  Generationen gespeichert.
-- Adminsitzungstokens verbleiben im Speicher des Tray-Prozesses und werden beim
-  kontrollierten Beenden widerrufen.
+- Indexaktionen, Einstellungen, Erkennungsläufe und Serverneustart benötigen
+  denselben Client-Bearer-Token, aber kein Kennwort und keine Adminsitzung.
 - Im Netzwerkbetrieb ist HTTPS über einen Reverse Proxy verpflichtend.
 
 Clienttokens werden dem Prozess über eine geschützte Betriebskonfiguration oder
 ein Secret übergeben und nicht in Generationen abgelegt. Die Compose-Dateien
-reichen nur `PAPAGUI_API_TOKEN_FILE=/config/api-token` und
-`PAPAGUI_ADMIN_PASSWORD_HASH_FILE=/config/admin-password-hash` an den Container;
-die Werte erscheinen dadurch nicht in `docker inspect`. Direkte Umgebungswerte
+reichen nur `PAPAGUI_API_TOKEN_FILE=/config/api-token` an den Container; der
+Wert erscheint dadurch nicht in `docker inspect`. Direkte Umgebungswerte
 bleiben für einen bewusst manuell gestarteten Server kompatibel, haben dort
 Vorrang und sollten im Produktionsbetrieb nicht verwendet werden.
 
@@ -48,13 +42,6 @@ Warnung, die vor einem Netzwerkbetrieb geklärt werden muss. Das Clienttoken
 bleibt zusätzlich im Clientprozess erforderlich. Ein OS-Keyring-Adapter ist
 noch nicht Teil von 0.4.2. Eine Rotation ersetzt zuerst die Serverdatei und
 anschließend die Clientkonfigurationen kontrolliert.
-
-Der lokale Komfortstart legt gegenwärtig außerdem ein Git-ignoriertes
-Adminpasswort unter `docker-config/admin-password` ab. Auf dem Host wird daraus
-vor dem Compose-Start über `hash-password --stdin` ein Argon2id-Hash erzeugt;
-das Passwort steht dabei nie in der Python-Prozessargumentliste. Nur die
-Hashdatei wird in `/config` gemountet. Auf dem NAS wird derselbe Hash vorab
-argv-sicher erzeugt und als Datei mit Modus `0600` abgelegt.
 
 ## Konflikte und Wiederholungen
 
@@ -76,7 +63,7 @@ Revision führt zu `409 Conflict`; fremde Änderungen werden niemals still
 
 ## Logging und Datenschutz
 
-Logs dürfen keine Tokens, Passwörter, kompletten Dokumentinhalte oder unnötige
+Logs dürfen keine Tokens, kompletten Dokumentinhalte oder unnötige
 personenbezogene Daten enthalten. Fehlermeldungen nennen nur die für Diagnose
 erforderlichen Pfade und Metadaten. Zugriff auf Server- und Clientdatenordner
 ist auf die jeweiligen Betriebskonten zu beschränken.

@@ -35,16 +35,14 @@ def test_launchers_delegate_to_the_platform_native_entrypoint() -> None:
     assert '"%~dp0start.ps1" %*' in batch
 
 
-def test_start_scripts_keep_secrets_out_of_child_argv_and_docker_environment() -> None:
+def test_start_scripts_manage_only_the_client_token_secret() -> None:
     shell = (ROOT / "start.sh").read_text(encoding="utf-8")
     powershell = (ROOT / "start.ps1").read_text(encoding="utf-8")
     for source in (shell, powershell):
-        assert "hash-password --stdin" in source
-        assert "hash_admin_password(sys.argv[1])" not in source
+        assert "PAPAGUI_ADMIN_PASSWORD" not in source
         assert "PAPAGUI_API_TOKEN_FILE" not in source  # Compose owns container paths.
     assert "umask 077" in shell
     assert 'chmod 600 "$secret_file"' in shell
-    assert "RedirectStandardInput = $true" in powershell
     assert "icacls.exe" in powershell
 
     compose = yaml.safe_load(
@@ -52,9 +50,8 @@ def test_start_scripts_keep_secrets_out_of_child_argv_and_docker_environment() -
     )
     environment = compose["services"]["papagui-server"]["environment"]
     assert environment["PAPAGUI_API_TOKEN_FILE"] == "/config/api-token"
-    assert environment["PAPAGUI_ADMIN_PASSWORD_HASH_FILE"] == ("/config/admin-password-hash")
     assert "PAPAGUI_API_TOKEN" not in environment
-    assert "PAPAGUI_ADMIN_PASSWORD_HASH" not in environment
+    assert not any("PASSWORD" in name for name in environment)
 
 
 def test_windows_health_wait_detects_a_crashed_detached_container() -> None:

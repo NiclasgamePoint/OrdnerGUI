@@ -1,4 +1,4 @@
-"""Client-authorized review operations that can never create an admin session."""
+"""Client-token-authorized review operations."""
 
 from __future__ import annotations
 

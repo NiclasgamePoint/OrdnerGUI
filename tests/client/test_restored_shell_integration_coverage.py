@@ -339,10 +339,7 @@ class _Review:
 
 class _ServerControl:
     def __init__(self) -> None:
-        self.admin_unlocked = True
         self.actions = []
-        self.login_error: Exception | None = None
-        self.logged_out = 0
 
     def status(self):
         return {"state": "online", "index": {"state": "idle"}}
@@ -357,16 +354,6 @@ class _ServerControl:
     def save_settings(self, values):
         self.saved_settings = values
         return {"settings": values}
-
-    def login_admin(self, _password):
-        if self.login_error:
-            raise self.login_error
-        self.admin_unlocked = True
-
-    def logout_admin(self):
-        self.logged_out += 1
-        self.admin_unlocked = False
-
 
 def _container(tmp_path: Path):
     settings = ClientSettings(

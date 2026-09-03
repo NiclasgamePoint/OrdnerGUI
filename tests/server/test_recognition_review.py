@@ -45,7 +45,6 @@ def _ambiguous_container(tmp_path: Path):
             data_path=data,
             config_path=tmp_path / "config",
             client_token="recognition-client-token",
-            bootstrap_admin_password="recognition-admin-password",
         )
     )
 
@@ -324,7 +323,7 @@ def test_accept_does_not_overwrite_manual_customer_value(tmp_path: Path) -> None
         )
 
 
-def test_suggestion_decisions_use_client_auth_but_case_decisions_remain_admin(
+def test_suggestion_and_case_decisions_use_client_auth(
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
@@ -362,7 +361,7 @@ def test_suggestion_decisions_use_client_auth_but_case_decisions_remain_admin(
                     headers=headers,
                     json={"action": "reject"},
                 )
-            ).status_code == 403
+            ).status_code == 404
 
     asyncio.run(scenario())
 
@@ -425,20 +424,14 @@ def test_recognition_assign_http_conflict_returns_current_customer(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            login = await client.post(
-                "/v2/admin/session",
-                headers=client_headers,
-                json={"password": "recognition-admin-password"},
-            )
-            admin = {
+            authorized = {
                 **client_headers,
-                "X-PapaGUI-Admin-Session": login.json()["token"],
                 "Idempotency-Key": "parallel-recognition-assign",
             }
             endpoint = f"/v2/admin/recognition/cases/{signature}/decision"
             stale = await client.post(
                 endpoint,
-                headers=admin,
+                headers=authorized,
                 json={
                     "action": "assign",
                     "customer_id": target["id"],
@@ -449,7 +442,7 @@ def test_recognition_assign_http_conflict_returns_current_customer(
             assert stale.json()["current"]["revision"] == changed["revision"]
             assigned = await client.post(
                 endpoint,
-                headers={**admin, "Idempotency-Key": "current-recognition-assign"},
+                headers={**authorized, "Idempotency-Key": "current-recognition-assign"},
                 json={
                     "action": "assign",
                     "customer_id": target["id"],

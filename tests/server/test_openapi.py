@@ -16,7 +16,6 @@ def test_openapi_snapshot_is_current(tmp_path: Path) -> None:
             data_path=tmp_path / "data",
             config_path=tmp_path / "config",
             client_token="snapshot-token",
-            bootstrap_admin_password="snapshot-admin-password",
         )
     )
     generated = create_app(container, manage_lifecycle=False).openapi()

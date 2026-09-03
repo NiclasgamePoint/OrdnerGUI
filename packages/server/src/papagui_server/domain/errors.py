@@ -13,10 +13,6 @@ class ResourceBusyError(RuntimeError):
     """An exclusive server operation cannot currently be accepted."""
 
 
-class AdminAuthenticationError(RuntimeError):
-    """Administrative authentication failed or is not configured."""
-
-
 class CustomerConflictError(RuntimeError):
     """A mutation was based on an outdated customer revision."""
 

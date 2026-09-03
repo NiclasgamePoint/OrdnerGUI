@@ -62,19 +62,6 @@ secret_from_file() {
 secret_from_file PAPAGUI_API_TOKEN api-token
 export PAPAGUI_API_TOKEN
 
-# The generated development password remains in the ignored, mode-0600 file so
-# it can still be entered in the tray. Only a mounted hash file reaches Docker.
-protect_secret_file "$PAPAGUI_SERVER_CONFIG_PATH/admin-password"
-if [ -z "${PAPAGUI_ADMIN_PASSWORD_HASH:-}" ]; then
-  secret_from_file PAPAGUI_ADMIN_PASSWORD admin-password
-  PAPAGUI_ADMIN_PASSWORD_VALUE="$PAPAGUI_ADMIN_PASSWORD"
-  unset PAPAGUI_ADMIN_PASSWORD
-  PAPAGUI_ADMIN_PASSWORD_HASH="$(printf '%s' "$PAPAGUI_ADMIN_PASSWORD_VALUE" | "$PAPAGUI_PYTHON" -m papagui_server hash-password --stdin)"
-  unset PAPAGUI_ADMIN_PASSWORD_VALUE
-fi
-write_secret_file "$PAPAGUI_SERVER_CONFIG_PATH/admin-password-hash" "$PAPAGUI_ADMIN_PASSWORD_HASH"
-unset PAPAGUI_ADMIN_PASSWORD PAPAGUI_ADMIN_PASSWORD_HASH
-
 if [ -z "${PAPAGUI_SOURCE_PATH:-}" ]; then
   if [ -s "$PAPAGUI_SERVER_CONFIG_PATH/source-path" ]; then
     PAPAGUI_SOURCE_PATH="$(<"$PAPAGUI_SERVER_CONFIG_PATH/source-path")"

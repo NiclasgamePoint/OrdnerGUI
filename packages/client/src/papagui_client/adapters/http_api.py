@@ -239,49 +239,20 @@ class HttpCustomerGateway:
 
 
 class HttpServerControlGateway:
-    """Tray-facing API client. Admin session state is memory-only by design."""
+    """Tray-facing API client for token-protected server controls."""
 
     def __init__(self, server_url: str, token: str = "", timeout_seconds: float = 5):
         self._transport = _HttpTransport(server_url, token, timeout_seconds)
-        self._admin_session = ""
-
-    @property
-    def admin_unlocked(self) -> bool:
-        return bool(self._admin_session)
 
     def status(self) -> Mapping[str, Any]:
         return self._transport.json("GET", "/v2/server/status")
 
-    def login_admin(self, password: str) -> None:
-        response = self._transport.json("POST", "/v2/admin/session", {"password": password})
-        token = response.get("session_token", response.get("token"))
-        if not token:
-            raise ApiRejectedError(401, "server returned no admin session token", response)
-        self._admin_session = str(token)
-
-    def lock_admin(self) -> None:
-        self._admin_session = ""
-
-    def logout_admin(self) -> None:
-        """Best-effort server revocation while always clearing the local secret."""
-        session = self._admin_session
-        if not session:
-            return
-        try:
-            self._transport.json(
-                "DELETE",
-                "/v2/admin/session",
-                headers={"X-PapaGUI-Admin-Session": session},
-            )
-        finally:
-            self._admin_session = ""
-
     def settings(self) -> Mapping[str, Any]:
-        return self._transport.json("GET", "/v2/admin/settings", headers=self._admin_headers())
+        return self._transport.json("GET", "/v2/admin/settings")
 
     def save_settings(self, settings: Mapping[str, Any]) -> Mapping[str, Any]:
         return self._transport.json(
-            "PUT", "/v2/admin/settings", {"settings": dict(settings)}, self._admin_headers()
+            "PUT", "/v2/admin/settings", {"settings": dict(settings)}
         )
 
     def index_action(self, action: str) -> Mapping[str, Any]:
@@ -296,7 +267,7 @@ class HttpServerControlGateway:
             method, path, payload = routes[action]
         except KeyError as exc:
             raise ValueError(f"unknown server action: {action}") from exc
-        return self._transport.json(method, path, payload, self._admin_headers())
+        return self._transport.json(method, path, payload)
 
     def recognition_cases(self, status: str = "pending") -> tuple[RecognitionCase, ...]:
         query = urllib.parse.urlencode({"status": status}) if status else ""
@@ -324,7 +295,6 @@ class HttpServerControlGateway:
             "POST",
             "/v2/admin/recognition/runs",
             {},
-            self._admin_headers(),
         )
         value = response.get("summary", response)
         if not isinstance(value, Mapping):
@@ -345,7 +315,7 @@ class HttpServerControlGateway:
             payload["customer_id"] = customer_id
         if expected_revision is not None:
             payload["expected_revision"] = expected_revision
-        headers = dict(self._admin_headers())
+        headers: dict[str, str] = {}
         if action in {"accept", "assign"}:
             key = idempotency_key or str(uuid.uuid4())
             payload["idempotency_key"] = key
@@ -416,7 +386,6 @@ class HttpServerControlGateway:
                     "idempotency_key": key,
                 },
                 {
-                    **self._admin_headers(),
                     "Idempotency-Key": key,
                     "If-Match": str(expected_revision),
                 },
@@ -438,8 +407,3 @@ class HttpServerControlGateway:
         if not isinstance(suggestion, Mapping) or not isinstance(customer, Mapping):
             raise ApiUnavailableError("server returned an invalid suggestion decision")
         return CustomerSuggestion.from_dict(suggestion), Customer.from_dict(customer)
-
-    def _admin_headers(self) -> Mapping[str, str]:
-        if not self._admin_session:
-            raise ApiRejectedError(401, "admin session is locked")
-        return {"X-PapaGUI-Admin-Session": self._admin_session}

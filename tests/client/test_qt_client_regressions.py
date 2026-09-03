@@ -59,8 +59,6 @@ class FakeSearch:
 
 
 class FakeServerControl:
-    admin_unlocked = False
-
     def status(self):
         return {"state": "online", "index": {"state": "idle"}}
 

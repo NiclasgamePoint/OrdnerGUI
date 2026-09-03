@@ -95,18 +95,10 @@ class Search:
 
 class ServerControl:
     def __init__(self):
-        self.admin_unlocked = False
-        self.login_error = None
         self.actions = []
-        self.logged_out = 0
 
     def status(self):
         return {"state": "online", "index": {"state": "idle"}}
-
-    def login_admin(self, _password):
-        if self.login_error:
-            raise self.login_error
-        self.admin_unlocked = True
 
     def index_action(self, action):
         self.actions.append(action)
@@ -118,11 +110,6 @@ class ServerControl:
     def save_settings(self, settings):
         self.saved_settings = settings
         return {"settings": settings}
-
-    def logout_admin(self):
-        self.logged_out += 1
-        self.admin_unlocked = False
-
 
 def make_container(tmp_path):
     return SimpleNamespace(
@@ -430,7 +417,7 @@ def test_run_main_gui_success_and_detached_tray_failure(monkeypatch, tmp_path):
     assert main.run_main_gui(container) == 23
 
 
-def test_tray_window_actions_admin_and_shutdown(application, tmp_path, monkeypatch):
+def test_tray_window_actions_and_shutdown(application, tmp_path, monkeypatch):
     container = make_container(tmp_path)
     window = ServerTrayWindow(container)
     tasks = []
@@ -445,12 +432,6 @@ def test_tray_window_actions_admin_and_shutdown(application, tmp_path, monkeypat
     window._show_status({"state": "online", "index": {"state": "running"}})
     window._show_status({"state": "online", "index": {"state": "idle"}})
 
-    window._ensure_admin = lambda: False
-    window.run_action("start")
-    window.load_settings()
-    window.save_settings()
-    assert len(tasks) == 1
-    window._ensure_admin = lambda: True
     window.run_action("start")
     window.load_settings()
     window._apply_settings({"interval_seconds": 3600})
@@ -482,7 +463,7 @@ def test_tray_window_actions_admin_and_shutdown(application, tmp_path, monkeypat
     window.close()
 
 
-def test_tray_owns_recognition_admin_review(application, tmp_path, monkeypatch):
+def test_tray_owns_recognition_review(application, tmp_path, monkeypatch):
     container = make_container(tmp_path)
     opened = []
 
@@ -506,46 +487,21 @@ def test_tray_owns_recognition_admin_review(application, tmp_path, monkeypatch):
     control = container.server_control
     container.server_control = None
     window.open_recognition_review()
-    assert "keine Admin-Steuerung" in warnings[-1][2]
+    assert "keine Serversteuerung" in warnings[-1][2]
     container.server_control = control
     window.shutdown()
     window.close()
 
 
-def test_tray_admin_prompt_controller_and_logout(application, tmp_path, monkeypatch):
+def test_tray_controller_shutdown_needs_no_admin_logout(application, tmp_path):
     container = make_container(tmp_path)
-    window = ServerTrayWindow(container)
-    monkeypatch.setattr(
-        "papagui_client.gui.tray.QInputDialog.getText", lambda *_args: ("", False)
-    )
-    assert not window._ensure_admin()
-    monkeypatch.setattr(
-        "papagui_client.gui.tray.QInputDialog.getText", lambda *_args: ("secret", True)
-    )
-    errors = []
-    window._show_action_error = errors.append
-    container.server_control.login_error = ValueError("wrong")
-    assert not window._ensure_admin()
-    assert errors == ["wrong"]
-    container.server_control.login_error = None
-    assert window._ensure_admin()
-    assert window._ensure_admin()  # already unlocked
-    window.close()
-
     with patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=False):
         controller = TrayController(application, container, show=False)
     controller.show()
     controller._activated(QSystemTrayIcon.ActivationReason.Context)
     controller._activated(QSystemTrayIcon.ActivationReason.Trigger)
     controller.shutdown()
-    assert container.server_control.logged_out == 1
-
-    container.server_control.admin_unlocked = True
-    container.server_control.logout_admin = Mock(side_effect=OSError("offline"))
-    with patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=False):
-        controller = TrayController(application, container, show=True)
-    controller.shutdown()
-    container.server_control.logout_admin.assert_called_once()
+    assert controller.window._shutting_down
 
 
 class Signal:

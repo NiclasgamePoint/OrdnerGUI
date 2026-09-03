@@ -1,7 +1,6 @@
 """Server domain types and rules."""
 
 from .errors import (
-    AdminAuthenticationError,
     CustomerConflictError,
     IdempotencyConflictError,
     ResourceBusyError,
@@ -10,7 +9,6 @@ from .errors import (
 from .models import CustomerMutationResult, IndexRunSnapshot, ServerSettings
 
 __all__ = [
-    "AdminAuthenticationError",
     "CustomerConflictError",
     "CustomerMutationResult",
     "IdempotencyConflictError",

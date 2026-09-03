@@ -59,40 +59,6 @@
         "title": "ActionResponse",
         "type": "object"
       },
-      "AdminSessionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "password": {
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
-          }
-        },
-        "required": [
-          "password"
-        ],
-        "title": "AdminSessionRequest",
-        "type": "object"
-      },
-      "AdminSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "expires_at": {
-            "title": "Expires At",
-            "type": "string"
-          },
-          "token": {
-            "title": "Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "token",
-          "expires_at"
-        ],
-        "title": "AdminSessionResponse",
-        "type": "object"
-      },
       "CapabilitiesModel": {
         "additionalProperties": false,
         "properties": {
@@ -2600,16 +2566,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -2692,16 +2648,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -2770,22 +2716,6 @@
               ],
               "title": "If-Match"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
           }
         ],
         "responses": {
@@ -2816,16 +2746,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -2911,16 +2831,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -3015,16 +2925,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3100,16 +3000,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -3194,16 +3084,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3247,24 +3127,6 @@
       "post": {
         "deprecated": true,
         "operationId": "legacy_action_v1_server_actions_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3309,16 +3171,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -3396,16 +3248,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3447,24 +3289,6 @@
       "put": {
         "deprecated": true,
         "operationId": "update_legacy_settings_v1_server_settings_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3509,16 +3333,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -3596,16 +3410,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3658,22 +3462,6 @@
               "title": "Rebuild",
               "type": "boolean"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
           }
         ],
         "responses": {
@@ -3706,16 +3494,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -3762,24 +3540,6 @@
     "/v2/admin/index-runs": {
       "post": {
         "operationId": "start_index_run_v2_admin_index_runs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3828,16 +3588,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3883,24 +3633,6 @@
     "/v2/admin/index-runs/current/cancel": {
       "post": {
         "operationId": "cancel_index_run_v2_admin_index_runs_current_cancel_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "responses": {
           "202": {
             "content": {
@@ -3931,16 +3663,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4012,22 +3734,6 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
           }
         ],
         "requestBody": {
@@ -4070,16 +3776,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4127,24 +3823,6 @@
     "/v2/admin/recognition/runs": {
       "post": {
         "operationId": "run_recognition_v2_admin_recognition_runs_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4175,16 +3853,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4232,24 +3900,6 @@
     "/v2/admin/server/restart": {
       "post": {
         "operationId": "restart_server_v2_admin_server_restart_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "responses": {
           "202": {
             "content": {
@@ -4280,16 +3930,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4333,218 +3973,9 @@
         ]
       }
     },
-    "/v2/admin/session": {
-      "delete": {
-        "operationId": "delete_admin_session_v2_admin_session_delete",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Resource not found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Concurrent or state conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request validation failed"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Admin Session",
-        "tags": [
-          "admin"
-        ]
-      },
-      "post": {
-        "operationId": "create_admin_session_v2_admin_session_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminSessionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminSessionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Resource not found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Concurrent or state conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request validation failed"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Admin Session",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/v2/admin/settings": {
       "get": {
         "operationId": "get_admin_settings_v2_admin_settings_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4575,16 +4006,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4629,24 +4050,6 @@
       },
       "put": {
         "operationId": "update_admin_settings_v2_admin_settings_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-PapaGUI-Admin-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Papagui-Admin-Session"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4687,16 +4090,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4785,16 +4178,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -4904,16 +4287,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -5011,16 +4384,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -5108,16 +4471,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -5215,16 +4568,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -5404,16 +4747,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -5510,16 +4843,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -5621,16 +4944,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -5744,16 +5057,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -5874,16 +5177,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -5968,16 +5261,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -6117,16 +5400,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -6213,16 +5486,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -6342,16 +5605,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -6481,16 +5734,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -6619,16 +5862,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -6731,16 +5964,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -6864,16 +6087,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -6949,16 +6162,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -7053,16 +6256,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {
@@ -7160,16 +6353,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -7264,16 +6447,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -7364,16 +6537,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -7450,16 +6613,6 @@
             },
             "description": "Client authentication required"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -7535,16 +6688,6 @@
               }
             },
             "description": "Client authentication required"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Admin session required"
           },
           "404": {
             "content": {

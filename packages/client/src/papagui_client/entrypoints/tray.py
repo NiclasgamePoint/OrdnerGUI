@@ -1,4 +1,4 @@
-"""Standalone tray entrypoint with a process-scoped admin session."""
+"""Standalone tray entrypoint for remote server control."""
 
 from __future__ import annotations
 

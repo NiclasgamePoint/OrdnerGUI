@@ -63,7 +63,7 @@ den neuen Client-Ports. Es ist keine Rückkehr zur monolithischen Architektur.
 - getrennte Karten für Server, Indexjob, Dokumentinhalte und veröffentlichte
   Generation
 - vollständige serverseitige Indexkonfiguration und Wartungsaktionen
-- Adminpasswort erzeugt weiterhin nur eine flüchtige Sitzung im Tray-Prozess
+- Wartungsaktionen sind nach erfolgreicher Client-Token-Verbindung direkt bedienbar
 
 ## 0.4.2-Funktionen und erforderliche GUI-Einbindung
 
@@ -90,12 +90,12 @@ werden können, weil zuerst ein passender revisionierter Vertrag fehlt.
 | Offline-Journal-Outbox | alte Journalansicht und Konfliktauflösung sind angebunden | **UI:** Reihenfolge und Abhängigkeiten blockierter Folgeänderungen sichtbar machen |
 | optimistische Revisionen und HTTP 409 | Neuladen, Zusammenführen, Wiederholen und Verwerfen bleiben erhalten | **UI:** Feld-für-Feld-/Drei-Wege-Vergleich Server/Lokal im Merge-Dialog ergänzen |
 | Idempotency-Keys | vollständig im Application-Layer, ohne Bedienbedarf | optional technische Diagnoseansicht ergänzen |
-| serverseitige Kundenerkennung | Review und globaler Start bleiben im Admin-Tray; die letzten Läufe werden bereits geladen | **UI:** vollständige Historie der Erkennungsläufe statt nur des jüngsten Zeitpunkts ergänzen |
+| serverseitige Kundenerkennung | Review und globaler Start bleiben im Server-Tray; die letzten Läufe werden bereits geladen | **UI:** vollständige Historie der Erkennungsläufe statt nur des jüngsten Zeitpunkts ergänzen |
 | Erkennungsregeln und Dokumentmuster | Mindestjahr und bevorzugte Dokumentmuster sind im Tray editierbar | **API + UI:** alte Aktivierung, Häufigkeitsschwelle, Blacklists und Blacklist-Vorschläge ergänzen |
 | dokumentbasierte Kundenvorschläge | alte Vorschlagskarten nutzen die v2-API; Kontaktvorschläge zeigen Name, Rolle, E-Mail und Telefon sowie Abweichungen von manuell gepflegten Kontakten | **API + UI:** kundenbezogenen „neu suchen“-Endpunkt und frei bestätigbaren Wert, etwa für den Kundentyp, ergänzen |
 | serververwaltete Projektzuordnung | Projekte sind im alten Dienstleistungsbereich und im Dateien-Tab des Kundeneditors in den beiden Listen `Gefundene mögliche Ordner`/`Ausgewählte Ordner` lesbar; die alte Zuordnungsbedienung ist sichtbar und eindeutig deaktiviert | **API + UI:** revisionierte manuelle Zuordnung, Umordnung, Entfernung und Zuordnung eines noch freien Ordners ergänzen |
 | Erkennungsfall gemeinsam/getrennt anlegen und Kundentyp bestätigen | gemeinsam anlegen, zuordnen und ablehnen sind angebunden; alte Zusatzfelder bleiben sichtbar | **API + UI:** transaktionalen Split-Endpunkt und Kundentyp im Entscheidungsvertrag ergänzen |
-| flüchtige Adminsitzung | Passwortabfrage vor geschützten Aktionen bleibt aktiv | **UI:** sichtbaren Entsperrtstatus, Ablaufzeit und eine Sperren-Aktion ergänzen |
+| kennwortfreie Serversteuerung | alle Aktionen verwenden ausschließlich den Client-Token | keine |
 | Serverstatus, Jobfortschritt und Generation | alte Übersichtskarten sind angebunden | **API + UI:** Server-Logstream und Worker-Zuordnungen/-Fortschritt statt nur lokal beobachteter Statusereignisse ergänzen |
 | Indexlauf, Vollaufbau, Abbruch, Löschen, Neustart | alte Wartungsaktionen rufen ausschließlich v2-Admin-API auf | keine |
 | vollständige OCR-/Inhalts-/Ressourceneinstellungen | altes Einstellungsraster im Tray ist angebunden | keine |

@@ -17,23 +17,11 @@ python -m papagui_server serve \
   --initialize-source-identity
 ```
 
-For containers, keep secrets out of the environment visible through
-`docker inspect`: mount UTF-8 files and set `PAPAGUI_API_TOKEN_FILE` plus
-`PAPAGUI_ADMIN_PASSWORD_HASH_FILE`. Create the Argon2id password hash without
-putting the password in argv:
-
-```bash
-printf '%s' 'a-long-admin-password' | papagui-server hash-password --stdin
-```
-
-Ohne `--stdin` fragt der Befehl das Passwort ausschließlich verdeckt an einem
-interaktiven Terminal ab. Ein Klartextpasswort als Positionsargument wird nicht
-akzeptiert, damit es weder in der Prozessliste noch in der Shell-Historie steht.
-
-Non-empty direct values in `PAPAGUI_API_TOKEN` and
-`PAPAGUI_ADMIN_PASSWORD_HASH` take precedence over file settings and are meant
-for local development only. `PAPAGUI_ADMIN_PASSWORD` is a migration/development
-bootstrap fallback and must not be used for production.
+For containers, keep the client token out of the environment visible through
+`docker inspect`: mount an UTF-8 file and set `PAPAGUI_API_TOKEN_FILE`.
+`PAPAGUI_API_TOKEN` takes precedence and is intended for local development
+only. Settings and maintenance operations require no additional password or
+administrative session.
 
 On the first non-empty source mount, `--initialize-source-identity` stores a
 portable identity in the persistent config directory. Later empty or replaced

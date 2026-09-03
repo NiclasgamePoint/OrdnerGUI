@@ -283,18 +283,11 @@ def test_customer_gateway_reads_mutates_and_translates_conflicts():
         gateway.mutate(_mutation(CustomerMutationKind.UPDATE))
 
 
-def test_server_control_keeps_admin_session_only_in_memory_and_validates_actions():
+def test_server_control_uses_client_token_and_validates_actions():
     gateway = HttpServerControlGateway("http://server")
     gateway._transport = Mock()
     gateway._transport.json.return_value = {"state": "online"}
-    assert not gateway.admin_unlocked
     assert gateway.status() == {"state": "online"}
-    with pytest.raises(ApiRejectedError):
-        gateway.settings()
-
-    gateway._transport.json.return_value = {"session_token": "ephemeral"}
-    gateway.login_admin("secret")
-    assert gateway.admin_unlocked
     gateway._transport.json.return_value = {"settings": {"interval_seconds": 900}}
     assert gateway.settings()["settings"]["interval_seconds"] == 900
     gateway.save_settings({"interval_seconds": 3_600})
@@ -303,30 +296,9 @@ def test_server_control_keeps_admin_session_only_in_memory_and_validates_actions
     }
     for action in ("start", "full_rebuild", "cancel", "delete", "restart_server"):
         gateway.index_action(action)
-        assert gateway._transport.json.call_args.args[3] == {
-            "X-PapaGUI-Admin-Session": "ephemeral"
-        }
+        assert len(gateway._transport.json.call_args.args) == 3
     with pytest.raises(ValueError):
         gateway.index_action("shell")
-    gateway.lock_admin()
-    assert not gateway.admin_unlocked
-
-    gateway._transport.json.return_value = {}
-    with pytest.raises(ApiRejectedError):
-        gateway.login_admin("secret")
-    gateway._transport.json.return_value = {"token": "fallback"}
-    gateway.login_admin("secret")
-    assert gateway.admin_unlocked
-    gateway.logout_admin()
-    assert not gateway.admin_unlocked
-    assert gateway._transport.json.call_args.args[:2] == ("DELETE", "/v2/admin/session")
-    gateway.logout_admin()  # already locked is a no-op
-
-    gateway._admin_session = "clear-even-when-offline"
-    gateway._transport.json.side_effect = ApiUnavailableError("offline")
-    with pytest.raises(ApiUnavailableError):
-        gateway.logout_admin()
-    assert not gateway.admin_unlocked
 
 
 def test_client_settings_platform_defaults_environment_and_validation(monkeypatch, tmp_path):

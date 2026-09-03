@@ -52,8 +52,8 @@ SETTINGS_HELP_TEXTS = {
         "Generationen sowie Kunden- und Journaländerungen."
     ),
     "api_token": (
-        "Client-Token für die Server-API. Das getrennte Adminpasswort wird nur "
-        "im Indexserver-Fenster abgefragt und hier nicht gespeichert."
+        "Client-Token für die Server-API. Es wird vom lokalen Komfortstart "
+        "automatisch erzeugt und für Client und Server gemeinsam verwendet."
     ),
     "sync_interval": (
         "Zeitabstand, in dem der Client eine neue, vollständig geprüfte "

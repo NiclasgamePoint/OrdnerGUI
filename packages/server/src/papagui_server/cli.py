@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import logging
 from pathlib import Path
@@ -12,7 +11,6 @@ import threading
 
 import uvicorn
 
-from papagui_server.adapters.security import hash_admin_password
 from papagui_server.api import create_app
 from papagui_server.composition import (
     RuntimeConfiguration,
@@ -36,20 +34,6 @@ def build_parser() -> argparse.ArgumentParser:
     _runtime_arguments(once)
     once.add_argument("--full-rebuild", action="store_true")
 
-    password = subparsers.add_parser(
-        "hash-password",
-        help="Argon2id-Hash für das Adminpasswort erzeugen",
-        description=(
-            "Liest das Passwort verdeckt von einem interaktiven Terminal oder "
-            "mit --stdin. Klartextpasswörter in argv werden nicht akzeptiert."
-        ),
-    )
-    password.add_argument(
-        "--stdin",
-        action="store_true",
-        help="Passwort argv-sicher exakt von stdin lesen (z. B. Secret-Pipe)",
-    )
-
     openapi = subparsers.add_parser(
         "openapi", help="OpenAPI-Dokument als JSON ausgeben"
     )
@@ -68,19 +52,6 @@ def main(arguments: list[str] | None = None) -> int:
         print(f"PapaGUI-Server konnte nicht konfiguriert werden: {error}", file=sys.stderr)
         return 2
     command = parsed.command
-    if command == "hash-password":
-        if parsed.stdin:
-            password = sys.stdin.read()
-        else:
-            if not sys.stdin.isatty():
-                raise ValueError(
-                    "Ohne interaktives Terminal muss --stdin verwendet werden."
-                )
-            password = getpass.getpass("Adminpasswort: ")
-        if not password:
-            raise ValueError("Das Adminpasswort darf nicht leer sein.")
-        print(hash_admin_password(password))
-        return 0
     configuration = _configuration(parsed)
     try:
         container = build_container(configuration)
@@ -151,10 +122,7 @@ def _configuration(parsed: argparse.Namespace) -> RuntimeConfiguration:
         config_path=parsed.config,
         source_id=parsed.source_id,
         client_token=environment.client_token,
-        admin_password_hash=environment.admin_password_hash,
-        bootstrap_admin_password=environment.bootstrap_admin_password,
         allow_insecure_no_client_token=environment.allow_insecure_no_client_token,
-        admin_session_minutes=environment.admin_session_minutes,
         default_interval_seconds=parsed.interval_seconds,
         initialize_source_identity=parsed.initialize_source_identity,
     )

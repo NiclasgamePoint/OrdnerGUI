@@ -145,15 +145,6 @@ class ServerStatusResponse(ApiModel):
     resumable: bool
 
 
-class AdminSessionRequest(ApiModel):
-    password: str = Field(min_length=1)
-
-
-class AdminSessionResponse(ApiModel):
-    token: str
-    expires_at: str
-
-
 class IndexRunRequest(ApiModel):
     full_rebuild: bool = False
 

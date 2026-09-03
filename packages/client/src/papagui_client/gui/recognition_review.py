@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListView,
@@ -357,8 +356,6 @@ class RecognitionReviewDialog(CenteredPopupDialog):
         )
 
     def start_run(self) -> None:
-        if not self._ensure_admin():
-            return
         try:
             summary = self._control.start_recognition()
         except Exception as exc:
@@ -371,7 +368,7 @@ class RecognitionReviewDialog(CenteredPopupDialog):
 
     def decide(self, action: str) -> None:
         case = self.selected_case()
-        if case is None or not self._ensure_admin():
+        if case is None:
             return
         customer_id = None
         expected_revision = None
@@ -410,25 +407,6 @@ class RecognitionReviewDialog(CenteredPopupDialog):
         self.together_button.setEnabled(enabled)
         self.ignore_button.setEnabled(enabled)
         self.separate_button.setEnabled(False)
-
-    def _ensure_admin(self) -> bool:
-        if self._control.admin_unlocked:
-            return True
-        password, accepted = QInputDialog.getText(
-            self,
-            "Admin entsperren",
-            "Adminpasswort",
-            QLineEdit.EchoMode.Password,
-        )
-        if not accepted:
-            return False
-        try:
-            self._control.login_admin(password)
-        except Exception as exc:
-            QMessageBox.warning(self, "Anmeldung fehlgeschlagen", str(exc))
-            return False
-        return True
-
 
 # v0.4.1 class name remains importable for extensions and documentation links.
 CustomerRecognitionReviewDialog = RecognitionReviewDialog

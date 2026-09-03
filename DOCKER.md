@@ -26,8 +26,8 @@ Server allein:
 cp deploy/server/.env.example deploy/server/.env
 # absolute Quell-, Daten- und Configpfade in .env eintragen
 docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml build
-# api-token und admin-password-hash geschützt im Configpfad erzeugen;
-# genaue argv-sichere Befehle: docs/server/operations.md
+# api-token geschützt im Configpfad erzeugen; ein Adminpasswort ist nicht nötig;
+# genaue Befehle: docs/server/operations.md
 docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml up -d --build
 docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml logs -f papagui-server
 ```

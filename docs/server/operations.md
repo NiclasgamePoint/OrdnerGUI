@@ -8,7 +8,7 @@ Der Container verwendet drei klar getrennte Pfade:
 | --- | --- | --- |
 | `/source` | read-only | Gemountete Bauvorhaben/Dokumente |
 | `/data` | read-write | Index, `customers.db`, Generationen, Backups und Jobstatus |
-| `/config` | read-write | Servereinstellungen und Passwort-Hash |
+| `/config` | read-write | Servereinstellungen, Quellidentität und API-Token |
 
 Nur eine Serverinstanz darf dasselbe `/data`-Volume verwenden. Die konfigurierte
 UID/GID benötigt Leserechte auf der Quelle und Schreibrechte auf Daten und
@@ -16,8 +16,8 @@ Konfiguration.
 
 Die Compose-Datei bindet Port 8765 standardmäßig ausschließlich an
 `127.0.0.1`. `PAPAGUI_API_BIND_ADDRESS=0.0.0.0` ist nur für einen bewusst
-abgesicherten direkten LAN-Zugriff vorgesehen. `/config/api-token` und
-`/config/admin-password-hash` werden als UTF-8-Dateien gelesen; ihre Werte sind
+abgesicherten direkten LAN-Zugriff vorgesehen. `/config/api-token` wird als
+UTF-8-Datei gelesen; sein Wert ist
 nicht Bestandteil der Containerumgebung und deshalb nicht über
 `docker inspect` sichtbar.
 
@@ -35,8 +35,7 @@ oder Compose-Dateien. Vor dem ersten Start wird zunächst das Image gebaut:
 docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml build
 ```
 
-Danach die beiden Secretdateien argv-sicher erzeugen. Das Passwort wird verdeckt
-vom Terminal gelesen und gelangt nur über stdin in den kurzlebigen Container:
+Danach die Tokendatei erzeugen:
 
 ```bash
 PAPAGUI_SECRET_DIR=/volume1/docker/papagui/config
@@ -46,13 +45,7 @@ umask 077
 docker run --rm --entrypoint python papagui-server:0.4.2 \
   -c 'import secrets; print(secrets.token_urlsafe(32))' \
   > "$PAPAGUI_SECRET_DIR/api-token"
-read -r -s -p 'Adminpasswort: ' PAPAGUI_ADMIN_PASSWORD_INPUT
-printf '%s' "$PAPAGUI_ADMIN_PASSWORD_INPUT" \
-  | docker run --rm -i papagui-server:0.4.2 hash-password --stdin \
-  > "$PAPAGUI_SECRET_DIR/admin-password-hash"
-unset PAPAGUI_ADMIN_PASSWORD_INPUT
-chmod 600 "$PAPAGUI_SECRET_DIR/api-token" \
-  "$PAPAGUI_SECRET_DIR/admin-password-hash"
+chmod 600 "$PAPAGUI_SECRET_DIR/api-token"
 ```
 
 Nun starten und prüfen:
@@ -90,10 +83,10 @@ Clientpaket im Serverimage importierbar sind.
 - Den Wert aus `api-token` über einen geschützten Kanal in die
   Clientkonfigurationen übernehmen. Die Datei selbst nicht in eine gemeinsame
   Benutzerfreigabe legen.
-- Für Docker/NAS ausschließlich die Hashdatei verwenden. Direkte Variablen
-  `PAPAGUI_API_TOKEN`, `PAPAGUI_ADMIN_PASSWORD_HASH` und die Bootstrap-Variable
-  `PAPAGUI_ADMIN_PASSWORD` sind nur für gezielte manuelle Starts kompatibel;
-  Umgebungswerte sind über Containerinspektion sichtbar.
+- Für Docker/NAS ausschließlich die Tokendatei verwenden. Die direkte Variable
+  `PAPAGUI_API_TOKEN` bleibt für gezielte manuelle Starts kompatibel;
+  ihr Wert ist über Containerinspektion sichtbar. Ein zusätzliches
+  Adminpasswort wird nicht konfiguriert.
 - Automatisches Indexintervall zwischen 15 Minuten und 48 Stunden wählen.
 - Reverse Proxy und HTTPS konfigurieren, bevor die API außerhalb eines
   vertrauenswürdigen Netzes erreichbar ist.
@@ -195,8 +188,7 @@ id papagui
 mkdir -p /volume1/docker/papagui/data /volume1/docker/papagui/config
 chown -R 1026:100 /volume1/docker/papagui/data /volume1/docker/papagui/config
 chmod 750 /volume1/docker/papagui/data /volume1/docker/papagui/config
-chmod 600 /volume1/docker/papagui/config/api-token \
-  /volume1/docker/papagui/config/admin-password-hash
+chmod 600 /volume1/docker/papagui/config/api-token
 ```
 
 Im Container Manager werden dieselben absoluten NAS-Pfade eingetragen;

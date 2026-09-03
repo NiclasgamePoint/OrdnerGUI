@@ -12,10 +12,7 @@ from papagui_server.domain.models import MutableRunState
 
 
 TOKEN = "edge-client-token"
-PASSWORD = "edge-admin-password"
-
-
-def _container(tmp_path: Path, *, admin: bool = True):
+def _container(tmp_path: Path):
     source = tmp_path / "source"
     source.mkdir(parents=True)
     return build_container(
@@ -24,25 +21,12 @@ def _container(tmp_path: Path, *, admin: bool = True):
             data_path=tmp_path / "data",
             config_path=tmp_path / "config",
             client_token=TOKEN,
-            bootstrap_admin_password=PASSWORD if admin else "",
         )
     )
 
 
 def _run(coroutine):
     return asyncio.run(coroutine)
-
-
-async def _login(client: httpx.AsyncClient) -> dict[str, str]:
-    client_headers = {"Authorization": f"Bearer {TOKEN}"}
-    response = await client.post(
-        "/v2/admin/session", headers=client_headers, json={"password": PASSWORD}
-    )
-    assert response.status_code == 200
-    return {
-        **client_headers,
-        "X-PapaGUI-Admin-Session": response.json()["token"],
-    }
 
 
 def test_auth_status_lifespan_and_strict_settings_errors(tmp_path: Path) -> None:
@@ -62,14 +46,7 @@ def test_auth_status_lifespan_and_strict_settings_errors(tmp_path: Path) -> None
             status = await client.get("/v2/server/status", headers=headers)
             assert status.status_code == 200
             assert status.json()["source_id"] == "primary"
-            admin = await _login(client)
-            assert (
-                await client.get(
-                    "/v2/admin/settings",
-                    headers={**headers, "X-PapaGUI-Admin-Session": "wrong"},
-                )
-            ).status_code == 403
-            assert (await client.get("/v2/admin/settings", headers=admin)).status_code == 200
+            assert (await client.get("/v2/admin/settings", headers=headers)).status_code == 200
             for invalid in (
                 {"settings": []},
                 {"settings": {"interval_seconds": "900"}},
@@ -79,31 +56,31 @@ def test_auth_status_lifespan_and_strict_settings_errors(tmp_path: Path) -> None
                 {"settings": {"unknown": 1}},
             ):
                 response = await client.put(
-                    "/v2/admin/settings", headers=admin, json=invalid
+                    "/v2/admin/settings", headers=headers, json=invalid
                 )
                 assert response.status_code == 400, response.text
                 assert response.json()["error"]["code"] == "invalid_request"
 
             assert (
                 await client.post(
-                    "/v2/admin/index-runs/current/cancel", headers=admin
+                    "/v2/admin/index-runs/current/cancel", headers=headers
                 )
             ).status_code == 409
             container.coordinator._state = MutableRunState(
                 state="running", run_id="api-running"
             )
             cancelled = await client.post(
-                "/v2/admin/index-runs/current/cancel", headers=admin
+                "/v2/admin/index-runs/current/cancel", headers=headers
             )
             assert cancelled.status_code == 202
             container.coordinator._state = MutableRunState()
             assert (
                 await client.delete(
-                    "/v2/admin/index", headers=admin, params={"rebuild": "false"}
+                    "/v2/admin/index", headers=headers, params={"rebuild": "false"}
                 )
             ).json()["rebuild"] is False
             assert (
-                await client.post("/v2/admin/server/restart", headers=admin)
+                await client.post("/v2/admin/server/restart", headers=headers)
             ).status_code == 202
 
         lifecycle = create_app(container, manage_lifecycle=True, run_on_start=False)
@@ -114,19 +91,19 @@ def test_auth_status_lifespan_and_strict_settings_errors(tmp_path: Path) -> None
     _run(scenario())
 
 
-def test_unconfigured_admin_and_generation_http_error_paths(tmp_path: Path) -> None:
+def test_removed_admin_session_and_generation_http_error_paths(tmp_path: Path) -> None:
     async def scenario() -> None:
-        container = _container(tmp_path, admin=False)
+        container = _container(tmp_path)
         app = create_app(container, manage_lifecycle=False)
         headers = {"Authorization": f"Bearer {TOKEN}"}
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             assert (
-                await client.post(
-                    "/v2/admin/session", headers=headers, json={"password": PASSWORD}
-                )
-            ).status_code == 401
+                    await client.post(
+                        "/v2/admin/session", headers=headers, json={"password": "old"}
+                    )
+                ).status_code == 404
             for url in (
                 "/v2/generations/current",
                 "/v2/generations/index/missing/manifest",
@@ -387,7 +364,6 @@ def test_v1_golden_status_settings_actions_and_customer_crud(tmp_path: Path) -> 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            admin = await _login(client)
             status = await client.get("/v1/server/status", headers=client_headers)
             assert status.status_code == 200
             assert set(status.json()) == {"server", "job", "generation", "backups"}
@@ -403,7 +379,7 @@ def test_v1_golden_status_settings_actions_and_customer_crud(tmp_path: Path) -> 
             assert settings.json()["settings"]["automatic_monitoring_enabled"] is True
             changed = await client.put(
                 "/v1/server/settings",
-                headers=admin,
+                headers=client_headers,
                 json={"settings": {"automatic_monitoring_enabled": False}},
             )
             assert changed.json()["settings"]["automatic_runs_enabled"] is False
@@ -429,12 +405,12 @@ def test_v1_golden_status_settings_actions_and_customer_crud(tmp_path: Path) -> 
             )
             for action in ("run", "rebuild", "delete", "cancel", "restart", "interval:900"):
                 response = await client.post(
-                    "/v1/server/actions", headers=admin, json={"action": action}
+                    "/v1/server/actions", headers=client_headers, json={"action": action}
                 )
                 assert response.status_code == 202
             assert (
                 await client.post(
-                    "/v1/server/actions", headers=admin, json={"action": "unknown"}
+                    "/v1/server/actions", headers=client_headers, json={"action": "unknown"}
                 )
             ).status_code == 400
 
@@ -460,24 +436,20 @@ def test_v1_golden_status_settings_actions_and_customer_crud(tmp_path: Path) -> 
             assert updated.json()["customer"]["revision"] == 2
             deleted = await client.delete(
                 f"/v1/customers/{customer['id']}",
-                headers={**admin, "If-Match": "2"},
+                headers={**client_headers, "If-Match": "2"},
             )
             assert deleted.json()["deleted"]
 
     _run(scenario())
 
 
-def test_v1_admin_and_destructive_routes_reject_client_only_sessions(
+def test_v1_writes_require_only_the_client_token(
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
         container = _container(tmp_path)
         app = create_app(container, manage_lifecycle=False)
         client_headers = {"Authorization": f"Bearer {TOKEN}"}
-        invalid_admin = {
-            **client_headers,
-            "X-PapaGUI-Admin-Session": "invalid-session",
-        }
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -489,34 +461,28 @@ def test_v1_admin_and_destructive_routes_reject_client_only_sessions(
                 await client.get("/v1/server/settings", headers=client_headers)
             ).status_code == 200
 
-            for headers in (client_headers, invalid_admin):
-                assert (
-                    await client.put(
-                        "/v1/server/settings",
-                        headers=headers,
-                        json={"settings": {"interval_seconds": 900}},
-                    )
-                ).status_code == 403
-                for action in (
-                    "run",
-                    "rebuild",
-                    "delete",
-                    "cancel",
-                    "restart",
-                    "interval:900",
-                ):
-                    assert (
-                        await client.post(
-                            "/v1/server/actions",
-                            headers=headers,
-                            json={"action": action},
-                        )
-                    ).status_code == 403
-                assert (
-                    await client.delete(
-                        "/v1/customers/1",
-                        headers={**headers, "If-Match": "1"},
-                    )
-                ).status_code == 403
+            assert (
+                await client.put(
+                    "/v1/server/settings",
+                    json={"settings": {"interval_seconds": 900}},
+                )
+            ).status_code == 401
+            assert (
+                await client.post(
+                    "/v1/server/actions", json={"action": "interval:900"}
+                )
+            ).status_code == 401
+            assert (
+                await client.delete(
+                    "/v1/customers/1", headers={"If-Match": "1"}
+                )
+            ).status_code == 401
+            assert (
+                await client.put(
+                    "/v1/server/settings",
+                    headers=client_headers,
+                    json={"settings": {"interval_seconds": 900}},
+                )
+            ).status_code == 200
 
     _run(scenario())

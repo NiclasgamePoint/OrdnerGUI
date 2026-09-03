@@ -21,7 +21,6 @@ def _runtime(tmp_path: Path):
             data_path=tmp_path / "data",
             config_path=tmp_path / "config",
             client_token="client-token-123",
-            bootstrap_admin_password="admin-password-123",
         )
     )
 

@@ -60,44 +60,6 @@ function Initialize-Secret([string]$Name, [string]$Filename) {
 
 Initialize-Secret 'PAPAGUI_API_TOKEN' 'api-token'
 
-function Get-AdminPasswordHash([string]$Password) {
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $python
-    $startInfo.Arguments = '-m papagui_server hash-password --stdin'
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardInput = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $startInfo
-    if (-not $process.Start()) { throw 'Der Passwort-Hashprozess konnte nicht gestartet werden.' }
-    $process.StandardInput.Write($Password)
-    $process.StandardInput.Close()
-    $output = $process.StandardOutput.ReadToEnd()
-    $errorOutput = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-    if ($process.ExitCode -ne 0) {
-        throw "Der Passwort-Hashprozess ist fehlgeschlagen: $errorOutput"
-    }
-    return $output.Trim()
-}
-
-# Keep the bootstrap password out of child-process argv and the container
-# environment. The readable development secret remains host-local for tray login.
-Protect-SecretFile (Join-Path $env:PAPAGUI_SERVER_CONFIG_PATH 'admin-password')
-if (-not $env:PAPAGUI_ADMIN_PASSWORD_HASH) {
-    Initialize-Secret 'PAPAGUI_ADMIN_PASSWORD' 'admin-password'
-    $password = $env:PAPAGUI_ADMIN_PASSWORD
-    Remove-Item Env:PAPAGUI_ADMIN_PASSWORD -ErrorAction SilentlyContinue
-    $env:PAPAGUI_ADMIN_PASSWORD_HASH = Get-AdminPasswordHash $password
-    $password = $null
-}
-$adminHashFile = Join-Path $env:PAPAGUI_SERVER_CONFIG_PATH 'admin-password-hash'
-Write-SecretFile $adminHashFile $env:PAPAGUI_ADMIN_PASSWORD_HASH
-Remove-Item Env:PAPAGUI_ADMIN_PASSWORD -ErrorAction SilentlyContinue
-Remove-Item Env:PAPAGUI_ADMIN_PASSWORD_HASH -ErrorAction SilentlyContinue
-
 if (-not $env:PAPAGUI_SOURCE_PATH) {
     $env:PAPAGUI_SOURCE_PATH = Join-Path $PSScriptRoot 'Bauvorhaben'
 }

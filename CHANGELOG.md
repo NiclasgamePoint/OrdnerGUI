@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Adminpasswort, Argon2-Abhängigkeit, Adminsession-API und Passwortdialoge
+  vollständig entfernt; Servereinstellungen und Wartungsaktionen benötigen nur
+  noch den automatisch verwalteten Client-Token.
+
 - Das vollständige v0.4.1-Erscheinungsbild von Hauptfenster,
   Einstellungs-Popup, Kundenmasken, Viewer und Indexserver-Tray auf die getrennte
   0.4.2-Clientarchitektur zurückportiert; Client und Server bleiben vollständig
@@ -9,8 +13,8 @@
 - Die vollständige read-only-Katalogschnittstelle im SearchCoordinator
   freigelegt, damit die wiederhergestellte Karten-/Ordnernavigation keine
   Adapter oder Index-Writer direkt kennt.
-- GUI-Migrationsmatrix für neue Offline-, Generations-, Pfad-, Konflikt- und
-  Adminfunktionen ergänzt.
+- GUI-Migrationsmatrix für neue Offline-, Generations-, Pfad- und
+  Konfliktfunktionen ergänzt.
 - Statistik-Seite wieder mit lokalen Kunden- und Suchkennzahlen gespeist und
   den alten **Indexserver öffnen**-Button als reine Tray-Weiterleitung ergänzt.
 
@@ -27,9 +31,8 @@
   Quellpfadmapping und vollständigem Offlinebetrieb ergänzt.
 - Kundenänderungen über eine dauerhafte Outbox, Idempotency-Keys und
   Revisionskonflikte mit expliziter 409-Auflösung abgesichert.
-- Eigenständiges Admin-Tray mit Live-Serverstatus, Indexsteuerung,
-  serverseitigen Einstellungen und ausschließlich speicherresidenten
-  Adminsitzungen ergänzt.
+- Eigenständiges Server-Tray mit Live-Serverstatus, Indexsteuerung und
+  serverseitigen Einstellungen ergänzt.
 - Leere oder vertauschte Quellmounts durch eine persistente Quellenidentität
   abgesichert und Secretdateien/Clientkonfiguration plattformgerecht gehärtet.
 - Getrennte Docker-, native Client- und CI-Builddefinitionen sowie Architektur-,

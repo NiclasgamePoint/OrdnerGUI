@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -452,7 +451,7 @@ class ServerTrayWindow(QDialog):
             QMessageBox.warning(
                 self,
                 "Kundenerkennung",
-                "Diese Clientinstanz besitzt keine Admin-Steuerung.",
+                "Diese Clientinstanz besitzt keine Serversteuerung.",
             )
             return
         try:
@@ -728,8 +727,6 @@ class ServerTrayWindow(QDialog):
         if control is None:
             self._show_action_error("Keine Serversteuerung konfiguriert")
             return
-        if not self._ensure_admin():
-            return
         self.activity.insertItem(0, f"Aktion angefordert: {action}")
         task = BackgroundTask(lambda: control.index_action(action))
         task.signals.succeeded.connect(self._action_complete)
@@ -776,8 +773,6 @@ class ServerTrayWindow(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        if not self._ensure_admin():
-            return
         self._set_settings_busy(True, "Servereinstellungen werden geladen …")
         task = BackgroundTask(self._container.server_control.settings)
         task.signals.succeeded.connect(
@@ -836,8 +831,6 @@ class ServerTrayWindow(QDialog):
 
     def save_settings(self) -> None:
         if self._settings_busy:
-            return
-        if not self._ensure_admin():
             return
         try:
             settings = self._collect_settings()
@@ -923,28 +916,6 @@ class ServerTrayWindow(QDialog):
         self.activity.insertItem(0, model.text)
         while self.activity.count() > 50:
             self.activity.takeItem(self.activity.count() - 1)
-
-    def _ensure_admin(self) -> bool:
-        control = self._container.server_control
-        if control is None:
-            self._show_action_error("Keine Serversteuerung konfiguriert")
-            return False
-        if control.admin_unlocked:
-            return True
-        password, accepted = QInputDialog.getText(
-            self,
-            "Admin entsperren",
-            "Adminpasswort",
-            QLineEdit.EchoMode.Password,
-        )
-        if not accepted:
-            return False
-        try:
-            control.login_admin(password)
-        except Exception as exc:
-            self._show_action_error(str(exc))
-            return False
-        return True
 
     def _show_action_error(self, error: str) -> None:
         self.activity.insertItem(0, f"Fehler: {error}")
@@ -1033,12 +1004,6 @@ class TrayController:
         self.icon.hide()
         self.window.shutdown()
         self.window.close()
-        try:
-            self.window._container.server_control.logout_admin()
-        except Exception:
-            # Shutdown must not be held hostage by an unreachable server. The
-            # gateway clears its in-memory token in a finally block.
-            pass
 
 
 class SingleInstanceServer:
