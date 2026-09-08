@@ -19,7 +19,7 @@ class SearchFilterPopup(QFrame):
 
     filtersChanged = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, file_type_filter_enabled: bool = True):
         super().__init__(
             parent,
             Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint,
@@ -27,6 +27,7 @@ class SearchFilterPopup(QFrame):
         self.setObjectName("SearchFilterPopup")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedWidth(340)
+        self._filter_labels: dict[QComboBox, QLabel] = {}
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -43,6 +44,7 @@ class SearchFilterPopup(QFrame):
         self.domain_combo = self._add_filter(layout, "Fachthema")
         self.year_combo = self._add_filter(layout, "Jahre")
         self.file_type_combo = self._add_filter(layout, "Dateityp")
+        self.set_file_type_filter_enabled(file_type_filter_enabled)
         self.sort_combo = self._add_filter(layout, "Sortierung")
         self.sort_combo.addItem("Relevanz", SearchSort.RELEVANCE)
         self.sort_combo.addItem("Datum", SearchSort.DATE)
@@ -97,7 +99,13 @@ class SearchFilterPopup(QFrame):
         combo.setAccessibleDescription(f"Suchergebnisse nach {label_text} filtern.")
         combo.setMinimumHeight(34)
         layout.addWidget(combo)
+        self._filter_labels[combo] = label
         return combo
+
+    def set_file_type_filter_enabled(self, enabled: bool) -> None:
+        """Hide the file-only filter while the desktop search is folder-only."""
+        self.file_type_combo.setVisible(enabled)
+        self._filter_labels[self.file_type_combo].setVisible(enabled)
 
     def clear_filters(self):
         changed = False
@@ -128,4 +136,3 @@ class SearchFilterPopup(QFrame):
             + int(self.sort_combo.currentData() != SearchSort.RELEVANCE)
             + int(self.include_subfolders_checkbox.isChecked())
         )
-

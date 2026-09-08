@@ -25,8 +25,8 @@ den neuen Client-Ports. Es ist keine Rückkehr zur monolithischen Architektur.
 - ursprüngliche Fenstergeometrie `1400 × 900`, Mindestgröße `920 × 640`
 - durchgehende Suchkopfzeile mit Suchhistorie, `Suchen`, Filter-Popup und
   Zahnrad-Schaltfläche
-- Suchergebnisse als getrennte Kartenbereiche für Kunden, Ordner und
-  Dokumentinhalte
+- Suchergebnisse als getrennte Kartenbereiche für Kunden und Ordner;
+  Datei- und Inhaltstreffer sind vorerst bewusst ausgeblendet
 - Navigation ohne sichtbare Haupt-Tabs über Such-, Kunden- und Ordnerseite,
   einschließlich `Alt+Links` und `Alt+Rechts`
 - Kunden- und Ordnerdetailseite im responsiven Zwei-Karten-Splitter
@@ -79,8 +79,8 @@ werden können, weil zuerst ein passender revisionierter Vertrag fehlt.
 
 | Funktion aus 0.4.2 | Stand im wiederhergestellten Design | Noch erforderlich |
 |---|---|---|
-| globale Suche über Kunde, Projekt, Ordner und Dokument | in den alten Ergebnis-Karten integriert | **UI:** Seitennavigation für mehr als 500 Treffer sowie die bereits vom Suchmodell unterstützten Trefferart- und Kundenfilter ergänzen |
-| Facetten für Bereich, Jahr und Dateityp sowie Sortierung | altes Filter-Popup verwendet die neuen Facetten | **UI:** expliziten `source_id`-Filter ergänzen |
+| globale Suche über Kunde, Projekt und Ordner | in den alten Ergebnis-Karten integriert; Unterordner optional, Datei-/Inhaltstreffer vorerst deaktiviert | **UI:** Seitennavigation sowie Trefferart- und Kundenfilter ergänzen, bevor die Dateisuche später bewusst reaktiviert wird |
+| Facetten für Bereich und Jahr sowie Sortierung | altes Filter-Popup verwendet die neuen Facetten; der derzeit bedeutungslose Dateitypfilter ist ausgeblendet | **UI:** expliziten `source_id`-Filter ergänzen |
 | portable Pfade (`source_id` + relativer Pfad) | vor jedem nativen Öffnen lokal aufgelöst | **UI:** Test-/Erreichbarkeitsanzeige je Mapping ergänzen |
 | getrennte Index- und Kundengeneration | Sync und atomare Aktivierung bleiben aktiv | **UI:** detaillierte lokale Generations-, Alters- und Prüfsummenansicht ergänzen |
 | aktiver Stand plus drei lokale Backups | unverändert in der Generation-Ablage; serverseitige Anzahlen stehen im Tray | **UI:** lokale Vorgänger sowie Retention-Warnung und vorhandenes `retry_retention()` visualisieren; **API + UI:** gezielte Wiederherstellung eines Serverbackups ergänzen |

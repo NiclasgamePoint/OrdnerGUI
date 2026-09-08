@@ -2,8 +2,8 @@
 
 ## Verantwortung
 
-Der Desktop-Client zeigt und bearbeitet Kunden, durchsucht den lokalen
-Dokumentkatalog und synchronisiert Snapshots mit dem Server. Er baut selbst
+Der Desktop-Client zeigt und bearbeitet Kunden, durchsucht Kunden und Ordner im
+lokalen Katalog und synchronisiert Snapshots mit dem Server. Er baut selbst
 keinen Index auf und schreibt niemals in eine heruntergeladene Generation.
 
 Die sichtbare Oberfläche verwendet wieder vollständig das Karten- und
@@ -100,17 +100,20 @@ UNC-Pfade sowie absolute macOS-/Linux-Pfade.
 
 ## Suche, Ordner und Kundendetails
 
-Die globale lokale Suche vereint Dokumente, Ordner, Projektwurzeln und Kunden,
-ohne eine Schreibberechtigung auf den Index zu besitzen. Sie unterstützt
-Entitätsfilter, Quelle, Bereich, Jahr, Dateityp und Kunde sowie Sortierung nach
-Relevanz, Änderungszeit oder Name und seitenweise Ergebnisse. Facetten werden
-direkt aus der aktiven Generation gelesen. Suchbegriffe werden als begrenzte
-MRU-Liste atomar in `search-history.json` gespeichert und können lokal gelöscht
-werden.
+Die sichtbare globale Suche ist vorerst auf Kunden und Projektordner begrenzt,
+ohne eine Schreibberechtigung auf den Index zu besitzen. Strukturierte
+Unterordner können im Filter ausdrücklich zugeschaltet werden; einzelne Dateien
+und extrahierte Dateiinhalte werden nicht als Suchtreffer dargestellt. Bereich,
+Jahr und Sortierung bleiben verfügbar. Die Ergebnisanzahl ist begrenzt, damit
+Qt nicht hunderte komplexe Ergebniskarten gleichzeitig im GUI-Thread erzeugen
+muss. Suchbegriffe werden als begrenzte MRU-Liste atomar in
+`search-history.json` gespeichert und können lokal gelöscht werden.
 
 Die Ordnerseite bildet die portablen `folders`- und `project_roots`-Datensätze
-der Generation ab. Erst der lokale `SourcePathResolver` übersetzt sie in ein
-Windows-, macOS- oder Linux-Ziel. In der Kundenansicht sind Projekte samt
+der Generation ab. Unterordner werden bedarfsgerecht beim Aufklappen aus der
+lokalen Generation gelesen, sodass ihre direkten Dateien und weiteren
+Unterordner einsehbar sind. Erst der lokale `SourcePathResolver` übersetzt sie
+in ein Windows-, macOS- oder Linux-Ziel. In der Kundenansicht sind Projekte samt
 Quelle/Provenienz, Kontakte, Notizen, Tags, Offline-Journal und offene
 Dokumentvorschläge getrennt sichtbar.
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Volltextsuche des Desktopclients beschleunigt: SQLite wertet die FTS-Abfrage
+  nicht mehr korreliert für jeden Katalogeintrag aus. Dadurch blockiert eine
+  Suche in großen lokalen Generationen nicht länger die Qt-Ereignisschleife.
+- Sichtbare Hauptsuche vorerst auf Kunden und Projektordner begrenzt;
+  Unterordner sind über den bestehenden Filter zuschaltbar, Datei- und
+  Inhaltstreffer bleiben aus der Ergebnisansicht ausgeblendet.
+- Projektunterordner in der Dienstleistungsansicht lassen sich aufklappen und
+  laden ihre direkten Unterordner und Dateien bedarfsgerecht aus dem lokalen
+  read-only Katalog nach.
+
 - Adminpasswort, Argon2-Abhängigkeit, Adminsession-API und Passwortdialoge
   vollständig entfernt; Servereinstellungen und Wartungsaktionen benötigen nur
   noch den automatisch verwalteten Client-Token.

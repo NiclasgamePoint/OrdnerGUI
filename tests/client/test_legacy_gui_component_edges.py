@@ -894,6 +894,63 @@ def test_folder_page_defaults_and_service_free_metadata(application, monkeypatch
     page.close()
 
 
+def test_folder_page_loads_indexed_subfolders_when_expanded(
+    application, tmp_path, monkeypatch
+):
+    settings = FakeFolderSettings()
+    monkeypatch.setattr(
+        "papagui_client.gui.pages.folder_page.QSettings", lambda *_args: settings
+    )
+    child_path = tmp_path / "Honorar"
+    document_path = child_path / "Rechnung.xlsx"
+    page = FolderPage()
+    requested = []
+    page.folderExpansionRequested.connect(requested.append)
+    route = ("archive", "Blower Door/2020/Kita Rickling/Honorar")
+    page.set_folder(
+        {
+            "folder_name": "Kita Rickling",
+            "folder_path": str(tmp_path),
+            "subfolders": [
+                {
+                    "name": "Honorar",
+                    "path": str(child_path),
+                    "navigation_key": route,
+                    "children": [],
+                    "children_loaded": False,
+                }
+            ],
+            "files": [],
+        }
+    )
+
+    folder = page.file_list.topLevelItem(0)
+    assert folder.childCount() == 1
+    assert folder.child(0).data(0, Qt.UserRole + 1) == "placeholder"
+    folder.setExpanded(True)
+    assert requested == [route]
+
+    page.set_folder_children(
+        route,
+        {
+            "subfolders": [],
+            "files": [
+                {
+                    "filename": "Rechnung.xlsx",
+                    "path": str(document_path),
+                    "relative_dir": "Blower Door/2020/Kita Rickling/Honorar",
+                    "file_type": "xlsx",
+                }
+            ],
+        },
+    )
+    folder = page.file_list.topLevelItem(0)
+    assert folder.isExpanded()
+    assert folder.childCount() == 1
+    assert folder.child(0).text(0) == "Rechnung.xlsx"
+    page.close()
+
+
 class FolderFakeMenu(FakeMenu):
     pass
 

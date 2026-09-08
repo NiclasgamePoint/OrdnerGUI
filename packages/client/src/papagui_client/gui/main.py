@@ -109,10 +109,10 @@ class ClientMainWindow(QMainWindow):
             history = list(self._container.search.history())
         except Exception:
             pass
-        self.header = AppHeader(history, document_search_enabled=True)
+        self.header = AppHeader(history, document_search_enabled=False)
         layout.addWidget(self.header)
 
-        self.filter_popup = SearchFilterPopup(self)
+        self.filter_popup = SearchFilterPopup(self, file_type_filter_enabled=False)
         self.domain_filter = self.filter_popup.domain_combo
         self.year_filter = self.filter_popup.year_combo
         self.file_type_filter = self.filter_popup.file_type_combo
@@ -125,7 +125,7 @@ class ClientMainWindow(QMainWindow):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("PageStack")
-        self.search_page = SearchPage(document_search_enabled=True)
+        self.search_page = SearchPage(document_search_enabled=False)
         self.customer_detail = CustomerDetailWidget()
         self.customer_page = self.customer_detail
         self.connection_page = self._connection_tab()
@@ -188,6 +188,9 @@ class ClientMainWindow(QMainWindow):
             self.decide_customer_suggestion
         )
         self.folder_page.backRequested.connect(self.navigator.back)
+        self.folder_page.folderExpansionRequested.connect(
+            self._load_folder_children
+        )
         self.folder_page.openFileRequested.connect(self.open_native_file)
         self.folder_page.openPathRequested.connect(self.open_native_path)
         self.folder_page.manageCustomerRequested.connect(self.manage_folder_customer)
@@ -290,6 +293,10 @@ class ClientMainWindow(QMainWindow):
         self.search_debounce.start()
 
     def start_full_search(self) -> None:
+        # Pressing Enter or changing a filter may arrive before the pending
+        # debounce timeout.  Consume it here so the same result set is not
+        # queried and rebuilt a second time 250 ms later.
+        self.search_debounce.stop()
         query_text = self.header.query()
         self.navigator.navigate("search")
         if len(query_text) < 2:
@@ -302,21 +309,25 @@ class ClientMainWindow(QMainWindow):
             SearchSort.ALPHABETICAL: GlobalSearchSort.NAME,
         }
         try:
+            kinds = [GlobalSearchKind.CUSTOMER, GlobalSearchKind.PROJECT]
+            if self.filter_popup.include_subfolders_checkbox.isChecked():
+                kinds.append(GlobalSearchKind.FOLDER)
             query = GlobalSearchQuery(
                 text=query_text,
+                kinds=tuple(kinds),
                 domain_folder=str(self.domain_filter.currentData() or "") or None,
                 year=str(self.year_filter.currentData() or "") or None,
-                file_type=str(self.file_type_filter.currentData() or "") or None,
+                file_type=None,
                 sort=sort_map.get(
                     self.filter_popup.sort_combo.currentData(),
                     GlobalSearchSort.RELEVANCE,
                 ),
-                limit=500,
+                # ResultRow is a rich QWidget.  Keep its bounded presentation
+                # cost predictable instead of constructing hundreds of hidden
+                # file-result widgets in Qt's main thread.
+                limit=250,
             )
             page = self._container.search.global_search(query)
-        except AttributeError:
-            self._run_document_only_search(query_text)
-            return
         except Exception as exc:
             self.search_page.set_customer_error(str(exc))
             self.search_page.set_folder_error(str(exc))
@@ -331,7 +342,6 @@ class ClientMainWindow(QMainWindow):
         }
         customer_rows: list[tuple[object, object]] = []
         folder_rows: list[dict] = []
-        documents: list[dict] = []
         self._folder_routes.clear()
         for hit in page.items:
             record = hit.record
@@ -362,13 +372,6 @@ class ClientMainWindow(QMainWindow):
                     }
                 )
                 continue
-            documents.append(
-                {
-                    "filename": record.title,
-                    "excerpt": record.subtitle,
-                    "path": local_path,
-                }
-            )
         # Local overlay customers are deliberately searchable before their next
         # server snapshot and therefore may not yet be present in the catalog.
         known_keys = {key for key, _customer in customer_rows}
@@ -395,42 +398,11 @@ class ClientMainWindow(QMainWindow):
             int(page.kind_counts.get(kind.value, 0)) for kind in included_folder_kinds
         )
         self.search_page.set_folders(folder_rows, folder_total or len(folder_rows))
-        self.search_page.set_documents(
-            documents,
-            int(page.kind_counts.get(GlobalSearchKind.DOCUMENT.value, len(documents))),
-        )
         try:
             self.header.set_history(list(self._container.search.history()))
         except Exception:
             pass
         self.status_bar.set_text(f"Suche abgeschlossen · {page.total} Treffer")
-
-    def _run_document_only_search(self, query_text: str) -> None:
-        try:
-            hits = self._container.search.search(query_text)
-        except Exception as exc:
-            self.search_page.set_document_error(str(exc))
-            return
-        documents = [
-            {
-                "filename": hit.record.filename,
-                "excerpt": hit.record.project_name,
-                "path": str(hit.local_path),
-            }
-            for hit in hits
-        ]
-        customers = [
-            view for view in self._customer_views
-            if query_text.casefold() in view.customer.display_name.casefold()
-        ]
-        self.search_page.set_customers(
-            [view.customer for view in customers],
-            len(customers),
-            keys=[view.key for view in customers],
-            paths=[self._customer_local_path(view.customer) for view in customers],
-        )
-        self.search_page.set_folders([], 0)
-        self.search_page.set_documents(documents, len(documents))
 
     def _customer_local_path(self, customer) -> str:
         for project in customer.projects:
@@ -495,7 +467,7 @@ class ClientMainWindow(QMainWindow):
         self.navigator.navigate("folder", route)
 
     def _coerce_folder_route(self, payload: object) -> tuple[str, str] | None:
-        if isinstance(payload, tuple) and len(payload) == 2:
+        if isinstance(payload, (list, tuple)) and len(payload) == 2:
             return str(payload[0]), str(payload[1])
         route = self._folder_routes.get(payload)
         if route is not None:
@@ -565,6 +537,11 @@ class ClientMainWindow(QMainWindow):
                 "name": child.folder.name,
                 "path": str(child.local_path),
                 "children": [],
+                "children_loaded": False,
+                "navigation_key": (
+                    child.folder.source.source_id,
+                    child.folder.source.relative_path,
+                ),
             }
             for child in details.children
         ]
@@ -588,6 +565,20 @@ class ClientMainWindow(QMainWindow):
             "subfolders": children,
             "files": files,
         }
+
+    def _load_folder_children(self, payload: object) -> None:
+        route = self._coerce_folder_route(payload)
+        if route is None:
+            self.folder_page.folder_loading_failed(payload)
+            self.status_bar.set_text("Für diesen Unterordner fehlt ein Pfadmapping.")
+            return
+        try:
+            details = self._container.search.folder(*route)
+        except Exception as exc:
+            self.folder_page.folder_loading_failed(route)
+            self.status_bar.set_text(f"Unterordner konnte nicht geladen werden · {exc}")
+            return
+        self.folder_page.set_folder_children(route, self._folder_details(details))
 
     def manage_folder_customer(self, folder_path: str, _folder_name: str) -> None:
         for row, view in enumerate(self._customer_views):

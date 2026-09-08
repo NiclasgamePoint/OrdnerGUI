@@ -182,9 +182,13 @@ class CatalogDocumentQueries:
         expressions = [f"{name} LIKE ?" for name in searchable]
         values.extend([f"%{text}%"] * len(searchable))
         if "file_content_fts" in all_tables and "path" in file_columns:
+            # Evaluate the FTS query once and use its paths as a materialized
+            # list.  A correlated EXISTS makes SQLite execute the virtual FTS
+            # scan once per catalog row; on real customer catalogs that can
+            # block the Qt event loop for tens of seconds.
             expressions.append(
-                "EXISTS (SELECT 1 FROM file_content_fts "
-                "WHERE file_content_fts.path=files.path AND file_content_fts MATCH ?)"
+                "path IN (SELECT path FROM file_content_fts "
+                "WHERE file_content_fts MATCH ?)"
             )
             values.append(f'"{text.replace(chr(34), chr(34) * 2)}"')
         clauses.append("(" + " OR ".join(expressions) + ")")

@@ -41,6 +41,11 @@ class FolderPage(QWidget):
     openFileRequested = Signal(str)
     openPathRequested = Signal(str)
     manageCustomerRequested = Signal(str, str)
+    folderExpansionRequested = Signal(object)
+
+    _ITEM_TYPE_ROLE = Qt.UserRole + 1
+    _NAVIGATION_ROLE = Qt.UserRole + 2
+    _CHILDREN_LOADED_ROLE = Qt.UserRole + 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +53,7 @@ class FolderPage(QWidget):
         self.folder_path = ""
         self._all_files: list[dict] = []
         self._subfolders: list[dict] = []
+        self._expanded_folders: set[object] = set()
         self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._icon_provider = QFileIconProvider()
 
@@ -136,6 +142,8 @@ class FolderPage(QWidget):
         self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._open_tree_context_menu)
         self.file_list.itemClicked.connect(self._open_selected_file)
+        self.file_list.itemExpanded.connect(self._request_folder_expansion)
+        self.file_list.itemCollapsed.connect(self._remember_folder_collapse)
         self.file_tabs = QTabWidget()
         self.file_tabs.setObjectName("InsetContentTabs")
         self.file_tabs.setAccessibleName("Ordner- und Mailansicht")
@@ -165,6 +173,7 @@ class FolderPage(QWidget):
         self.folder_path = str(details.get("folder_path") or "")
         self._all_files = list(details.get("files") or [])
         self._subfolders = list(details.get("subfolders") or [])
+        self._expanded_folders.clear()
         self.folder_title.setText(str(details.get("folder_name") or "Ordner"))
         file_count = int(details.get("file_count") or 0)
         size_mb = float(details.get("total_size") or 0) / 1024 / 1024
@@ -191,6 +200,33 @@ class FolderPage(QWidget):
         self.file_filter.clear()
         self._apply_file_filter("")
 
+    def set_folder_children(self, navigation_key: object, details: dict) -> None:
+        """Merge one lazily loaded subtree without changing the current page."""
+        node = self._find_subfolder(self._subfolders, navigation_key)
+        if node is None:
+            return
+        node["children"] = list(details.get("subfolders") or [])
+        node["children_loaded"] = True
+        known_paths = {
+            self._path_key(str(item.get("path") or ""))
+            for item in self._all_files
+            if item.get("path")
+        }
+        for item in details.get("files") or []:
+            path_key = self._path_key(str(item.get("path") or ""))
+            if path_key and path_key in known_paths:
+                continue
+            self._all_files.append(dict(item))
+            if path_key:
+                known_paths.add(path_key)
+        self._expanded_folders.add(self._navigation_identity(navigation_key))
+        self._apply_file_filter()
+
+    def folder_loading_failed(self, navigation_key: object) -> None:
+        """Keep a failed subtree retryable instead of leaving a loading stub."""
+        self._expanded_folders.discard(self._navigation_identity(navigation_key))
+        self._apply_file_filter()
+
     def _apply_file_filter(self, _value=None):
         normalized = self.file_filter.text().strip().casefold()
         selected_type = str(self.file_type_filter.currentData() or "")
@@ -201,7 +237,11 @@ class FolderPage(QWidget):
             item = QTreeWidgetItem([str(node.get("name") or "Ordner"), "Ordner"])
             path = str(node.get("path") or "")
             item.setData(0, Qt.UserRole, path)
-            item.setData(0, Qt.UserRole + 1, "folder")
+            item.setData(0, self._ITEM_TYPE_ROLE, "folder")
+            navigation_key = node.get("navigation_key", path)
+            item.setData(0, self._NAVIGATION_ROLE, navigation_key)
+            children_loaded = bool(node.get("children_loaded", True))
+            item.setData(0, self._CHILDREN_LOADED_ROLE, children_loaded)
             item.setToolTip(0, path)
             if path:
                 item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
@@ -212,6 +252,10 @@ class FolderPage(QWidget):
             folder_items[self._path_key(path)] = item
             for child in node.get("children") or []:
                 append_folder(child, item)
+            if not children_loaded and item.childCount() == 0:
+                placeholder = QTreeWidgetItem(["Inhalt wird beim Aufklappen geladen …", ""])
+                placeholder.setData(0, self._ITEM_TYPE_ROLE, "placeholder")
+                item.addChild(placeholder)
 
         for node in self._subfolders:
             append_folder(node)
@@ -238,7 +282,7 @@ class FolderPage(QWidget):
             item = QTreeWidgetItem([filename, " · ".join(details)])
             path = str(file_info.get("path") or "")
             item.setData(0, Qt.UserRole, path)
-            item.setData(0, Qt.UserRole + 1, "file")
+            item.setData(0, self._ITEM_TYPE_ROLE, "file")
             item.setToolTip(0, path)
             if path:
                 item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
@@ -254,8 +298,10 @@ class FolderPage(QWidget):
             child_visible = False
             for index in reversed(range(item.childCount())):
                 child = item.child(index)
-                if child.data(0, Qt.UserRole + 1) == "folder":
+                if child.data(0, self._ITEM_TYPE_ROLE) == "folder":
                     visible = prune(child)
+                elif child.data(0, self._ITEM_TYPE_ROLE) == "placeholder":
+                    visible = not filters_active
                 else:
                     visible = True
                 child.setHidden(not visible)
@@ -267,9 +313,9 @@ class FolderPage(QWidget):
 
         for index in range(self.file_list.topLevelItemCount()):
             root_item = self.file_list.topLevelItem(index)
-            if root_item.data(0, Qt.UserRole + 1) == "folder":
+            if root_item.data(0, self._ITEM_TYPE_ROLE) == "folder":
                 prune(root_item)
-        self.file_list.expandToDepth(0)
+        self._restore_expanded_folders()
 
     @staticmethod
     def _format_size(size: int) -> str:
@@ -281,14 +327,58 @@ class FolderPage(QWidget):
 
     def _open_selected_file(self, item: QTreeWidgetItem):
         path = str(item.data(0, Qt.UserRole) or "")
-        if path and item.data(0, Qt.UserRole + 1) == "file":
+        if path and item.data(0, self._ITEM_TYPE_ROLE) == "file":
             self.file_viewer.open_file(Path(path))
+
+    def _request_folder_expansion(self, item: QTreeWidgetItem) -> None:
+        if item.data(0, self._ITEM_TYPE_ROLE) != "folder":
+            return
+        navigation_key = item.data(0, self._NAVIGATION_ROLE)
+        identity = self._navigation_identity(navigation_key)
+        self._expanded_folders.add(identity)
+        if item.data(0, self._CHILDREN_LOADED_ROLE):
+            return
+        item.setData(0, self._CHILDREN_LOADED_ROLE, True)
+        self.folderExpansionRequested.emit(navigation_key)
+
+    def _remember_folder_collapse(self, item: QTreeWidgetItem) -> None:
+        navigation_key = item.data(0, self._NAVIGATION_ROLE)
+        self._expanded_folders.discard(self._navigation_identity(navigation_key))
+
+    def _restore_expanded_folders(self) -> None:
+        def restore(item: QTreeWidgetItem) -> None:
+            navigation_key = item.data(0, self._NAVIGATION_ROLE)
+            if self._navigation_identity(navigation_key) in self._expanded_folders:
+                item.setExpanded(True)
+            for index in range(item.childCount()):
+                restore(item.child(index))
+
+        for index in range(self.file_list.topLevelItemCount()):
+            restore(self.file_list.topLevelItem(index))
+
+    @classmethod
+    def _find_subfolder(cls, nodes: list[dict], navigation_key: object) -> dict | None:
+        identity = cls._navigation_identity(navigation_key)
+        for node in nodes:
+            candidate = node.get("navigation_key", node.get("path", ""))
+            if cls._navigation_identity(candidate) == identity:
+                return node
+            found = cls._find_subfolder(list(node.get("children") or []), navigation_key)
+            if found is not None:
+                return found
+        return None
+
+    @staticmethod
+    def _navigation_identity(value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
 
     def _open_tree_context_menu(self, position):
         item = self.file_list.itemAt(position)
         if item is None:
             return
-        item_type = str(item.data(0, Qt.UserRole + 1) or "")
+        item_type = str(item.data(0, self._ITEM_TYPE_ROLE) or "")
         path = str(item.data(0, Qt.UserRole) or "")
 
         menu = QMenu(self.file_list)
@@ -347,4 +437,3 @@ class FolderPage(QWidget):
 
     def cleanup(self):
         self.file_viewer.shutdown()
-

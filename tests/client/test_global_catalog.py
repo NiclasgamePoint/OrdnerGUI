@@ -12,6 +12,7 @@ from papagui_client.adapters.sqlite_catalog import (
     CatalogUnavailableError,
     SQLiteCatalogReader,
 )
+from papagui_client.adapters.sqlite_catalog_documents import CatalogDocumentQueries
 from papagui_client.application.catalog import CatalogSearchService
 from papagui_client.application.models import (
     GlobalSearchKind,
@@ -218,3 +219,43 @@ def test_global_query_and_history_edge_validation(tmp_path):
     reader = SQLiteCatalogReader(database)
     with pytest.raises(CatalogUnavailableError, match="portable"):
         reader.facets()
+
+
+def test_full_text_search_is_not_correlated_per_catalog_row(tmp_path):
+    """Guard against the GUI-freezing correlated FTS query from the crash dump."""
+    database = tmp_path / "catalog.db"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE files (
+            path TEXT,
+            document_key TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            filename TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE file_content_fts USING fts5(path UNINDEXED, content);
+        INSERT INTO files VALUES('/source/one', 'one', 'archive', 'one.txt', 'one.txt');
+        INSERT INTO file_content_fts VALUES('/source/one', 'gesuchter Inhalt');
+        """
+    )
+    clauses: list[str] = []
+    values: list[object] = []
+    CatalogDocumentQueries._append_text(
+        clauses,
+        values,
+        "gesuchter",
+        {"path", "filename"},
+        {"files", "file_content_fts"},
+    )
+    plan = connection.execute(
+        "EXPLAIN QUERY PLAN SELECT document_key FROM files WHERE " + clauses[0],
+        values,
+    ).fetchall()
+    rows = connection.execute(
+        "SELECT document_key FROM files WHERE " + clauses[0], values
+    ).fetchall()
+    connection.close()
+
+    assert rows == [("one",)]
+    assert not any("CORRELATED" in str(row[3]).upper() for row in plan)

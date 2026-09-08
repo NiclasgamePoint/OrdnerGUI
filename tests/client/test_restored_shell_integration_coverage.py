@@ -401,14 +401,21 @@ def test_search_split_filters_overlay_and_error_paths(window):
     widget.file_type_filter.setCurrentIndex(widget.file_type_filter.findData("txt"))
     widget.start_full_search()
 
+    assert not widget.search_debounce.isActive()
     assert widget.search_page.customer_section.row_count == 2
     assert widget.search_page.folder_section.row_count == 2
-    assert widget.search_page.document_section.row_count == 1
+    assert widget.search_page.document_section.row_count == 0
+    assert not widget.search_page.document_section.isVisible()
     query = value.search.queries[-1]
     assert (query.domain_folder, query.year, query.file_type) == (
         "Beratung",
         "2026",
-        "txt",
+        None,
+    )
+    assert query.kinds == (
+        GlobalSearchKind.CUSTOMER,
+        GlobalSearchKind.PROJECT,
+        GlobalSearchKind.FOLDER,
     )
     assert widget._folder_routes[("archive", "2026/Muster")]
     assert "9 Treffer" in widget.status.text()
@@ -431,7 +438,7 @@ def test_search_split_filters_overlay_and_error_paths(window):
     assert "Serverindex fehlt" in widget.status.text()
     value.search.fail_global = AttributeError("alte Suche")
     widget.start_full_search()
-    assert widget.search_page.document_section.row_count == 1
+    assert "alte Suche" in widget.status.text()
 
     widget.header.search_input.setText("x")
     widget.start_full_search()
@@ -619,7 +626,8 @@ def test_remaining_main_shell_branches(window, application, monkeypatch):
     value.search.fail_global = AttributeError("legacy")
     value.search.search = Mock(side_effect=OSError("alte Suche defekt"))
     widget.start_full_search()
-    assert "alte Suche defekt" in widget.search_page.document_section._message.text()
+    assert "legacy" in widget.search_page.customer_section._message.text()
+    assert "legacy" in widget.search_page.folder_section._message.text()
     value.search.fail_global = None
 
     projects = (

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Einen GUI-Hänger mit anschließendem `SIGABRT` bei Volltextsuchen behoben:
+  Die FTS-Ergebnismenge wird jetzt einmal je Suche statt einmal je Katalogzeile
+  berechnet.
+- Hauptsuche auf Kunden und Projektordner fokussiert, redundante Debounce-Läufe
+  verhindert und den Dateitypfilter ausgeblendet; Unterordner bleiben optional.
+- Projektunterordner der Dienstleistungsseite laden beim Aufklappen ihre
+  Ordner- und Dateiinhalte aus der aktiven lokalen Generation nach.
+
 - Passwortdialoge und Adminsitzungszustand aus Tray und Kundenerkennungsprüfung
   entfernt; Serveraktionen sind nach gültiger Client-Token-Verbindung direkt
   bedienbar.
