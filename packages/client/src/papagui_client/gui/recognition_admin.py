@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer
+from PySide6.QtCore import QItemSelectionModel, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from papagui_client.adapters.http_api import ApiRejectedError
+from papagui_client.presentation.document_workers import document_worker_summary
 
 from .tasks import BackgroundTask
 from .widgets.buttons import AppButton
@@ -59,6 +60,10 @@ class RecognitionAdminWidget(QWidget):
         self._pool = QThreadPool.globalInstance()
         self._tasks: set[BackgroundTask] = set()
         self._entries: list[dict] = []
+        self._pending_additions: dict[int, dict] = {}
+        self._pending_deletions: set[int] = set()
+        self._next_draft_id = -1
+        self._publication_pending = False
         self._job: dict | None = None
         self._online = False
         self._loaded = False
@@ -67,7 +72,6 @@ class RecognitionAdminWidget(QWidget):
         self._active = False
         self._reload_on_idle = False
         self._operation = ""
-        self._deleted_id: int | None = None
         self._cancel_requested_id: str | None = None
 
         self.setObjectName("RecognitionAdminPage")
@@ -105,22 +109,27 @@ class RecognitionAdminWidget(QWidget):
             "Gesperrte Werte werden bei der automatischen Kundenerkennung für alle "
             "Kunden ausgeschlossen. Bestehende Kundendaten bleiben erhalten. "
             "Es gelten exakte Treffer nach Vereinheitlichung der Schreibweise. "
-            "Eine E-Mail-Domain sperrt nur diese Domain, keine Unterdomains."
+            "Eine E-Mail-Domain sperrt nur diese Domain, keine Unterdomains. "
+            "Sammle Änderungen und bestätige sie anschließend gemeinsam."
         )
         hint.setObjectName("PopupCaption")
         hint.setWordWrap(True)
         layout.addWidget(hint)
-        self.entry_list = QTableWidget(0, 4)
-        self.entry_list.setHorizontalHeaderLabels(("Typ", "Wert", "Grund", "Erstellt"))
+        self.entry_list = QTableWidget(0, 5)
+        self.entry_list.setHorizontalHeaderLabels(("Typ", "Wert", "Grund", "Erstellt", "Status"))
         self.entry_list.setAccessibleName("Serverweite Sperrliste der Kundenerkennung")
         self.entry_list.setMinimumHeight(150)
         self.entry_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.entry_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.entry_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.entry_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.entry_list.verticalHeader().hide()
         self.entry_list.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.entry_list.itemSelectionChanged.connect(self._update_controls)
         layout.addWidget(self.entry_list, 1)
+        self.pending_status = QLabel()
+        self.pending_status.setObjectName("PopupCaption")
+        self.pending_status.setWordWrap(True)
+        layout.addWidget(self.pending_status)
 
         fields = QFormLayout()
         fields.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
@@ -139,12 +148,18 @@ class RecognitionAdminWidget(QWidget):
         fields.addRow("Grund", self.reason_input)
         layout.addLayout(fields)
         entry_actions = QVBoxLayout()
-        self.add_button = AppButton("Zur Sperrliste hinzufügen")
+        self.add_button = AppButton("Sperre vormerken", AppButton.SECONDARY)
         self.add_button.clicked.connect(self.add_entry)
-        self.delete_button = AppButton("Ausgewählten Eintrag löschen", AppButton.DANGER)
+        self.delete_button = AppButton("Auswahl entfernen", AppButton.DANGER)
         self.delete_button.clicked.connect(self.delete_entry)
         entry_actions.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
         entry_actions.addWidget(self.delete_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.apply_button = AppButton("Änderungen bestätigen")
+        self.apply_button.clicked.connect(self.apply_changes)
+        self.discard_button = AppButton("Vormerkungen verwerfen", AppButton.SECONDARY)
+        self.discard_button.clicked.connect(self.discard_changes)
+        entry_actions.addWidget(self.apply_button, 0, Qt.AlignmentFlag.AlignLeft)
+        entry_actions.addWidget(self.discard_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addLayout(entry_actions)
 
         self.status = QLabel("Serverdaten werden geladen …")
@@ -200,9 +215,11 @@ class RecognitionAdminWidget(QWidget):
         if control is None:
             self.status.setText("Keine Serversteuerung konfiguriert.")
             return
+        load_state = getattr(control, "recognition_blocklist_state", None)
         self._submit(
             "load",
-            lambda: (control.recognition_blocklist(), control.recognition_rebuild()),
+            lambda: (load_state() if callable(load_state) else control.recognition_blocklist(),
+                     control.recognition_rebuild()),
             "Sperrliste und Neuaufbau werden geladen …",
         )
 
@@ -212,26 +229,63 @@ class RecognitionAdminWidget(QWidget):
         kind = str(self.kind_combo.currentData())
         value = self.value_input.text().strip()
         reason = self.reason_input.text().strip()
-        control = self._control
-        self._submit(
-            "add",
-            lambda: control.add_recognition_blocklist_entry(kind, value, reason),
-            "Eintrag wird gespeichert …",
-        )
+        duplicate = next((key for key, entry in self._pending_additions.items()
+                          if entry["kind"] == kind and entry["value"].casefold() == value.casefold()), None)
+        if duplicate is None:
+            if len(self._pending_additions) >= 500:
+                self.status.setText("Bitte zuerst die 500 vorgemerkten Sperren bestätigen.")
+                return
+            duplicate = self._next_draft_id
+            self._next_draft_id -= 1
+        self._pending_additions[duplicate] = dict(id=duplicate, kind=kind, value=value, reason=reason)
+        self.value_input.clear()
+        self.reason_input.clear()
+        self._show_entries()
+        self.status.setText("Sperre vorgemerkt. Mit „Änderungen bestätigen“ gemeinsam speichern.")
+        self._update_controls()
+        self.value_input.setFocus()
 
     def delete_entry(self) -> None:
         if not self.delete_button.isEnabled():
             return
-        entry_id = self._selected_id()
-        if entry_id is None:
+        selected = self._selected_ids()
+        if selected <= self._pending_deletions:
+            future_deletions = self._pending_deletions - selected
+        else:
+            future_deletions = self._pending_deletions | {
+                entry_id for entry_id in selected if entry_id > 0}
+        if len(future_deletions) > 500:
+            self.status.setText("Bitte höchstens 500 Entfernungen gemeinsam vormerken.")
             return
-        self._deleted_id = entry_id
-        control = self._control
-        self._submit(
-            "delete",
-            lambda: control.delete_recognition_blocklist_entry(entry_id),
-            "Eintrag wird gelöscht …",
-        )
+        self._pending_deletions = future_deletions
+        for entry_id in selected:
+            self._pending_additions.pop(entry_id, None)
+        self._show_entries()
+        self.status.setText("Vormerkungen geändert. Gespeichert wird erst nach dem Bestätigen.")
+        self._update_controls()
+
+    def apply_changes(self) -> None:
+        if not self.apply_button.isEnabled():
+            return
+        apply = getattr(self._control, "apply_recognition_blocklist_changes", None)
+        if apply is None:
+            self.status.setText("Gemeinsames Bestätigen benötigt einen aktualisierten Server und Client. "
+                                "Deine Vormerkungen bleiben erhalten.")
+            return
+        additions = [{key: entry[key] for key in ("kind", "value", "reason")}
+                     for entry in self._pending_additions.values()]
+        deletions = sorted(self._pending_deletions)
+        self._submit("apply", lambda: apply(additions, deletions),
+                     "Sperrlistenänderungen werden gemeinsam angewendet …")
+
+    def discard_changes(self) -> None:
+        if not self.discard_button.isEnabled():
+            return
+        self._pending_additions.clear()
+        self._pending_deletions.clear()
+        self._show_entries()
+        self.status.setText("Vormerkungen verworfen.")
+        self._update_controls()
 
     def start_rebuild(self) -> None:
         if not self.rebuild_button.isEnabled():
@@ -298,23 +352,26 @@ class RecognitionAdminWidget(QWidget):
         self._online = True
         if self._operation == "load":
             entries, job = result
+            if isinstance(entries, Mapping):
+                self._publication_pending = entries["publication_pending"]
+                entries = entries["entries"]
             self._entries = list(entries)
             self._loaded = True
             self._show_entries()
             self._show_job(job)
             self.status.setText(f"Vom Server geladen · {len(self._entries)} Sperreinträge")
-        elif self._operation == "add":
-            # The server may return an existing, normalized entry for duplicates.
-            self._entries = [entry for entry in self._entries if entry["id"] != result["id"]]
-            self._entries.append(dict(result))
+        elif self._operation == "apply":
+            self._entries = list(result["entries"])
+            self._pending_additions.clear()
+            self._pending_deletions.clear()
+            self._publication_pending = not result["published"]
             self._show_entries()
-            self.value_input.clear()
-            self.reason_input.clear()
-            self.status.setText("Sperreintrag gespeichert.")
-        elif self._operation == "delete":
-            self._entries = [entry for entry in self._entries if entry["id"] != self._deleted_id]
-            self._show_entries()
-            self.status.setText("Sperreintrag gelöscht.")
+            self.status.setText(
+                "Sperrliste gespeichert. Der aktualisierte Kundenstand konnte noch nicht "
+                "veröffentlicht werden. Bitte „Veröffentlichung wiederholen“ wählen."
+                if self._publication_pending else
+                "Sperrlistenänderungen gemeinsam gespeichert und vorhandene Vorschläge aktualisiert."
+            )
         else:
             if self._operation == "cancel" and isinstance(result, Mapping):
                 self._cancel_requested_id = str(result["id"])
@@ -345,10 +402,12 @@ class RecognitionAdminWidget(QWidget):
                 self.reload()
 
     def _show_entries(self) -> None:
-        selected_id = self._selected_id()
+        selected_ids = self._selected_ids()
         self.entry_list.setRowCount(0)
         labels = dict(BLOCKLIST_KINDS)
-        for entry in self._entries:
+        for entry in [*self._entries, *self._pending_additions.values()]:
+            entry_id = int(entry["id"])
+            pending_delete = entry_id in self._pending_deletions
             row = self.entry_list.rowCount()
             self.entry_list.insertRow(row)
             for column, value in enumerate(
@@ -357,14 +416,27 @@ class RecognitionAdminWidget(QWidget):
                     entry["value"],
                     entry.get("reason", ""),
                     entry.get("created_at", ""),
+                    "Neue Sperre · unbestätigt" if entry_id < 0 else
+                    "Entfernung · unbestätigt" if pending_delete else "Gespeichert",
                 )
             ):
                 item = QTableWidgetItem(str(value or ""))
                 item.setData(Qt.ItemDataRole.UserRole, int(entry["id"]))
                 item.setToolTip(str(value or ""))
+                if entry_id < 0 or pending_delete:
+                    font = item.font()
+                    font.setItalic(True)
+                    font.setStrikeOut(pending_delete)
+                    item.setFont(font)
                 self.entry_list.setItem(row, column, item)
-            if entry["id"] == selected_id:
-                self.entry_list.selectRow(row)
+            if entry_id in selected_ids:
+                self.entry_list.selectionModel().select(
+                    self.entry_list.model().index(row, 0),
+                    QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+                )
+
+    def _selected_ids(self) -> set[int]:
+        return {int(item.data(Qt.ItemDataRole.UserRole)) for item in self.entry_list.selectedItems()}
 
     def _selected_id(self) -> int | None:
         items = self.entry_list.selectedItems()
@@ -391,6 +463,9 @@ class RecognitionAdminWidget(QWidget):
             details.append(f"Beendet: {self._job['finished_at']}")
         if self._job.get("error"):
             details.append(f"Fehler: {self._job['error']}")
+        workers = self._job.get("document_workers")
+        if isinstance(workers, Mapping):
+            details.extend(document_worker_summary(workers))
         self.job_status.setText("\n".join((label, *details)))
         self.job_progress.setRange(0, 0 if active else 100)
         self.job_progress.setVisible(active)
@@ -407,8 +482,25 @@ class RecognitionAdminWidget(QWidget):
         self.reason_input.setEnabled(editable)
         self.add_button.setEnabled(available and bool(self.value_input.text().strip()))
         self.delete_button.setEnabled(available and self._selected_id() is not None)
+        pending = len(self._pending_additions) + len(self._pending_deletions)
+        selected = self._selected_ids()
+        self.delete_button.setText("Entfernung zurücknehmen" if selected and
+                                   selected <= self._pending_deletions else "Auswahl entfernen")
+        self.apply_button.setEnabled(available and (pending > 0 or self._publication_pending))
+        self.apply_button.setText(f"Änderungen bestätigen ({pending})" if pending else
+                                 "Veröffentlichung wiederholen" if self._publication_pending else
+                                 "Änderungen bestätigen")
+        self.discard_button.setEnabled(pending > 0 and not self._busy and not self._closed)
+        self.pending_status.setText(
+            f"{len(self._pending_additions)} neue Sperren · {len(self._pending_deletions)} Entfernungen "
+            "vorgemerkt. Noch nicht auf dem Server gespeichert."
+            if pending else "Kundenstand noch nicht veröffentlicht."
+            if self._publication_pending else "Keine unbestätigten Änderungen."
+        )
         active = self._job is not None and self._job.get("state") in _ACTIVE_JOB_STATES
-        self.rebuild_button.setEnabled(available and not active)
+        self.rebuild_button.setEnabled(available and not active and pending == 0 and not self._publication_pending)
+        self.rebuild_button.setToolTip("Bitte zuerst die Sperrlistenänderungen bestätigen oder verwerfen."
+                                      if pending else "")
         self.cancel_button.setEnabled(
             available and active and self._cancel_requested_id is None
             and self._job.get("state") != "cancelling"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Mapping
 
 from ._base import (
@@ -12,6 +13,7 @@ from ._base import (
     JsonValue,
     mapping_get,
     optional_string,
+    require_bool,
     require_int,
     require_mapping,
     require_string,
@@ -195,6 +197,44 @@ class IndexStatus(JsonDto):
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentWorkerStatus(JsonDto):
+    """Aggregate document processing counters without source or customer details."""
+
+    state: str = "idle"
+    worker_limit: int = 0
+    active_workers: int = 0
+    queued_documents: int = 0
+    discovered_documents: int = 0
+    processed_documents: int = 0
+    reused_documents: int = 0
+    extracted_documents: int = 0
+    failed_documents: int = 0
+    read_documents: int = 0
+    verify_content: bool = False
+    elapsed_seconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        require_string(self.state, "state")
+        for name in (
+            "worker_limit", "active_workers", "queued_documents", "discovered_documents",
+            "processed_documents", "reused_documents", "extracted_documents",
+            "failed_documents", "read_documents",
+        ):
+            require_int(getattr(self, name), name, minimum=0)
+        require_bool(self.verify_content, "verify_content")
+        if (isinstance(self.elapsed_seconds, bool)
+                or not isinstance(self.elapsed_seconds, (int, float))
+                or not math.isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0):
+            raise ContractValidationError("elapsed_seconds must be a finite nonnegative number")
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> "DocumentWorkerStatus":
+        payload = require_mapping(payload, "document_workers")
+        # Known fields only: extensions must not introduce document details.
+        return cls(**{name: payload[name] for name in cls.__dataclass_fields__ if name in payload})
+
+
+@dataclass(frozen=True, slots=True)
 class ServerStatus(JsonDto):
     state: ServerState
     index: IndexStatus = field(default_factory=IndexStatus)
@@ -204,6 +244,7 @@ class ServerStatus(JsonDto):
     active_index_generation: str | None = None
     active_customer_generation: str | None = None
     message: str | None = None
+    document_workers: DocumentWorkerStatus | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.state, ServerState):
@@ -216,6 +257,8 @@ class ServerStatus(JsonDto):
         optional_string(self.active_index_generation, "active_index_generation")
         optional_string(self.active_customer_generation, "active_customer_generation")
         optional_string(self.message, "message")
+        if self.document_workers is not None and not isinstance(self.document_workers, DocumentWorkerStatus):
+            raise ContractValidationError("document_workers must be a DocumentWorkerStatus DTO")
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
@@ -227,6 +270,7 @@ class ServerStatus(JsonDto):
             "active_customer_generation": self.active_customer_generation,
             "message": self.message,
             "index": self.index.to_dict(),
+            "document_workers": self.document_workers.to_dict() if self.document_workers else None,
         }
 
     @classmethod
@@ -271,6 +315,10 @@ class ServerStatus(JsonDto):
             message=optional_string(
                 mapping_get(server, "message", mapping_get(server, "error", None)),
                 "message",
+            ),
+            document_workers=(
+                DocumentWorkerStatus.from_dict(require_mapping(payload["document_workers"], "document_workers"))
+                if payload.get("document_workers") is not None else None
             ),
         )
 

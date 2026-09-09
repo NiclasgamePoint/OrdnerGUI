@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import threading
@@ -76,7 +77,6 @@ class IndexRunCoordinator:
         self._queued_delete = False
         self._schedule_reset = False
         self._next_due = time.monotonic()
-        self._last_full_reconciliation = time.monotonic()
         self._recover_persisted_state()
 
     def start(self, *, run_on_start: bool = True) -> None:
@@ -95,6 +95,7 @@ class IndexRunCoordinator:
             )
             self._thread = threading.Thread(
                 target=self._scheduler_loop,
+                kwargs={"defer_overdue": not run_on_start},
                 name="papagui-index-scheduler",
                 daemon=True,
             )
@@ -234,10 +235,52 @@ class IndexRunCoordinator:
         payload["resumable"] = (
             self.data_path / "index" / "catalog" / "builds" / "resume.db"
         ).is_file()
+        payload["document_workers"] = self.document_worker_status()
         return payload
 
-    def _scheduler_loop(self) -> None:
-        next_due = self._next_due
+    def document_worker_status(self) -> dict[str, Any] | None:
+        status = getattr(self._catalog, "status", None)
+        return status() if status is not None else None
+
+    def _content_verification_due(self) -> bool:
+        remaining = self._content_verification_delay(self._settings.load())
+        return remaining is not None and remaining <= 0
+
+    def _content_verification_delay(self, settings: ServerSettings) -> float | None:
+        if not getattr(settings, "daily_reconciliation_enabled", False):
+            return None
+        try:
+            last_verified = getattr(self._catalog, "last_content_verification_at", None)
+            timestamp = last_verified() if last_verified is not None else None
+            if not timestamp:
+                return 0.0
+            verified = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if verified.tzinfo is None:
+                verified = verified.replace(tzinfo=timezone.utc)
+            return max(0.0, 86_400 - (datetime.now(timezone.utc) - verified).total_seconds())
+        except Exception:
+            # Missing/unreadable scheduling metadata must not stop the scheduler.
+            # A failing build follows the ordinary bounded retry schedule below.
+            return 0.0
+
+    def _scheduled_delay(self, settings: ServerSettings, *, defer_overdue: bool = False) -> float:
+        remaining = self._content_verification_delay(settings)
+        if remaining is None:
+            return settings.interval_seconds
+        if defer_overdue and remaining <= 0:
+            # Failed or cancelled verification does not advance the durable
+            # timestamp, but must not cause a zero-delay retry loop. The same
+            # bounded delay respects an explicitly disabled startup run.
+            remaining = 86_400
+        return min(settings.interval_seconds, remaining)
+
+    def _scheduler_loop(self, *, defer_overdue: bool = False) -> None:
+        next_due = min(
+            self._next_due,
+            time.monotonic() + self._scheduled_delay(
+                self._settings.load(), defer_overdue=defer_overdue
+            ),
+        )
         while not self._stopped.is_set() and not self._restart_requested.is_set():
             settings = self._settings.load()
             timeout = max(0.0, next_due - time.monotonic()) if settings.automatic_runs_enabled else None
@@ -245,6 +288,8 @@ class IndexRunCoordinator:
             self._wake.clear()
             if self._stopped.is_set() or self._restart_requested.is_set():
                 break
+            # A settings-change wake must use the newly saved interval/profile.
+            settings = self._settings.load()
             with self._lock:
                 delete = self._queued_delete
                 requested = self._queued_run
@@ -257,21 +302,17 @@ class IndexRunCoordinator:
                 self._queued_full_rebuild = False
                 self._schedule_reset = False
             if reset_schedule:
-                next_due = time.monotonic() + settings.interval_seconds
+                next_due = time.monotonic() + self._scheduled_delay(settings)
             due = settings.automatic_runs_enabled and time.monotonic() >= next_due
             if delete:
                 self._delete_index()
             if requested or due:
-                daily_full = (
-                    getattr(settings, "daily_reconciliation_enabled", False)
-                    and time.monotonic() - self._last_full_reconciliation >= 86_400
-                )
                 self._execute_run(
                     rebuild or delete, run_id=requested_id or None
                 )
-                if daily_full:
-                    self._last_full_reconciliation = time.monotonic()
-                next_due = time.monotonic() + self._settings.load().interval_seconds
+                next_due = time.monotonic() + self._scheduled_delay(
+                    self._settings.load(), defer_overdue=True
+                )
             elif settings.automatic_runs_enabled:
                 next_due = min(next_due, time.monotonic() + settings.interval_seconds)
         with self._lock:
@@ -313,6 +354,7 @@ class IndexRunCoordinator:
                 self.source_path,
                 source_id=self.source_id,
                 full_rebuild=full_rebuild,
+                verify_content=full_rebuild or self._content_verification_due(),
                 settings=self._settings.load(),
                 cancelled=self._cancel.is_set,
                 progress=self._progress,
@@ -344,8 +386,6 @@ class IndexRunCoordinator:
                     "index_generation": index_generation["generation"],
                     "customer_generation": customer_generation["generation"],
                 }
-                if full_rebuild:
-                    self._last_full_reconciliation = time.monotonic()
                 self._persist_state()
             return 0
         except InterruptedError:
@@ -399,6 +439,7 @@ class IndexRunCoordinator:
                 self.source_path, source_id=self.source_id, full_rebuild=True,
                 settings=self._settings.load(), cancelled=cancelled,
                 progress=lambda _count, _path: None, force_extraction=True,
+                verify_content=True,
             )
 
     def _delete_index(self) -> None:

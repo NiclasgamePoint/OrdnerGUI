@@ -197,6 +197,28 @@ Variable wird das Hauptfenster normal angezeigt.
 
 ## Admin-Tray
 
+Im Tab **Kundenerkennung** sammelt **Sperre vormerken** mehrere Ausschlüsse
+zunächst lokal. Neue Sperren und vorgemerkte Entfernungen sind in der Tabelle
+als unbestätigt markiert. Mehrere Zeilen lassen sich gemeinsam auswählen;
+**Auswahl entfernen** merkt gespeicherte Sperren zur Entfernung vor oder nimmt
+neue Vormerkungen zurück. Eine vorgemerkte Entfernung lässt sich zurücknehmen.
+
+**Änderungen bestätigen** übermittelt alle Vormerkungen gemeinsam. Der Server
+prüft die vorhandenen Vorschläge einmal und veröffentlicht einen Kundenstand;
+eine erneute Dokumentauslesung wird dadurch nicht gestartet. **Vormerkungen
+verwerfen** nimmt die lokalen Änderungen zurück. Laden, Tabwechsel und das
+Ausblenden des Fensters erhalten Vormerkungen. Bei einem Speicherfehler bleiben
+sie für die Korrektur oder einen erneuten Versuch stehen. Der vollständige
+Neuaufbau ist eine separate Aktion und wartet auf Bestätigen oder Verwerfen.
+
+Falls die Sperrliste gespeichert wurde, ihre Veröffentlichung aber scheitert,
+zeigt die Oberfläche diesen Zustand ausdrücklich an. **Veröffentlichung
+wiederholen** wiederholt nur den noch ausstehenden Schritt. Ältere Server ohne
+die neue Stapelschnittstelle benötigen ein Update; der Client weicht nicht auf
+viele einzelne Schreibanfragen aus.
+Der Server meldet eine ausstehende Veröffentlichung auch nach einem Neustart
+des Clients, damit die Wiederholung weiterhin erreichbar bleibt.
+
 Das Tray ist ein eigenständiger Clientprozess. Status und Fortschritt sind mit
 dem normalen Clienttoken sichtbar. Änderungen an Servereinstellungen,
 Indexaktionen und Neustart verlangen eine Adminanmeldung. Der Sitzungstoken
@@ -215,6 +237,29 @@ Die Aktivitätsseite liest aktuellen beziehungsweise zuletzt abgeschlossenen
 Lauf aus dem regelmäßig abgefragten v2-Serverstatus. Sie zeigt Zeit, Zustand,
 Phase, Fortschritt und Fehlermeldung und hält lokal die letzten 50 verschiedenen
 Beobachtungen vor.
+
+Die Dokumentkarte zeigt die tatsächlich aktiven Worker und ihre Obergrenze,
+die Warteschlange sowie gefundene, verarbeitete, wiederverwendete, extrahierte
+und fehlerhafte Dokumente. Diese Werte werden bereits während der Katalogphase
+aktualisiert. Beim vollständigen Neuaufbau erscheinen sie auch im Tab
+**Kundenerkennung**, solange die Dokumentauslesung läuft. Ältere Server bleiben
+bedienbar; fehlende Workerstatistiken werden ausdrücklich als nicht verfügbar
+angezeigt. Die neuen Zähler enthalten ausschließlich Summen.
+
+Das Ressourcenprofil berechnet die Parallelität aus den verfügbaren CPU- und
+RAM-Ressourcen des Servers einschließlich Containergrenzen: **Schonend** nutzt
+15 %, **Ausgewogen** 25 % und **Schnell** 60 % der verfügbaren CPU-Kapazität
+für die Workerberechnung. Speicherreserve und Dokumentlimits können die Zahl
+weiter senken; zulässig sind 1 bis 20 Worker. Der Tooltip erläutert das Budget,
+die Dokumentkarte zeigt die für den laufenden Auftrag ermittelte Grenze.
+
+Reguläre Läufe überspringen bereits verarbeitete Dokumente bei unveränderter
+Dateigröße, Änderungszeit und Auslesekonfiguration ohne erneutes Lesen der
+Quelldatei. Der aktivierte tägliche Abgleich prüft nach 24 Stunden die
+Inhaltshashes; auch ein ausdrücklicher Indexneuaufbau prüft die Inhalte.
+Vorhandene passende Extraktionsergebnisse können dabei wiederverwendet werden.
+**Kundenerkennung vollständig neu aufbauen** erzwingt zusätzlich die erneute
+Dokumentauslesung.
 
 ## Funktionsumfang des 0.4.2-Checkpoints
 

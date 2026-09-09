@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 from importlib import metadata
@@ -10,9 +11,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 from tempfile import TemporaryDirectory, TemporaryFile
+import threading
 import time
 
 from papagui_server.adapters.extraction_ocr import tsv_blocks
@@ -59,11 +62,77 @@ class ExtractionResourcePolicy:
         )
 
 
+class _ExtractionCancelled(Exception):
+    pass
+
+
 class ExternalCommandRunner:
     """Run argv without a shell; retain sanitized failure categories only."""
 
     def __init__(self) -> None:
-        self.last_status = "ok"
+        self._local = threading.local()
+
+    @property
+    def last_status(self) -> str:
+        return getattr(self._local, "last_status", "ok")
+
+    @last_status.setter
+    def last_status(self, value: str) -> None:
+        self._local.last_status = value
+
+    @contextmanager
+    def cancellation_scope(self, cancelled: Callable[[], bool]) -> Iterator[None]:
+        previous = getattr(self._local, "cancelled", None)
+        self._local.cancelled = cancelled
+        try:
+            yield
+        finally:
+            self._local.cancelled = previous
+
+    @staticmethod
+    def _stop(process: subprocess.Popen) -> None:
+        try:
+            if os.name == "posix":
+                # Disposable parsers/tools have no state to flush. Kill the
+                # session so any helper children also stop immediately.
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+    def _run_cancellable(self, command: list[str], *, timeout: int, output, env: dict) -> None:
+        cancelled = self._local.cancelled
+        if cancelled():
+            raise _ExtractionCancelled
+        deadline = time.monotonic() + timeout
+        process = subprocess.Popen(
+            command,
+            stdout=output,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=os.name == "posix",
+        )
+        try:
+            while True:
+                if cancelled():
+                    self._stop(process)
+                    raise _ExtractionCancelled
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._stop(process)
+                    raise subprocess.TimeoutExpired(command, timeout)
+                try:
+                    process.wait(timeout=min(0.05, remaining))
+                    if process.returncode:
+                        self.last_status = "error"
+                    return
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            if process.poll() is None:
+                self._stop(process)
 
     def run(self, command: list[str], *, timeout: int) -> bytes:
         self.last_status = "ok"
@@ -71,31 +140,40 @@ class ExternalCommandRunner:
             # Disk-backed stdout prevents a malformed tool from filling server RAM.
             # Tool stderr may contain customer paths/content and is never retained.
             with TemporaryFile() as output:
-                result = subprocess.run(
-                    command,
-                    stdout=output,
-                    stderr=subprocess.DEVNULL,
-                    timeout=timeout,
-                    check=False,
-                    env={
-                        **os.environ,
-                        "OMP_THREAD_LIMIT": "1",
-                        "PYTHONPATH": os.pathsep.join(sys.path),
-                    },
-                )
-                if result.returncode:
-                    self.last_status = "error"
+                env = {
+                    **os.environ,
+                    "OMP_THREAD_LIMIT": "1",
+                    "PYTHONPATH": os.pathsep.join(sys.path),
+                }
+                result = None
+                if getattr(self._local, "cancelled", None) is not None:
+                    self._run_cancellable(command, timeout=timeout, output=output, env=env)
+                else:
+                    result = subprocess.run(
+                        command,
+                        stdout=output,
+                        stderr=subprocess.DEVNULL,
+                        timeout=timeout,
+                        check=False,
+                        env=env,
+                    )
+                    if result.returncode:
+                        self.last_status = "error"
+                if self.last_status != "ok":
                     return b""
                 output.seek(0)
                 data = (
                     result.stdout
-                    if isinstance(result.stdout, bytes)
+                    if result is not None and isinstance(result.stdout, bytes)
                     else output.read(16 * 1024 * 1024 + 1)
                 )
                 if len(data) > 16 * 1024 * 1024:
                     self.last_status = "too_large"
                     return b""
                 return data
+        except _ExtractionCancelled:
+            self.last_status = "cancelled"
+            raise
         except subprocess.TimeoutExpired:
             self.last_status = "timeout"
             return b""
@@ -211,6 +289,17 @@ class DocumentTextExtractor:
     def extract_document(
         self, path: Path, settings: ServerSettings, cancelled: Callable[[], bool] = lambda: False
     ) -> ExtractionResult:
+        # Shared extractors serve multiple document threads. A scope binds each
+        # thread's callback without changing the injected runner.run API.
+        with ExitStack() as scopes:
+            for runner in (self._runner, self._worker_runner):
+                if isinstance(runner, ExternalCommandRunner):
+                    scopes.enter_context(runner.cancellation_scope(cancelled))
+            return self._extract_document(path, settings, cancelled)
+
+    def _extract_document(
+        self, path: Path, settings: ServerSettings, cancelled: Callable[[], bool]
+    ) -> ExtractionResult:
         started = time.monotonic()
         deadline = started + getattr(settings, "extraction_timeout_seconds", 90)
         extension = path.suffix.casefold().lstrip(".")
@@ -246,6 +335,8 @@ class DocumentTextExtractor:
                     )
             else:
                 result = self._image(path, settings, cancelled, deadline)
+        except _ExtractionCancelled:
+            result = ExtractionResult(status="partial", reason="cancelled")
         except TimeoutError:
             result = ExtractionResult(status="timeout", reason="document_time_budget")
         except Exception:

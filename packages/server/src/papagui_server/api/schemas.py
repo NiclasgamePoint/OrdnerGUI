@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -129,7 +129,7 @@ class IndexProgressModel(ApiModel):
 
 
 class IndexStatusModel(ApiModel):
-    state: Literal["idle", "queued", "running", "completed", "failed", "cancelled"]
+    state: Literal["idle", "queued", "running", "completed", "failed", "error", "cancelled"]
     progress: IndexProgressModel
     run_id: str | None
     message: str | None
@@ -149,6 +149,21 @@ class RetentionStatusModel(ApiModel):
     failures: dict[str, RetentionFailureModel]
 
 
+class DocumentWorkerStatusModel(ApiModel):
+    state: Literal["idle", "running", "cancelling", "completed", "cancelled", "error"]
+    worker_limit: int = Field(ge=0)
+    active_workers: int = Field(ge=0)
+    queued_documents: int = Field(ge=0)
+    discovered_documents: int = Field(ge=0)
+    processed_documents: int = Field(ge=0)
+    reused_documents: int = Field(ge=0)
+    extracted_documents: int = Field(ge=0)
+    failed_documents: int = Field(ge=0)
+    read_documents: int = Field(ge=0)
+    verify_content: bool
+    elapsed_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
 class ServerStatusResponse(ApiModel):
     state: Literal["online", "degraded", "offline", "stopping"]
     index: IndexStatusModel
@@ -165,6 +180,7 @@ class ServerStatusResponse(ApiModel):
     retention: RetentionStatusModel
     queued_action: str
     resumable: bool
+    document_workers: DocumentWorkerStatusModel | None = None
 
 
 class IndexRunRequest(ApiModel):
@@ -498,6 +514,7 @@ class CustomerRecognitionJobModel(ApiModel):
     created_at: str
     finished_at: str = ""
     error: str = ""
+    document_workers: DocumentWorkerStatusModel | None = None
 
 
 class CustomerRecognitionJobResponse(ApiModel):
@@ -529,8 +546,22 @@ class RecognitionBlocklistResponse(ApiModel):
     entries: list[RecognitionBlocklistEntry]
 
 
+class RecognitionBlocklistStatusResponse(RecognitionBlocklistResponse):
+    publication_pending: bool
+
+
 class RecognitionBlocklistMutationResponse(ApiModel):
     entry: RecognitionBlocklistEntry
+
+
+class RecognitionBlocklistBatchRequest(ApiModel):
+    additions: list[RecognitionBlocklistRequest] = Field(default_factory=list, max_length=500)
+    deletions: list[Annotated[int, Field(gt=0, le=(1 << 63) - 1)]] = Field(default_factory=list, max_length=500)
+
+
+class RecognitionBlocklistBatchResponse(RecognitionBlocklistResponse):
+    changed: bool
+    published: bool
 
 
 class CustomerRecognitionStatusResponse(ApiModel):

@@ -156,6 +156,7 @@ def build_container(configuration: RuntimeConfiguration) -> ServerContainer:
         operation_lock=coordinator.operation_lock,
         validate=validate_recheck,
         execute=execute_recheck,
+        document_worker_status=coordinator.document_worker_status,
     )
     settings = SettingsApplicationService(
         settings_repository, changed=coordinator.settings_changed

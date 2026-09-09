@@ -31,8 +31,10 @@ class Capability(str, Enum):
     CUSTOMER_RECOGNITION_STATUS = "customer-recognition-status"
     CUSTOMER_RECOGNITION_JOBS = "customer-recognition-jobs"
     RECOGNITION_BLOCKLIST = "recognition-blocklist"
+    RECOGNITION_BLOCKLIST_BATCH = "recognition-blocklist-batch"
     RECOGNITION_REBUILD = "recognition-rebuild"
     STABLE_CONTACT_IDS = "stable-contact-ids"
+    DOCUMENT_WORKERS = "document-workers"
 
 
 DEFAULT_CAPABILITIES = tuple(item.value for item in Capability)

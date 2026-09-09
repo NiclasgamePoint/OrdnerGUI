@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import threading
 import zipfile
 
 import pytest
@@ -222,19 +223,18 @@ def test_scanner_incremental_removal_exclusions_and_three_backups(tmp_path: Path
     indexer.delete()
 
 
-def test_cancelled_scan_is_resumed_and_failure_never_rotates_active(tmp_path: Path) -> None:
+def test_cancelled_scan_reuses_committed_documents_on_resume(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
     for number in range(30):
         (source / f"{number:02}.txt").write_text(str(number), encoding="utf-8")
     extractor = CountingExtractor()
     indexer = SqliteCatalogIndexer(tmp_path / "data", extractor)
-    calls = 0
+    stop = threading.Event()
 
-    def cancelled() -> bool:
-        nonlocal calls
-        calls += 1
-        return calls > 27
+    def progress(count: int, _name: str) -> None:
+        if count >= 3:
+            stop.set()
 
     with pytest.raises(InterruptedError):
         indexer.build(
@@ -242,23 +242,87 @@ def test_cancelled_scan_is_resumed_and_failure_never_rotates_active(tmp_path: Pa
             source_id="primary",
             full_rebuild=True,
             settings=ServerSettings(),
-            cancelled=cancelled,
-            progress=lambda *_args: None,
+            cancelled=stop.is_set,
+            progress=progress,
         )
     assert indexer.resume_path.is_file()
     assert indexer.resume_state_path.is_file()
-    already_extracted = len(extractor.paths)
+    connection = sqlite3.connect(indexer.resume_path)
+    try:
+        committed = {
+            row[0]
+            for row in connection.execute("SELECT filename FROM files WHERE extraction_status='ok'")
+        }
+    finally:
+        connection.close()
+    assert 0 < len(committed) < 30
+    # Workers may finish parsing after cancellation without committing their results.
+    # Only durable completed documents are guaranteed to avoid extraction on resume.
+    extractor.paths.clear()
     _build(indexer, source, full=False)
-    assert len(extractor.paths) - already_extracted == 30 - already_extracted
+    assert not committed.intersection(extractor.paths)
+    assert len(extractor.paths) <= 30 - len(committed)
+    connection = sqlite3.connect(indexer.active_path)
+    try:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM files WHERE extraction_status='ok'"
+            ).fetchone()[0]
+            == 30
+        )
+        assert connection.execute("SELECT COUNT(*) FROM file_content_fts").fetchone()[0] == 30
+    finally:
+        connection.close()
     assert not indexer.resume_state_path.exists()
+
+
+def test_custom_parser_failure_is_isolated_and_successful_files_are_published(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "success.txt").write_text("generated success", encoding="utf-8")
+    (source / "failure.txt").write_text("generated failure", encoding="utf-8")
+    indexer = SqliteCatalogIndexer(tmp_path / "data", CountingExtractor("failure.txt"))
+    _build(indexer, source, full=True)
+    connection = sqlite3.connect(indexer.active_path)
+    try:
+        rows = {
+            row[0]: row[1:]
+            for row in connection.execute(
+                "SELECT filename, extraction_status, extraction_reason FROM files"
+            )
+        }
+        assert rows["success.txt"][0] == "ok"
+        assert rows["failure.txt"] == ("error", "document_read_failed")
+        assert "extraction failed" not in str(rows)
+        assert connection.execute("SELECT COUNT(*) FROM file_content_fts").fetchone()[0] == 1
+    finally:
+        connection.close()
+    assert not indexer.resume_state_path.exists()
+
+
+def test_writer_failure_never_rotates_active_or_backups(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "success.txt").write_text("generated success", encoding="utf-8")
+    indexer = SqliteCatalogIndexer(tmp_path / "data", CountingExtractor())
+    _build(indexer, source, full=True)
+    _build(indexer, source, full=False)
     before = sha256_file(indexer.active_path)
-    backups_before = list(indexer.backup_root.glob("*.db"))
-    (source / "failure.txt").write_text("bad", encoding="utf-8")
-    indexer.extractor = CountingExtractor("failure.txt")
-    with pytest.raises(RuntimeError, match="extraction failed"):
+    backups_before = {path.name: sha256_file(path) for path in indexer.backup_root.glob("*.db")}
+    (source / "new.txt").write_text("generated new content", encoding="utf-8")
+
+    def fail_write(*_args, **_kwargs):
+        raise sqlite3.OperationalError("synthetic write failure")
+
+    monkeypatch.setattr(indexer._writer, "upsert_file", fail_write)
+    with pytest.raises(sqlite3.OperationalError, match="synthetic write failure"):
         _build(indexer, source, full=False)
     assert sha256_file(indexer.active_path) == before
-    assert list(indexer.backup_root.glob("*.db")) == backups_before
+    assert {
+        path.name: sha256_file(path) for path in indexer.backup_root.glob("*.db")
+    } == backups_before
     assert indexer.resume_path.is_file()
 
 

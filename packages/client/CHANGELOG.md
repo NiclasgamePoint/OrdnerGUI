@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Sperrlistenänderungen lassen sich vormerken und gemeinsam bestätigen.
+  Mehrfachauswahl, Zurücknehmen und Verwerfen halten die Änderungen vor dem
+  Speichern überprüfbar. Fehler, Aktualisieren und Tabwechsel erhalten die
+  Vormerkungen; eine ausstehende Veröffentlichung kann separat wiederholt werden.
+
+- Indexserver und Kundenerkennungsneuaufbau zeigen aktive Dokument-Worker,
+  ermittelte Obergrenze, Warteschlange und verarbeitete, wiederverwendete,
+  extrahierte sowie fehlerhafte Dokumente live an. Ältere Server bleiben
+  kompatibel; fehlende Workerstatistiken werden als nicht verfügbar angezeigt.
+- Der Ressourcenprofil-Tooltip erläutert die Berechnung aus CPU, RAM und
+  Containergrenzen; die Dokumentkarte zeigt die tatsächlich verwendete Grenze.
+
 - Der Tab „Kundenerkennung“ auf der Indexserver-Seite enthält die serverweite
   Sperrliste und den vollständigen Neuaufbau mit Status und Abbruch. Eingaben
   bleiben beim Tabwechsel erhalten; ausgeblendete Tabs pausieren Statusabfragen.

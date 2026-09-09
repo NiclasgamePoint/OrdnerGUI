@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from papagui_client.composition import ClientContainer
+from papagui_client.presentation.document_workers import document_worker_summary
 from papagui_client.presentation.server_settings import ServerSettingsPresenter
 from papagui_client.presentation.tray import TrayHealth, TrayPresenter, TrayStatusViewModel
 
@@ -352,6 +353,12 @@ class ServerTrayWindow(QDialog):
         ):
             self.resource_profile.addItem(label, value)
         self.resource_profile.currentIndexChanged.connect(self._mark_settings_dirty)
+        self.resource_profile.setToolTip(
+            "Bestimmt das Budget für parallele Dokumentverarbeitung. Die Zahl der Worker "
+            "wird aus den verfügbaren CPU-Kernen und dem freien RAM des Servers berechnet; "
+            "Containergrenzen und das Speicherlimit je Dokument werden berücksichtigt. "
+            "Die tatsächlich verwendete Grenze steht im Dokumentstatus."
+        )
         form.addRow("Ressourcenprofil", self.resource_profile)
 
         self.max_file_size_mb = self._spin(1, 102_400, " MB")
@@ -633,7 +640,7 @@ class ServerTrayWindow(QDialog):
 
         content_phase = any(
             token in phase.casefold()
-            for token in ("content", "document", "extract", "ocr", "inhalt", "dokument")
+            for token in ("catalog", "content", "document", "extract", "ocr", "inhalt", "dokument")
         )
         if active and content_phase:
             self.content_status_label.setText("Dokumentinhalte werden indexiert")
@@ -657,11 +664,12 @@ class ServerTrayWindow(QDialog):
             or "Noch keine Dokumentstatistik verfügbar"
         )
         self.worker_summary_label.setText(
-            "Index arbeitet · einzelne Worker werden von API v2 nicht separat gemeldet"
-            if active and content_phase
-            else "Keine aktiven Dokument-Worker"
+            "Dieser Server meldet keine Dokument-Worker-Statistik"
         )
-        self.worker_output.setPlainText(f"Aktuell: {current}" if current else "")
+        self.worker_output.clear()
+        raw_workers = payload.get("document_workers")
+        if isinstance(raw_workers, Mapping):
+            self._apply_document_workers(raw_workers)
 
         index_generation = str(payload.get("active_index_generation") or "")
         customer_generation = str(payload.get("active_customer_generation") or "")
@@ -701,6 +709,32 @@ class ServerTrayWindow(QDialog):
             "Live-Status aktualisiert · "
             + QDateTime.currentDateTime().toString("dd.MM.yyyy HH:mm:ss")
         )
+
+    def _apply_document_workers(self, workers: Mapping[str, object]) -> None:
+        state = str(workers.get("state", "idle"))
+        active = state in {"running", "cancelling"}
+        labels = {
+            "idle": "Dokumentverarbeitung wartet",
+            "running": "Dokumentinhalte werden verarbeitet",
+            "cancelling": "Dokumentverarbeitung wird abgebrochen …",
+            "completed": "Dokumentverarbeitung abgeschlossen",
+            "cancelled": "Dokumentverarbeitung abgebrochen",
+            "error": "Dokumentverarbeitung mit Fehler beendet",
+        }
+        self.content_status_label.setText(labels.get(state, "Dokumentverarbeitung"))
+        summary, details = document_worker_summary(workers)
+        self.worker_summary_label.setText(summary)
+        self.content_detail_label.setText(details)
+        # Discovery continues during extraction, so the final total is not yet known.
+        self._set_progress(
+            self.content_progress_bar,
+            self._integer(workers.get("processed_documents"), 0),
+            0 if active else self._integer(workers.get("discovered_documents"), 0),
+            active,
+        )
+        elapsed = self._format_duration(self._integer(workers.get("elapsed_seconds"), 0))
+        mode = "Inhaltsprüfung" if workers.get("verify_content") else "Schneller Abgleich"
+        self.worker_output.setPlainText(f"{mode} · Laufzeit: {elapsed}")
 
     @staticmethod
     def _integer(value: object, default: int) -> int:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
-from dataclasses import replace
 import hashlib
 import json
 import os
@@ -14,18 +13,18 @@ import re
 import shutil
 import sqlite3
 import zipfile
+import uuid
 
 from papagui_server.adapters.catalog_extraction import (
     DocumentTextExtractor,
     ExternalCommandRunner,
     ExtractionResourcePolicy,
-    SUPPORTED_EXTENSIONS,
-    IMAGE_EXTENSIONS,
     extraction_fingerprint,
 )
+from papagui_server.adapters.catalog_documents import DocumentWorkStatus, ParallelDocuments
 from papagui_server.adapters.catalog_storage import CatalogSqliteWriter
-from papagui_server.adapters.extraction_store import ExtractionStore, artifact_identity
-from papagui_server.domain.document_extraction import ExtractionBlock, ExtractionResult
+from papagui_server.adapters.extraction_store import ExtractionStore
+from papagui_server.adapters.worker_resources import document_worker_budget
 from papagui_server.adapters.catalog_scanner import (
     CatalogResumeMatcher,
     CatalogSourceScanner,
@@ -65,6 +64,24 @@ class SqliteCatalogIndexer:
         self._writer = CatalogSqliteWriter()
         self._scanner = CatalogSourceScanner()
         self._resume_matcher = CatalogResumeMatcher()
+        self._document_status = DocumentWorkStatus()
+
+    def status(self) -> dict:
+        return self._document_status.snapshot()
+
+    def last_content_verification_at(self) -> str:
+        if not self.active_path.is_file():
+            return ""
+        connection = sqlite3.connect(self.active_path.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            row = connection.execute(
+                "SELECT value FROM index_metadata WHERE key='last_content_verification_at'"
+            ).fetchone()
+            return str(row[0]) if row else ""
+        except sqlite3.Error:
+            return ""
+        finally:
+            connection.close()
 
     def build(
         self,
@@ -77,6 +94,46 @@ class SqliteCatalogIndexer:
         progress: Callable[[int, str], None],
         force_extraction: bool = False,
         project_root_ids: list[int] | tuple[int, ...] | None = None,
+        verify_content: bool = False,
+    ) -> Path:
+        workers = document_worker_budget(settings).workers
+        verify_content = bool(verify_content or full_rebuild)
+        self._document_status.begin(workers, verify_content)
+        try:
+            result = self._build(
+                source_path,
+                source_id=source_id,
+                full_rebuild=full_rebuild,
+                settings=settings,
+                cancelled=cancelled,
+                progress=progress,
+                force_extraction=force_extraction,
+                project_root_ids=project_root_ids,
+                verify_content=verify_content,
+                workers=workers,
+            )
+        except InterruptedError:
+            self._document_status.finish("cancelled")
+            raise
+        except Exception:
+            self._document_status.finish("error")
+            raise
+        self._document_status.finish("completed")
+        return result
+
+    def _build(
+        self,
+        source_path: Path,
+        *,
+        source_id: str,
+        full_rebuild: bool,
+        settings: ServerSettings,
+        cancelled: Callable[[], bool],
+        progress: Callable[[int, str], None],
+        force_extraction: bool = False,
+        project_root_ids: list[int] | tuple[int, ...] | None = None,
+        verify_content: bool = False,
+        workers: int = 1,
     ) -> Path:
         source_path = source_path.resolve()
         if not source_path.is_dir():
@@ -90,14 +147,29 @@ class SqliteCatalogIndexer:
             if hasattr(self.extractor, "fingerprint")
             else extraction_fingerprint(settings)
         )
-        format_fingerprints: dict[str, str] = {}
         selected_projects = set(project_root_ids) if project_root_ids is not None else None
         settings_fingerprint = hashlib.sha256(
-            json.dumps([settings.to_dict(), parser_fingerprint], sort_keys=True).encode("utf-8")
+            json.dumps(
+                [
+                    settings.to_dict(),
+                    parser_fingerprint,
+                    force_extraction,
+                    sorted(selected_projects) if selected_projects is not None else None,
+                ],
+                sort_keys=True,
+            ).encode("utf-8")
         ).hexdigest()
         resumable = not full_rebuild and self._resume_matches(
             source_path, source_id, settings_fingerprint
         )
+        resume_state = json.loads(self.resume_state_path.read_text()) if resumable else {}
+        if resumable and verify_content and not resume_state.get("verify_content", False):
+            resumable = False
+        run_id = (
+            str(resume_state.get("run_id") or uuid.uuid4().hex) if resumable else uuid.uuid4().hex
+        )
+        verify_content = bool(verify_content or (resumable and resume_state.get("verify_content")))
+        self._document_status.change(verify_content=verify_content)
         if full_rebuild or not resumable:
             self.resume_path.unlink(missing_ok=True)
             self.resume_state_path.unlink(missing_ok=True)
@@ -132,12 +204,15 @@ class SqliteCatalogIndexer:
                     "source_path": str(source_path),
                     "settings_fingerprint": settings_fingerprint,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "run_id": run_id,
+                    "verify_content": verify_content,
                 },
             )
             known = {
-                str(row["relative_path"]): (int(row["modified_ns"]), int(row["file_size"]))
+                str(row["relative_path"]): dict(row)
                 for row in connection.execute(
-                    "SELECT relative_path, modified_ns, file_size FROM files WHERE source_id=?",
+                    "SELECT relative_path,modified_ns,file_size,content_eligible,content_hash,"
+                    "extraction_status,extraction_reason,extraction_policy_version,last_scan_run FROM files WHERE source_id=?",
                     (source_id,),
                 )
             }
@@ -147,144 +222,38 @@ class SqliteCatalogIndexer:
                     "SELECT id, relative_path FROM project_roots WHERE source_id=?", (source_id,)
                 )
             }
-            seen: set[str] = set()
-            processed = 0
-            for path in self._files(
-                source_path,
-                settings.excluded_folder_names,
-                newest_years_first=settings.newest_years_first,
-            ):
-                if cancelled():
-                    raise InterruptedError("Indexlauf abgebrochen.")
-                relative = path.relative_to(source_path).as_posix()
-                seen.add(relative)
-                stat = path.stat()
-                metadata = parser.parse_file(source_id, relative)
-                extension = path.suffix.casefold().lstrip(".")
-                eligible = (
-                    settings.content_indexing_enabled
-                    and extension in settings.indexed_content_types
-                    and extension in SUPPORTED_EXTENSIONS
-                    and stat.st_size <= settings.max_file_size_mb * 1024 * 1024
-                )
-                content_hash = ""
-                policy = ExtractionResourcePolicy.for_document(path, settings)
-                ocr_budget = (
-                    policy.ocr_pages if extension == "pdf" or extension in IMAGE_EXTENSIONS else 0
-                )
-                image_preferred = extension in IMAGE_EXTENSIONS and any(
-                    word in path.stem.casefold()
-                    for word in (
-                        "scan",
-                        "kontakt",
-                        "anschreiben",
-                        "auftrag",
-                        "angebot",
-                        "vertrag",
-                        "dokument",
-                    )
-                )
-                if extension not in format_fingerprints:
-                    format_fingerprints[extension] = (
-                        self.extractor.fingerprint(settings, extension)
-                        if isinstance(self.extractor, DocumentTextExtractor)
-                        else parser_fingerprint
-                    )
-                version_hash = hashlib.sha256(
-                    f"{format_fingerprints[extension]}\0{extension}\0{ocr_budget}\0{image_preferred}".encode()
-                ).hexdigest()
-                if not settings.content_indexing_enabled:
-                    extraction = ExtractionResult(
-                        status="unsupported", reason="content_indexing_disabled"
-                    )
-                elif stat.st_size > settings.max_file_size_mb * 1024 * 1024:
-                    extraction = ExtractionResult(status="too_large", reason="file_size_budget")
-                elif not eligible:
-                    extraction = ExtractionResult(
-                        status="unsupported",
-                        reason="extension_disabled"
-                        if extension in SUPPORTED_EXTENSIONS
-                        else "unsupported_extension",
-                    )
-                else:
-                    connection.commit()
-                    # Reconciliation verifies bytes even with unchanged timestamps;
-                    # identical content reuses extraction across copies and renames.
-                    digest = hashlib.sha256()
-                    with path.open("rb") as stream:
-                        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                            if cancelled():
-                                raise InterruptedError("Indexlauf abgebrochen.")
-                            digest.update(chunk)
-                    content_hash = digest.hexdigest()
-                    root_path = (
-                        metadata.project_root.source.relative_path if metadata.project_root else ""
-                    )
-                    forced = force_extraction and (
-                        selected_projects is None or root_ids.get(root_path) in selected_projects
-                    )
-                    extraction = (
-                        None
-                        if forced
-                        else self.extraction_store.get(
-                            content_hash,
-                            version_hash,
-                            max_attempts=getattr(settings, "extraction_retry_attempts", 3),
-                        )
-                    )
-                    if extraction is None:
-                        if hasattr(self.extractor, "extract_document"):
-                            extraction = self.extractor.extract_document(path, settings, cancelled)
-                        else:
-                            content = self.extractor.extract(path, settings, cancelled)
-                            extraction = ExtractionResult(
-                                text=content,
-                                blocks=(ExtractionBlock(content),) if content else (),
-                                status="ok" if content else "no_text",
-                            )
-                        after = path.stat()
-                        if (after.st_mtime_ns, after.st_size) != (stat.st_mtime_ns, stat.st_size):
-                            extraction = ExtractionResult(
-                                status="error", reason="source_changed_during_extraction"
-                            )
-                        extraction = replace(
-                            extraction, content_hash=content_hash, version_hash=version_hash
-                        )
-                        extraction = replace(
-                            extraction, artifact_hash=artifact_identity(extraction)
-                        )
-                        if not self.extraction_store.put(
-                            extraction,
-                            retry_delay_seconds=getattr(
-                                settings, "extraction_retry_delay_seconds", 300
-                            ),
-                            max_store_mb=getattr(settings, "extraction_store_max_mb", 1024),
-                        ):
-                            extraction = replace(
-                                extraction, status="partial", reason="artifact_store_budget"
-                            )
-                        if cancelled():
-                            raise InterruptedError("Indexlauf abgebrochen.")
-                extraction = replace(
-                    extraction, content_hash=content_hash, version_hash=version_hash
-                )
-                self._writer.upsert_file(
-                    connection,
-                    source_id=source_id,
-                    relative_path=relative,
-                    path=path,
-                    stat=stat,
-                    content=extraction.text,
-                    eligible=eligible,
-                    metadata=metadata,
-                    extraction=extraction,
-                )
-                processed += 1
-                progress(processed, relative)
-                if processed % 25 == 0:
-                    connection.commit()
+            pipeline = ParallelDocuments(
+                extractor=self.extractor,
+                store=self.extraction_store,
+                writer=self._writer,
+                settings=settings,
+                workers=workers,
+                status=self._document_status,
+                cancelled=cancelled,
+            )
+            seen = pipeline.run(
+                connection=connection,
+                files=self._files(
+                    source_path,
+                    settings.excluded_folder_names,
+                    newest_years_first=settings.newest_years_first,
+                ),
+                source_path=source_path,
+                source_id=source_id,
+                parser=parser,
+                known=known,
+                root_ids=root_ids,
+                parser_fingerprint=parser_fingerprint,
+                verify_content=verify_content,
+                forced=force_extraction,
+                selected_projects=selected_projects,
+                run_id=run_id,
+                progress=progress,
+            )
             removed = set(known) - seen
             for relative in removed:
+                if cancelled():
+                    raise InterruptedError("Indexlauf abgebrochen.")
                 uri = _source_uri(source_id, relative)
                 connection.execute("DELETE FROM file_content_fts WHERE path=?", (uri,))
                 connection.execute(
@@ -303,6 +272,11 @@ class SqliteCatalogIndexer:
                 "INSERT OR REPLACE INTO index_metadata(key, value) VALUES (?, ?)",
                 ("source_id", source_id),
             )
+            if verify_content and selected_projects is None:
+                connection.execute(
+                    "INSERT OR REPLACE INTO index_metadata(key,value) VALUES ('last_content_verification_at',?)",
+                    (datetime.now(timezone.utc).isoformat(),),
+                )
             connection.commit()
             if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Der erzeugte Katalog ist beschädigt.")
@@ -316,6 +290,8 @@ class SqliteCatalogIndexer:
             raise
         else:
             connection.close()
+        if cancelled():
+            raise InterruptedError("Indexlauf abgebrochen.")
         self._activate(build_path)
         self.resume_state_path.unlink(missing_ok=True)
         self._cleanup_extractions(settings)

@@ -723,6 +723,16 @@
             "title": "Customer Id",
             "type": "integer"
           },
+          "document_workers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentWorkerStatusModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "error": {
             "default": "",
             "title": "Error",
@@ -1141,6 +1151,93 @@
           "customer_id"
         ],
         "title": "DeleteCustomerResponse",
+        "type": "object"
+      },
+      "DocumentWorkerStatusModel": {
+        "additionalProperties": false,
+        "properties": {
+          "active_workers": {
+            "minimum": 0.0,
+            "title": "Active Workers",
+            "type": "integer"
+          },
+          "discovered_documents": {
+            "minimum": 0.0,
+            "title": "Discovered Documents",
+            "type": "integer"
+          },
+          "elapsed_seconds": {
+            "minimum": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "extracted_documents": {
+            "minimum": 0.0,
+            "title": "Extracted Documents",
+            "type": "integer"
+          },
+          "failed_documents": {
+            "minimum": 0.0,
+            "title": "Failed Documents",
+            "type": "integer"
+          },
+          "processed_documents": {
+            "minimum": 0.0,
+            "title": "Processed Documents",
+            "type": "integer"
+          },
+          "queued_documents": {
+            "minimum": 0.0,
+            "title": "Queued Documents",
+            "type": "integer"
+          },
+          "read_documents": {
+            "minimum": 0.0,
+            "title": "Read Documents",
+            "type": "integer"
+          },
+          "reused_documents": {
+            "minimum": 0.0,
+            "title": "Reused Documents",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "idle",
+              "running",
+              "cancelling",
+              "completed",
+              "cancelled",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "verify_content": {
+            "title": "Verify Content",
+            "type": "boolean"
+          },
+          "worker_limit": {
+            "minimum": 0.0,
+            "title": "Worker Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "worker_limit",
+          "active_workers",
+          "queued_documents",
+          "discovered_documents",
+          "processed_documents",
+          "reused_documents",
+          "extracted_documents",
+          "failed_documents",
+          "read_documents",
+          "verify_content",
+          "elapsed_seconds"
+        ],
+        "title": "DocumentWorkerStatusModel",
         "type": "object"
       },
       "ErrorDetailModel": {
@@ -1998,6 +2095,7 @@
               "running",
               "completed",
               "failed",
+              "error",
               "cancelled"
             ],
             "title": "State",
@@ -2269,6 +2367,58 @@
         "title": "MutationEnvelopeRequest",
         "type": "object"
       },
+      "RecognitionBlocklistBatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "additions": {
+            "items": {
+              "$ref": "#/components/schemas/RecognitionBlocklistRequest"
+            },
+            "maxItems": 500,
+            "title": "Additions",
+            "type": "array"
+          },
+          "deletions": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "maximum": 9.223372036854776e+18,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Deletions",
+            "type": "array"
+          }
+        },
+        "title": "RecognitionBlocklistBatchRequest",
+        "type": "object"
+      },
+      "RecognitionBlocklistBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RecognitionBlocklistEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "published": {
+            "title": "Published",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "changed",
+          "published"
+        ],
+        "title": "RecognitionBlocklistBatchResponse",
+        "type": "object"
+      },
       "RecognitionBlocklistEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2365,7 +2515,7 @@
         "title": "RecognitionBlocklistRequest",
         "type": "object"
       },
-      "RecognitionBlocklistResponse": {
+      "RecognitionBlocklistStatusResponse": {
         "additionalProperties": false,
         "properties": {
           "entries": {
@@ -2374,12 +2524,17 @@
             },
             "title": "Entries",
             "type": "array"
+          },
+          "publication_pending": {
+            "title": "Publication Pending",
+            "type": "boolean"
           }
         },
         "required": [
-          "entries"
+          "entries",
+          "publication_pending"
         ],
-        "title": "RecognitionBlocklistResponse",
+        "title": "RecognitionBlocklistStatusResponse",
         "type": "object"
       },
       "RecognitionCaseModel": {
@@ -2654,6 +2809,16 @@
             "title": "Customer Id",
             "type": "null"
           },
+          "document_workers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentWorkerStatusModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "error": {
             "default": "",
             "title": "Error",
@@ -2923,6 +3088,16 @@
             },
             "title": "Backups",
             "type": "object"
+          },
+          "document_workers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentWorkerStatusModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "index": {
             "$ref": "#/components/schemas/IndexStatusModel"
@@ -4355,7 +4530,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RecognitionBlocklistResponse"
+                  "$ref": "#/components/schemas/RecognitionBlocklistStatusResponse"
                 }
               }
             },
@@ -4503,6 +4678,93 @@
           }
         ],
         "summary": "Add Recognition Blocklist",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      }
+    },
+    "/v2/admin/recognition/blocklist/batch": {
+      "post": {
+        "operationId": "batch_recognition_blocklist_v2_admin_recognition_blocklist_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecognitionBlocklistBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionBlocklistBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Batch Recognition Blocklist",
         "tags": [
           "admin",
           "recognition"

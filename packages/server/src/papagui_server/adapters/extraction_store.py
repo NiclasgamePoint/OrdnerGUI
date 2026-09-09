@@ -28,6 +28,35 @@ class ExtractionStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
 
+    def peek(
+        self, content_hash: str, version_hash: str, *, max_attempts: int = 3
+    ) -> ExtractionResult | None:
+        """Read without schema/timestamp writes; safe for parallel document readers."""
+        if not self.database_path.is_file():
+            return None
+        connection = sqlite3.connect(self.database_path.resolve().as_uri() + "?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            row = connection.execute(
+                "SELECT result_json,status,attempts,next_retry FROM document_extractions WHERE content_hash=? AND version_hash=?",
+                (content_hash, version_hash),
+            ).fetchone()
+            if row is None:
+                return None
+            parsed = ExtractionResult.from_dict(json.loads(row["result_json"]))
+            if parsed.reason == "cancelled":
+                return None
+            retryable = row["status"] in RETRYABLE or any(
+                page.status in RETRYABLE for page in parsed.pages
+            )
+            if retryable and row["attempts"] < max_attempts and row["next_retry"] <= time.time():
+                return None
+            return parsed
+        except (sqlite3.Error, ValueError, TypeError, KeyError):
+            return None
+        finally:
+            connection.close()
+
     @contextmanager
     def _connection(self):
         self.database_path.parent.mkdir(parents=True, exist_ok=True)

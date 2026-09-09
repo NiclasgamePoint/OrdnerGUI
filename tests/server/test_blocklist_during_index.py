@@ -15,8 +15,9 @@ from tests.server.test_api import _container
 
 
 @pytest.mark.parametrize("pause_at", ["extraction", "evaluation"])
+@pytest.mark.parametrize("batch", [False, True])
 def test_blocklist_can_change_during_index_and_remains_effective_after_publication(
-    tmp_path, monkeypatch, pause_at
+    tmp_path, monkeypatch, pause_at, batch
 ):
     container = _container(tmp_path)
     project = container.configuration.source_path / "Service" / "2026" / "Synthetic GmbH"
@@ -72,9 +73,13 @@ def test_blocklist_can_change_during_index_and_remains_effective_after_publicati
         ) as client:
             endpoint = "/v2/admin/recognition/blocklist"
             payload = {"kind": "phone", "value": "+49 30 12345678", "reason": "Synthetic switchboard"}
-            added = await client.post(endpoint, json=payload)
+            mutation_endpoint = endpoint + "/batch" if batch else endpoint
+            addition = {"additions": [payload], "deletions": []} if batch else payload
+            added = await client.post(mutation_endpoint, json=addition)
             assert added.status_code == 200, added.text
-            entry = added.json()["entry"]
+            entry = added.json()["entries"][0] if batch else added.json()["entry"]
+            if batch:
+                assert added.json()["changed"] and added.json()["published"]
             listed = await client.get(endpoint)
             assert listed.status_code == 200
             assert listed.json()["entries"] == [entry]
@@ -85,19 +90,24 @@ def test_blocklist_can_change_during_index_and_remains_effective_after_publicati
             assert first_publication["components"]["customers"] != before["components"]["customers"]
             assert first_publication["components"]["index"] == before["components"]["index"]
 
-            removed = await client.delete(f"{endpoint}/{entry['id']}")
+            removed = (
+                await client.post(mutation_endpoint, json={"deletions": [entry["id"]]})
+                if batch else await client.delete(f"{endpoint}/{entry['id']}")
+            )
             assert removed.status_code == 200
-            assert removed.json() == {"deleted": True}
+            assert removed.json() == (
+                {"entries": [], "changed": True, "published": True} if batch else {"deleted": True}
+            )
             listed = await client.get(endpoint)
             assert listed.json()["entries"] == []
             suggestions = await client.get(f"/v2/customers/{customer_id}/suggestions?status=pending")
             assert phone["id"] in {row["id"] for row in suggestions.json()["suggestions"]}
 
-            readded = await client.post(endpoint, json=payload)
+            readded = await client.post(mutation_endpoint, json=addition)
             assert readded.status_code == 200, readded.text
             assert not resume.is_set()
             assert worker.is_alive()
-            return readded.json()["entry"]
+            return readded.json()["entries"][0] if batch else readded.json()["entry"]
 
     try:
         assert paused.wait(10), "Index run did not reach the controlled pause"

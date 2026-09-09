@@ -28,14 +28,42 @@ class MemoryStore:
         self.payload = deepcopy(value)
 
 
-def jobs(*, store=None, execute=None, operation_lock=None, limit=100, validate=None):
+def jobs(*, store=None, execute=None, operation_lock=None, limit=100, validate=None,
+         document_worker_status=None):
     return CustomerRecognitionJobs(
         store=store or MemoryStore(),
         operation_lock=operation_lock or threading.RLock(),
         validate=validate or (lambda customer_id: None),
         execute=execute or (lambda customer_id, mode, cancelled: None),
         queue_limit=limit,
+        document_worker_status=document_worker_status,
     )
+
+
+@pytest.mark.parametrize("customer_id,mode", [(7, "extract"), (None, "rebuild"), (7, "reassess")])
+def test_only_running_extraction_jobs_include_live_document_workers(customer_id, mode):
+    store = MemoryStore()
+    workers = {"state": "running", "active_workers": 2, "worker_limit": 4}
+    snapshots = []
+    worker = jobs(store=store, document_worker_status=lambda: workers)
+    worker._execute = lambda *_args: snapshots.append(worker.latest(customer_id))
+    worker.request(customer_id, mode=mode)
+    assert "document_workers" not in worker.latest(customer_id)
+    worker.run_pending()
+    assert ("document_workers" in snapshots[0]) == (mode in {"extract", "rebuild"})
+    if "document_workers" in snapshots[0]:
+        assert snapshots[0]["document_workers"] == workers
+    assert "document_workers" not in worker.latest(customer_id)
+    assert "document_workers" not in store.payload["jobs"][0]
+
+
+def test_running_job_does_not_inherit_completed_catalog_counts():
+    snapshots = []
+    worker = jobs(document_worker_status=lambda: {"state": "completed", "processed_documents": 90})
+    worker._execute = lambda *_args: snapshots.append(worker.latest(7))
+    worker.request(7, mode="extract")
+    worker.run_pending()
+    assert "document_workers" not in snapshots[0]
 
 
 def test_job_deduplication_queue_limit_and_defensive_snapshots():

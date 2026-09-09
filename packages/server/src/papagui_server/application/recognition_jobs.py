@@ -14,11 +14,13 @@ from papagui_server.domain.models import utc_now
 class CustomerRecognitionJobs:
     def __init__(self, *, store: RunStateRepositoryPort, operation_lock,
                  validate: Callable[[int], None], execute: Callable,
-                 queue_limit: int = 100):
+                 queue_limit: int = 100,
+                 document_worker_status: Callable[[], dict | None] | None = None):
         self._store = store
         self._operation_lock = operation_lock
         self._validate = validate
         self._execute = execute
+        self._document_worker_status = document_worker_status
         self._limit = queue_limit
         self._lock = threading.RLock()
         self._wake = threading.Event()
@@ -91,7 +93,14 @@ class CustomerRecognitionJobs:
 
     def latest(self, customer_id):
         with self._lock:
-            return next((deepcopy(j) for j in reversed(self._jobs) if j["customer_id"] == customer_id), None)
+            job = next((deepcopy(j) for j in reversed(self._jobs) if j["customer_id"] == customer_id), None)
+            if (job is not None and job["state"] == "running"
+                    and job["mode"] in {"extract", "rebuild"}
+                    and self._document_worker_status is not None):
+                workers = self._document_worker_status()
+                if workers is not None and workers.get("state") in {"running", "cancelling"}:
+                    job["document_workers"] = deepcopy(workers)
+            return job
 
     def cancel(self, customer_id, job_id):
         with self._lock:

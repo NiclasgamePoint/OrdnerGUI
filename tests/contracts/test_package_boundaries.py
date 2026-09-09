@@ -16,6 +16,7 @@ ALLOWED_STDLIB_ROOTS = {
     "dataclasses",
     "enum",
     "json",
+    "math",
     "pathlib",
     "re",
     "typing",

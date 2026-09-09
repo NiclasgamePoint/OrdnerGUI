@@ -44,6 +44,31 @@ Die Herkunft der Stammdaten liegt in `customer_field_provenance`: `manual`, `con
 
 ## Oberfläche und Schnittstellen
 
+Die serverweite Sperrliste im Indexserver-Tab **Kundenerkennung** unterstützt
+gesammelte Änderungen. Neue Sperren und Entfernungen bleiben bis zu
+**Änderungen bestätigen** lokale Vormerkungen. Der Server validiert den ganzen
+Vorgang, speichert ihn atomar, gleicht vorhandene Vorschläge einmal ab und
+veröffentlicht einmal den Kundenstand. Gespeicherte Stammdaten und bisherige
+Entscheidungen bleiben erhalten; Dokumentauslesung, OCR und ein vollständiger
+Neuaufbau werden dabei nicht gestartet.
+
+Die additive Fähigkeit `recognition-blocklist-batch` kennzeichnet
+`POST /v2/admin/recognition/blocklist/batch`. Die Anfrage enthält
+`additions: [{kind, value, reason}]` und `deletions: [id]`, jeweils höchstens
+500 Einträge. Sie übermittelt Änderungen, keine vollständige Ersetzung der
+Sperrliste, damit parallele Bearbeitungen erhalten bleiben. Doppelte Werte
+werden normalisiert zusammengefasst; bereits entfernte IDs sind bei einem
+erneuten Versuch unschädlich. Bestehende Einzel-Endpunkte bleiben verfügbar.
+
+Die Antwort enthält `entries`, `changed` und `published`. Wenn die Speicherung
+erfolgreich war, aber die Veröffentlichung scheitert, meldet der Server
+`published: false` und merkt den offenen Schritt dauerhaft vor. Ein leerer
+Stapel kann dann ausschließlich die Veröffentlichung wiederholen. Ein
+unveränderter Stapel ohne offene Veröffentlichung verursacht keine neue
+Veröffentlichung.
+`GET /v2/admin/recognition/blocklist` liefert zusätzlich `publication_pending`,
+damit eine ausstehende Veröffentlichung nach einem Clientneustart sichtbar bleibt.
+
 Die Kundenprüfung zeigt Ergänzungen, Konflikte und Ansprechpartner mit zunächst drei Alternativen je Feld und 30 Entscheidungen je Seite. Weitere bleiben erreichbar. Karten nennen Qualitätsstufe, Rolle, Gründe und anklickbare Fundstellen. Der Zähler zählt offene Entscheidungen. Fehler, fehlende Quellen, noch nicht ausgewertete Quellen und ausbleibende neue Angaben sind verschiedene Zustände.
 
 Zwei Aktionen starten dauerhafte Serverjobs:
@@ -63,7 +88,15 @@ Die `/v2`-Erweiterungen sind additiv:
 | `POST /v2/customers/{id}/recognition` | `{ "mode": "reassess" }` oder `{ "mode": "extract" }`; HTTP 202. |
 | `DELETE /v2/customers/{id}/recognition/{job_id}` | Gezielter Abbruch. |
 
-Neue Fähigkeiten heißen `customer-suggestion-groups`, `customer-recognition-status`, `customer-recognition-jobs` und `stable-contact-ids`. Ältere Clients erhalten ohne `include_groups` keine unbekannten Adressgruppen. Der neue Client kann ältere, unpaginierte Antworten lokal aufteilen. Kontakte ohne ID werden bei alten Client-Schreibzugriffen konservativ eindeutig zugeordnet; Mehrdeutigkeiten werden abgelehnt.
+Neue Fähigkeiten heißen `customer-suggestion-groups`, `customer-recognition-status`, `customer-recognition-jobs`, `stable-contact-ids` und `document-workers`. Ältere Clients erhalten ohne `include_groups` keine unbekannten Adressgruppen. Der neue Client kann ältere, unpaginierte Antworten lokal aufteilen. Kontakte ohne ID werden bei alten Client-Schreibzugriffen konservativ eindeutig zugeordnet; Mehrdeutigkeiten werden abgelehnt.
+
+`GET /v2/server/status` liefert optional `document_workers` mit aktiven Workern,
+Workerlimit, Warteschlange, Dokumentzählern und Laufzeit. Laufende Aufträge der
+Modi `extract` und `rebuild` führen dieselben Summen während ihrer Auslesung
+im Jobstatus. Wartende Aufträge übernehmen keine Zahlen eines anderen Laufs.
+Die Dokumentkarte und der Tab **Kundenerkennung** zeigen diese Werte live;
+bei älteren Servern bleibt der bisherige Jobstatus verfügbar. Die neuen
+Workerstatistiken enthalten weder Kundendetails noch Dokumentpfade.
 
 ## Speicherung, Konsistenz und Ressourcen
 
@@ -73,7 +106,36 @@ Große Layout-/OCR-Artefakte liegen ausschließlich unter `data/extraction/artif
 
 Indexierung und einzelne Kundenjobs teilen eine Schreibkoordination. Die Dokumentbewertung verwendet eine konsistente Katalogkopie. Vor jeder kurzen Ergebnistransaktion werden Kundenrevision und Projektbesitzer erneut geprüft. Ein zwischenzeitlich bearbeiteter Kunde ergibt Teilabdeckung; seine neueren Werte werden nicht überschrieben. Die Veröffentlichung erfolgt nach dem zusammengehörigen Verarbeitungslauf.
 
-Der Extraktionscache verwendet Inhaltshash, Parser-/Werkzeugversionen und relevante Einstellungen. Auch bei unveränderten Dateimetadaten wird der Inhalt abgeglichen. Ein täglicher vollständiger Dateiabgleich erzwingt keine neue OCR. `reassess` benötigt keine neue Extraktion; ein geänderter Parserfingerprint oder `extract` löst sie gezielt aus. Wiederholbare Fehler haben ein begrenztes Retrybudget.
+Dokumente werden für Indexierung und Kundenerkennung über dieselbe begrenzte
+parallele Auslesung vorbereitet. Die fachliche Wertprüfung und Zuordnung zu
+Kunden erfolgt anschließend weiterhin nacheinander. Eine begrenzte
+Warteschlange hält die Zahl gleichzeitig vorgemerkter Dokumente klein; die
+bestehende Schreibkoordination schützt Katalog und Extraktionscache.
+
+Das Ressourcenprofil bestimmt die Workerzahl anhand der verfügbaren CPU-Kapazität:
+
+| Profil | CPU-Anteil für die Workerberechnung |
+|---|---:|
+| Schonend (`gentle`) | 15 % |
+| Ausgewogen (`balanced`) | 25 % |
+| Schnell (`fast`) | 60 % |
+
+CPU-Affinität, CPU-/RAM-Grenzen des Containers, verfügbarer RAM, eine
+Speicherreserve und der Speicherbedarf je Dokument begrenzen die Auslesung auf
+1 bis 20 Worker. Bei unbekanntem oder knappem RAM bleibt ein Worker. Der
+Live-Status zeigt die ermittelte Obergrenze und die tatsächlich aktiven Worker.
+
+Der Extraktionscache verwendet Inhaltshash, Parser-/Werkzeugversionen und
+relevante Einstellungen. Ein regulärer Lauf überspringt bereits verarbeitete
+Dateien bei unveränderter Größe, Änderungszeit und Auslesekonfiguration ohne
+erneutes Öffnen der Quelldatei. Der aktivierte tägliche Abgleich prüft nach
+24 Stunden die Inhaltshashes; der Zeitpunkt der letzten erfolgreichen Prüfung
+bleibt über einen Serverneustart erhalten. Ein ausdrücklicher Indexneuaufbau
+prüft ebenfalls die Inhalte. Passende Cacheergebnisse werden dabei weiter
+genutzt, einschließlich vorhandener OCR. `reassess` verwendet vorhandene Texte;
+ein geänderter Parserfingerprint oder `extract` löst die Auslesung gezielt aus.
+Ein einzelner Kundenauftrag verschiebt den Termin der vollständigen
+Inhaltsprüfung nicht. Wiederholbare Fehler haben ein begrenztes Retrybudget.
 
 | Einstellung | Standard | Bedeutung |
 |---|---:|---|
@@ -112,7 +174,7 @@ Zum Rückfall `recognition_pipeline_enabled=false` setzen. Dies beendet neue aut
 
 Im Client enthält **Indexserver → Tab „Kundenerkennung“** die serverweite Verwaltung. Eingaben bleiben beim Tabwechsel erhalten; Statusabfragen laufen nur im sichtbaren Tab und werden beim erneuten Öffnen aktualisiert. Die Sperrliste liegt dauerhaft in der Serverdatenbank. Einträge können dort hinzugefügt und entfernt werden; sie gelten für alle Kunden. Unterstützt werden E-Mail-Adresse, Telefonnummer, E-Mail-Domain, Kontaktname und Firmenname. Der Vergleich verwendet normalisierte vollständige Werte. Eine Domain sperrt genau diese Domain, keine ähnlichen Domains oder Unterdomains. Eine passende E-Mail-Adresse, Telefonnummer oder ein gesperrter Name sperrt auch einen daraus zusammengesetzten Kontaktvorschlag.
 
-Eine neue Sperre blendet passende offene Vorschläge sofort aus und verhindert ihr Wiedererscheinen bei späteren Läufen. Belege bleiben erhalten. Wird eine Sperre entfernt, können Vorschläge mit weiterhin aktiven Belegen wieder erscheinen. Bereits angenommene oder abgelehnte Vorschläge und vorhandene Kundendaten werden dabei nicht geändert. Die Sperrliste kann auch während laufender Index- und Neuaufbauaufträge bearbeitet werden. Änderungen werden in der Kundendatenbank gespeichert und bei weiteren Vorschlägen des laufenden Auftrags berücksichtigt. Nach erfolgreichem Speichern erscheint der Eintrag direkt in der Liste.
+Eine bestätigte neue Sperre blendet passende offene Vorschläge sofort aus und verhindert ihr Wiedererscheinen bei späteren Läufen. Belege bleiben erhalten. Wird eine Sperre entfernt, können Vorschläge mit weiterhin aktiven Belegen wieder erscheinen. Bereits angenommene oder abgelehnte Vorschläge und vorhandene Kundendaten werden dabei nicht geändert. Die Sperrliste kann auch während laufender Index- und Neuaufbauaufträge bearbeitet werden. Änderungen werden in der Kundendatenbank gespeichert und bei weiteren Vorschlägen des laufenden Auftrags berücksichtigt. Nach erfolgreichem Speichern erscheint der Eintrag direkt in der Liste.
 
 **Kundenerkennung vollständig neu aufbauen** startet einen dauerhaften Serverauftrag. Er erstellt den Dokumentkatalog neu, liest die zugelassenen Dokumente einschließlich aktivierter OCR erneut und bewertet die Vorschläge aller Kunden. Der Auftrag durchläuft alle verfügbaren Dokumente je Projekt, auch über das normale Suchbudget hinaus und wenn die Kundendaten bereits vollständig sind. Die eingestellten Dateitypen, Ordnerausschlüsse, OCR-Einstellungen und Schutzgrenzen je Dokument gelten weiterhin. Unlesbare oder nur teilweise lesbare Dokumente bleiben im jeweiligen Kundenstatus erkennbar.
 
@@ -124,6 +186,7 @@ Die Verwaltung ist außerdem über die mit dem Client-Token authentifizierte API
 | --- | --- | --- |
 | GET / POST | `/v2/admin/recognition/blocklist` | Sperren auflisten / hinzufügen (`kind`, `value`, optional `reason`). |
 | DELETE | `/v2/admin/recognition/blocklist/{id}` | Sperre entfernen. |
+| POST | `/v2/admin/recognition/blocklist/batch` | Vormerkungen gemeinsam anwenden (`additions`, `deletions`); Antwort mit `entries`, `changed`, `published`. |
 | GET / POST | `/v2/admin/recognition/rebuild` | Letzten Auftrag abfragen / Neuaufbau starten. |
 | DELETE | `/v2/admin/recognition/rebuild/{job_id}` | Neuaufbau abbrechen. |
 
@@ -144,6 +207,14 @@ docker run --network none --rm --entrypoint python \
 Der Benchmark öffnet ausschließlich `tests/fixtures/recognition_synthetic/cases.json`. Er vergleicht die frühere Regexregel mit der neuen fachlichen Pipeline und berichtet Precision/Recall getrennt nach Feld, Strukturformat, Gruppe und Testsplit. Er misst keine OCR-Genauigkeit und keine Produktivqualität. Die echte Parserprüfung erzeugt Office-Dateien, Bilder, einen gedrehten Scan und ein gemischtes PDF selbst und löscht sie anschließend. Weitere Tests erzeugen echtes XLS und mehrspaltige PDFs.
 
 Die Tests decken außerdem Migration, stabile IDs/Ablehnungen, Kopien und Exporte, aktive/veraltete Belege, Adressatomarität, Kontaktkonflikte, zweite Suchstufe, parallele Kundenänderungen, Jobabbruch/Neustart, API-Kompatibilität, Offline-Snapshots und mehrere Entscheidungen im selben Dialog ab. Die bestehende repositoryweite Coveragegrenze bleibt 93 %.
+
+Parallelität, Ressourcenbudgets, schnelle unveränderte Folgeläufe,
+Inhaltsprüfung, Abbruch und Workeranzeige werden mit künstlich erzeugten
+Dokumenten und temporären Datenbanken geprüft. Laufzeitvergleiche der
+Dokumentauslesung verwenden ebenfalls ausschließlich synthetische Dateien;
+sie messen keine Laufzeit oder Erkennungsqualität des produktiven Bestands.
+Messwerte und Abbruch-/Wiederaufnahmeprüfungen stehen im
+[Prüfbericht zur parallelen Dokumentverarbeitung](dokumentverarbeitung-pruefbericht-2026-09-09.md).
 
 Die optionale Docling-/Modellstufe bleibt deaktiviert: Ein zusätzlicher Nutzen auf einem unabhängigen realen Abnahmebestand und innerhalb des Zielhardwarebudgets wurde nicht nachgewiesen. Das Benchmarkwerkzeug enthält eine ausdrückliche Prüfung dieser Voraussetzungen; es lädt oder ruft kein Modell auf.
 

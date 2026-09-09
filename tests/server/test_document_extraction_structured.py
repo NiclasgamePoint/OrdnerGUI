@@ -324,12 +324,14 @@ def test_rebuild_cache_copy_metadata_change_and_parser_invalidation(tmp_path: Pa
     before = document.stat()
     document.write_text("synthetic-bravo")
     os.utime(document, ns=(before.st_atime_ns, before.st_mtime_ns))
-    _build(indexer, tmp_path / "source")
+    _build(indexer, tmp_path / "source", full_rebuild=False)
+    assert extractor.calls == 1  # Ordinary scans trust unchanged modification time and size.
+    _build(indexer, tmp_path / "source", full_rebuild=False, verify_content=True)
     assert extractor.calls == 2
     extractor.version = "version-2"
-    _build(indexer, tmp_path / "source")
+    _build(indexer, tmp_path / "source", full_rebuild=False)
     assert extractor.calls == 4
-    _build(indexer, tmp_path / "source", force_extraction=True)
+    _build(indexer, tmp_path / "source", full_rebuild=False, force_extraction=True)
     assert extractor.calls == 6
     reader = SqliteCatalogReader(indexer.active_path)
     evidence = reader.document_evidence(source_id="primary")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import time
@@ -133,6 +134,7 @@ def test_success_cancel_error_busy_and_status_paths(tmp_path: Path) -> None:
     assert status["active_customer_generation"] == "customers-one"
     assert status["index"]["progress"]["legacy_current_path"] == "../legacy-absolute"
     assert not status["resumable"]
+    assert status["document_workers"] is None
 
     coordinator._state = MutableRunState(state="running", run_id="busy")
     with pytest.raises(ResourceBusyError):
@@ -204,6 +206,51 @@ def test_delete_maintenance_and_backup_counts(tmp_path: Path) -> None:
     assert not content.exists()
     assert coordinator.status()["backups"] == {"index": 2, "customers": 2}
     coordinator._delete_index()
+
+
+@pytest.mark.parametrize("age_hours,expected", [(1, False), (25, True), (None, True)])
+def test_daily_verification_uses_catalog_timestamp_after_restart(
+    tmp_path, age_hours, expected
+):
+    timestamp = (
+        (datetime.now(timezone.utc) - timedelta(hours=age_hours)).isoformat()
+        if age_hours is not None else ""
+    )
+    calls = []
+    catalog = Catalog()
+    catalog.last_content_verification_at = lambda: timestamp
+    original = catalog.build
+
+    def record(*args, **kwargs):
+        calls.append((kwargs["full_rebuild"], kwargs.get("verify_content", False)))
+        return original(*args, **kwargs)
+
+    catalog.build = record
+    # A new coordinator must consult the durable catalog timestamp immediately.
+    coordinator = _coordinator(tmp_path, catalog=catalog)
+    assert coordinator.run_once() == 0
+    assert calls == [(False, expected)]
+
+
+def test_daily_verification_disabled_and_explicit_rebuild_still_verifies(tmp_path):
+    calls = []
+    catalog = Catalog()
+    original = catalog.build
+
+    def record(*args, **kwargs):
+        calls.append((kwargs["full_rebuild"], kwargs.get("verify_content", False)))
+        return original(*args, **kwargs)
+
+    catalog.build = record
+    coordinator = _coordinator(
+        tmp_path, catalog=catalog,
+        settings=Settings(ServerSettings(daily_reconciliation_enabled=False)),
+    )
+    assert coordinator.run_once() == 0
+    assert coordinator.run_once(full_rebuild=True) == 0
+    coordinator.rebuild_recognition_documents(lambda: False)
+    coordinator.extract_customer_documents([7], lambda: False)
+    assert calls == [(False, False), (True, True), (True, True), (False, False)]
 
 
 def test_scheduler_handles_manual_run_delete_reset_due_and_idempotent_start(

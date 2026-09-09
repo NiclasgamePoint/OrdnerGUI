@@ -64,6 +64,8 @@ class CatalogSqliteWriter:
             "extraction_status": "TEXT NOT NULL DEFAULT 'unsupported'",
             "extraction_reason": "TEXT NOT NULL DEFAULT 'not_processed'",
             "extraction_version": "TEXT NOT NULL DEFAULT ''",
+            "extraction_policy_version": "TEXT NOT NULL DEFAULT ''",
+            "last_scan_run": "TEXT NOT NULL DEFAULT ''",
             "extraction_pages_total": "INTEGER",
             "extraction_pages_processed": "INTEGER NOT NULL DEFAULT 0",
             "extraction_priority": "INTEGER NOT NULL DEFAULT 0",

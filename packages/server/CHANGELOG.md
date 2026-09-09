@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Atomare Stapelschnittstelle für Sperrlistenänderungen: einmaliger Abgleich
+  bestehender Vorschläge und eine Veröffentlichung pro geändertem Stapel.
+  Wiederholte unveränderte Anfragen vermeiden zusätzliche Veröffentlichungen;
+  fehlgeschlagene Veröffentlichungen bleiben dauerhaft zur Wiederholung vorgemerkt.
+  Sperrlistenänderungen starten keine Dokumentauslesung und keinen Neuaufbau.
+
+- Gemeinsame parallele Dokumentauslesung für Indexierung und Kundenerkennung
+  mit begrenzter Warteschlange und 1–20 Workern. Ressourcenprofile berücksichtigen
+  CPU-Affinität, verfügbaren RAM und Containergrenzen; die fachliche Zuordnung
+  erfolgt weiterhin nacheinander.
+- Unveränderte Dokumente werden bei regulären Folgeläufen ohne erneutes Lesen
+  übersprungen. Täglicher Abgleich und ausdrücklicher Indexneuaufbau prüfen die
+  Inhaltshashes; passende Extraktionsergebnisse bleiben wiederverwendbar.
+  Der letzte erfolgreiche vollständige Prüftermin bleibt über Neustarts erhalten.
+- Additive Workerstatistik im Serverstatus und während der Auslesung laufender
+  Kunden-/Neuaufbauaufträge: aktive Worker, Limit, Warteschlange und Dokumentzähler.
+
 - Die serverweite Sperrliste lässt sich während laufender Index- und
   Neuaufbauaufträge bearbeiten. Neue Sperren gelten auch für anschließend
   gespeicherte Vorschläge desselben Laufs.

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import httpx
+from papagui_contracts import DocumentWorkerStatus
 
 from papagui_server.api import create_app
 from papagui_server.composition import RuntimeConfiguration, build_container
@@ -24,6 +25,32 @@ def _container(tmp_path: Path):
 
 def _run(coroutine):
     return asyncio.run(coroutine)
+
+
+def test_api_preserves_aggregate_document_workers(tmp_path, monkeypatch):
+    async def scenario():
+        container = _container(tmp_path)
+        workers = DocumentWorkerStatus(
+            state="running", worker_limit=4, active_workers=2, queued_documents=6,
+            processed_documents=12, reused_documents=8, extracted_documents=4,
+            failed_documents=1, elapsed_seconds=1.5,
+        ).to_dict()
+        monkeypatch.setattr(container.coordinator, "document_worker_status", lambda: workers)
+        job = dict(id="synthetic-rebuild", customer_id=None, mode="rebuild", state="running",
+                   created_at="2030-01-01T12:00:00Z", finished_at="", error="",
+                   document_workers=workers)
+        monkeypatch.setattr(container.recognition_jobs, "latest", lambda _customer: job)
+        app = create_app(container, manage_lifecycle=False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            headers = {"Authorization": "Bearer client-token-123"}
+            response = await client.get("/v2/server/status", headers=headers)
+            assert response.status_code == 200
+            assert response.json()["document_workers"] == workers
+            response = await client.get("/v2/admin/recognition/rebuild", headers=headers)
+            assert response.status_code == 200
+            assert response.json()["job"]["document_workers"] == workers
+
+    _run(scenario())
 
 
 def test_health_system_info_and_client_authentication(tmp_path: Path) -> None:

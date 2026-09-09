@@ -18,6 +18,11 @@ class RecognitionBlocklistApplicationService:
         with self._unit_of_work() as work:
             return work.blocklist.list()
 
+    def list_state(self) -> dict[str, Any]:
+        with self._unit_of_work() as work:
+            return {"entries": work.blocklist.list(),
+                    "publication_pending": work.blocklist.pending_publication() is not None}
+
     def add(self, kind: str, value: str, reason: str = "") -> dict[str, Any]:
         # SQLite serializes this short change with evidence writes. The long
         # extraction/index lock must not prevent users from managing exclusions.
@@ -38,6 +43,32 @@ class RecognitionBlocklistApplicationService:
             work.commit()
         self._publisher.publish_customers()
         return True
+
+    def batch(self, additions: list[dict[str, Any]], deletions: list[int]) -> dict[str, Any]:
+        # BEGIN IMMEDIATE serializes this delta with recognition writes and other
+        # editors without acquiring the long-running index/extraction lock.
+        with self._unit_of_work() as work:
+            changed = work.blocklist.apply_batch(additions, deletions)
+            if changed:
+                self._reconcile_restored(work)
+                token = work.blocklist.mark_publication_pending()
+            else:
+                token = work.blocklist.pending_publication()
+            entries = work.blocklist.list()
+            work.commit()
+        published = True
+        if token is not None:
+            try:
+                self._publisher.publish_customers()
+                with self._unit_of_work() as work:
+                    work.blocklist.clear_pending_publication(token)
+                    work.commit()
+            except Exception:
+                # Changes already committed are still successful. The durable
+                # marker lets an unchanged retry finish publication, including
+                # after a restart, without rerunning recognition or extraction.
+                published = False
+        return {"entries": entries, "changed": changed, "published": published}
 
     @staticmethod
     def _reconcile_restored(work) -> None:

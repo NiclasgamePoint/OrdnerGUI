@@ -51,6 +51,7 @@ from .recognition import (
 )
 from .status import (
     ACTIVE_INDEX_STATES,
+    DocumentWorkerStatus,
     IndexProgress,
     IndexRunState,
     IndexRunStatus,
@@ -123,6 +124,7 @@ __all__ = [
     "RunSummary",
     "ServerState",
     "ServerStatus",
+    "DocumentWorkerStatus",
     "SourcePath",
     "SystemInfo",
     "SystemCapabilities",

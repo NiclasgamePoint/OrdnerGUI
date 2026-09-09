@@ -596,13 +596,19 @@ def create_app(
     async def cancel_customer_recognition(customer_id: int, job_id: str) -> dict[str, Any]:
         return {"job": container.recognition_jobs.cancel(customer_id, job_id)}
 
-    @app.get("/v2/admin/recognition/blocklist", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistResponse)
+    @app.get("/v2/admin/recognition/blocklist", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistStatusResponse)
     def recognition_blocklist() -> dict[str, Any]:
-        return {"entries": container.recognition_blocklist.list()}
+        return container.recognition_blocklist.list_state()
 
     @app.post("/v2/admin/recognition/blocklist", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistMutationResponse)
     def add_recognition_blocklist(payload: api_models.RecognitionBlocklistRequest) -> dict[str, Any]:
         return {"entry": container.recognition_blocklist.add(payload.kind, payload.value, reason=payload.reason)}
+
+    @app.post("/v2/admin/recognition/blocklist/batch", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistBatchResponse)
+    def batch_recognition_blocklist(payload: api_models.RecognitionBlocklistBatchRequest) -> dict[str, Any]:
+        return container.recognition_blocklist.batch(
+            [entry.model_dump() for entry in payload.additions], payload.deletions
+        )
 
     @app.delete("/v2/admin/recognition/blocklist/{entry_id}", dependencies=[Depends(require_client)], tags=["admin", "recognition"])
     def delete_recognition_blocklist(entry_id: int) -> dict[str, bool]:

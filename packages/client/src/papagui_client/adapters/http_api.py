@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shutil
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -76,6 +76,8 @@ class _HttpTransport:
         path: str,
         payload: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> Mapping[str, Any]:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         request = urllib.request.Request(self.url(path), data=data, method=method)
@@ -87,13 +89,18 @@ class _HttpTransport:
         for name, value in (headers or {}).items():
             request.add_header(name, value)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=self.timeout_seconds if timeout_seconds is None else timeout_seconds,
+            ) as response:
                 body = response.read()
         except urllib.error.HTTPError as exc:
             raw = exc.read()
             try:
                 error = json.loads(raw.decode("utf-8")) if raw else {}
             except (UnicodeDecodeError, ValueError):
+                error = {}
+            if not isinstance(error, dict):
                 error = {}
             message = str(error.get("detail") or error.get("error") or exc.reason)
             raise ApiRejectedError(exc.code, message, error) from exc
@@ -310,6 +317,21 @@ class HttpServerControlGateway:
             raise ApiUnavailableError("server returned an invalid recognition blocklist")
         return tuple(dict(entry) for entry in entries)
 
+    def recognition_blocklist_state(self) -> dict[str, Any]:
+        response = self._transport.json("GET", "/v2/admin/recognition/blocklist")
+        entries = response.get("entries")
+        publication_pending = response.get("publication_pending", False)
+        if (
+            not isinstance(entries, list)
+            or any(not isinstance(entry, Mapping) for entry in entries)
+            or not isinstance(publication_pending, bool)
+        ):
+            raise ApiUnavailableError("server returned an invalid recognition blocklist state")
+        return {
+            "entries": [dict(entry) for entry in entries],
+            "publication_pending": publication_pending,
+        }
+
     def add_recognition_blocklist_entry(
         self, kind: str, value: str, reason: str = ""
     ) -> dict[str, Any]:
@@ -330,6 +352,63 @@ class HttpServerControlGateway:
         if response.get("deleted") is not True:
             raise ApiUnavailableError("server did not confirm recognition blocklist deletion")
         return True
+
+    def apply_recognition_blocklist_changes(
+        self,
+        additions: Iterable[Mapping[str, str]],
+        deletions: Iterable[int],
+    ) -> dict[str, Any]:
+        try:
+            response = self._transport.json(
+                "POST",
+                "/v2/admin/recognition/blocklist/batch",
+                {
+                    "additions": [dict(entry) for entry in additions],
+                    "deletions": list(deletions),
+                },
+                # Publishing the customer snapshot can exceed the short polling timeout.
+                timeout_seconds=max(self._transport.timeout_seconds, 60),
+            )
+        except ApiRejectedError as exc:
+            if exc.status not in {404, 405}:
+                raise
+            message = (
+                "Für das gemeinsame Speichern der Sperrliste ist ein Serverupdate erforderlich. "
+                "Bitte aktualisieren Sie den Server und versuchen Sie es erneut."
+            )
+            raise ApiRejectedError(
+                exc.status,
+                message,
+                {"error": {"code": "recognition_blocklist_batch_unsupported", "message": message}},
+            ) from exc
+        entries = response.get("entries")
+        changed = response.get("changed")
+        published = response.get("published")
+        if (
+            not isinstance(entries, list)
+            or not isinstance(changed, bool)
+            or not isinstance(published, bool)
+        ):
+            raise ApiUnavailableError("server returned an invalid recognition blocklist batch result")
+        for entry in entries:
+            if (
+                not isinstance(entry, Mapping)
+                or type(entry.get("id")) is not int
+                or entry["id"] <= 0
+                or not isinstance(entry.get("kind"), str)
+                or not entry["kind"].strip()
+                or not isinstance(entry.get("value"), str)
+                or not entry["value"].strip()
+                or not isinstance(entry.get("reason", ""), str)
+            ):
+                raise ApiUnavailableError(
+                    "server returned an invalid recognition blocklist batch entry"
+                )
+        return {
+            "entries": [dict(entry) for entry in entries],
+            "changed": changed,
+            "published": published,
+        }
 
     def recognition_rebuild(self) -> dict[str, Any] | None:
         response = self._transport.json("GET", "/v2/admin/recognition/rebuild")

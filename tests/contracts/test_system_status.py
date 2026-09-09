@@ -7,6 +7,7 @@ from papagui_contracts import (
     Capabilities,
     Capability,
     ContractValidationError,
+    DocumentWorkerStatus,
     IndexProgress,
     IndexRunState,
     IndexStatus,
@@ -59,6 +60,22 @@ class SystemContractTests(unittest.TestCase):
 
 
 class StatusContractTests(unittest.TestCase):
+    def test_document_workers_roundtrip_and_legacy_fallback(self):
+        workers = DocumentWorkerStatus(
+            state="running", worker_limit=4, active_workers=2,
+            queued_documents=5, processed_documents=20, reused_documents=12,
+            extracted_documents=8, failed_documents=1, elapsed_seconds=2.5,
+        )
+        status = ServerStatus(state=ServerState.ONLINE, document_workers=workers)
+        self.assertEqual(ServerStatus.from_json(status.to_json()), status)
+        self.assertIsNone(ServerStatus.from_dict({"state": "online"}).document_workers)
+        self.assertNotIn("current_path", DocumentWorkerStatus.from_dict(
+            {**workers.to_dict(), "current_path": "synthetic-private-path"}
+        ).to_dict())
+        for value in (-1, float("nan"), float("inf")):
+            with self.assertRaises(ContractValidationError):
+                DocumentWorkerStatus(elapsed_seconds=value)
+
     def test_v2_status_roundtrip_includes_portable_progress_path(self):
         original = ServerStatus(
             state=ServerState.ONLINE,

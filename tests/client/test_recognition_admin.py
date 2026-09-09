@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtCore import QPoint, QTimer
+from PySide6.QtCore import QItemSelectionModel, QPoint, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from papagui_client.adapters.http_api import (
@@ -20,6 +20,7 @@ from papagui_client.adapters.http_api import (
 from papagui_client.gui.recognition_admin import BLOCKLIST_KINDS, RecognitionAdminWidget
 from papagui_client.gui.theme import build_stylesheet
 from papagui_client.gui.tray import ServerTrayWindow
+from papagui_contracts import DocumentWorkerStatus
 
 
 def _entry(entry_id=1, kind="email", value="synthetic@example.test", reason="Testeintrag"):
@@ -51,6 +52,7 @@ class _Control:
         self.calls = []
         self.threads = []
         self.failure = ""
+        self.published = True
 
     def _record(self, *args):
         self.calls.append(args)
@@ -66,16 +68,22 @@ class _Control:
         self._record("job")
         return dict(self.job) if self.job else None
 
-    def add_recognition_blocklist_entry(self, kind, value, reason):
-        self._record("add", kind, value, reason)
-        entry = _entry(2, kind, value, reason)
-        self.entries = [old for old in self.entries if old["id"] != 2] + [entry]
-        return entry
-
-    def delete_recognition_blocklist_entry(self, entry_id):
-        self._record("delete", entry_id)
-        self.entries = [entry for entry in self.entries if entry["id"] != entry_id]
-        return True
+    def apply_recognition_blocklist_changes(self, additions, deletions):
+        self._record("apply", [dict(entry) for entry in additions], list(deletions))
+        previous = list(self.entries)
+        next_id = max((entry["id"] for entry in previous), default=0) + 1
+        self.entries = [entry for entry in previous if entry["id"] not in deletions]
+        for addition in additions:
+            existing = next((entry for entry in self.entries
+                             if entry["kind"] == addition["kind"]
+                             and entry["value"].casefold() == addition["value"].casefold()), None)
+            entry_id = existing["id"] if existing else next_id
+            if existing is None:
+                next_id += 1
+            self.entries = [entry for entry in self.entries if entry["id"] != entry_id]
+            self.entries.append(_entry(entry_id, **addition))
+        return {"entries": tuple(self.entries), "changed": self.entries != previous,
+                "published": self.published}
 
     def start_recognition_rebuild(self):
         self._record("start")
@@ -102,6 +110,22 @@ def _flush(application, widget):
         if not widget._tasks:
             return
     assert not widget._tasks
+
+
+def _stage_entry(widget, value, reason="Testeintrag", kind="email"):
+    widget.kind_combo.setCurrentIndex(widget.kind_combo.findData(kind))
+    widget.value_input.setText(value)
+    widget.reason_input.setText(reason)
+    widget.add_button.click()
+
+
+def _select_rows(widget, *rows):
+    widget.entry_list.clearSelection()
+    for row in rows:
+        widget.entry_list.selectionModel().select(
+            widget.entry_list.model().index(row, 0),
+            QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+        )
 
 
 @pytest.fixture
@@ -140,6 +164,22 @@ def make_window(application):
         window.close()
         window.deleteLater()
     application.processEvents()
+
+
+@pytest.mark.parametrize("with_workers", [False, True])
+def test_gateway_preserves_optional_worker_status_for_server_and_jobs(monkeypatch, with_workers):
+    status = {"state": "online"}
+    job = _job()
+    if with_workers:
+        workers = DocumentWorkerStatus(state="running", worker_limit=4, active_workers=2).to_dict()
+        status["document_workers"] = workers
+        job["document_workers"] = workers
+    responses = iter((status, {"job": job}))
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs:
+                        io.BytesIO(json.dumps(next(responses)).encode()))
+    gateway = HttpServerControlGateway("http://synthetic-server.test")
+    assert gateway.status() == status
+    assert gateway.recognition_rebuild() == job
 
 
 def test_gateway_routes_and_normal_token_authentication(monkeypatch):
@@ -198,7 +238,7 @@ def test_gateway_rejects_invalid_admin_responses(method, args, response):
         getattr(gateway, method)(*args)
 
 
-def test_blocklist_load_add_delete_and_duplicate_entry(application, make_widget):
+def test_blocklist_stages_casefold_duplicates_and_applies_once(application, make_widget):
     control = _Control()
     widget = make_widget(control)
     assert not widget.rebuild_button.isEnabled()
@@ -216,31 +256,44 @@ def test_blocklist_load_add_delete_and_duplicate_entry(application, make_widget)
     assert widget.rebuild_button.isEnabled()
     assert not widget.add_button.isEnabled()
     assert not widget.delete_button.isEnabled()
+    assert not widget.apply_button.isEnabled()
+    assert not widget.discard_button.isEnabled()
+    calls_before_drafts = list(control.calls)
 
-    for reason in ("Synthetischer Test", "Aktualisierter Test"):
-        widget.kind_combo.setCurrentIndex(widget.kind_combo.findData("email_domain"))
-        widget.value_input.setText("  example.test  ")
-        widget.reason_input.setText(f" {reason} ")
-        widget.add_button.click()
+    for value, reason in (("  EXAMPLE.test  ", "Synthetischer Test"),
+                          ("example.TEST", "Aktualisierter Test")):
+        _stage_entry(widget, value, f" {reason} ", "email_domain")
         assert not widget.add_button.isEnabled()
-        _flush(application, widget)
         assert widget.entry_list.rowCount() == 2
-        assert control.calls[-1] == ("add", "email_domain", "example.test", reason)
+        assert len(widget._pending_additions) == 1
+        assert all(entry_id < 0 for entry_id in widget._pending_additions)
+        assert control.calls == calls_before_drafts
+        assert widget.entry_list.item(1, 2).text() == reason
+        assert widget.entry_list.item(1, 4).text() == "Neue Sperre · unbestätigt"
         assert not widget.value_input.text()
         assert not widget.reason_input.text()
-        assert "gespeichert" in widget.status.text()
+        assert widget.apply_button.isEnabled()
+        assert not widget.rebuild_button.isEnabled()
 
-    widget.entry_list.selectRow(1)
-    assert widget.delete_button.isEnabled()
-    widget.delete_button.click()
+    widget.apply_button.click()
+    assert not widget.apply_button.isEnabled()
     _flush(application, widget)
-    assert control.calls[-1] == ("delete", 2)
-    assert widget.entry_list.rowCount() == 1
-    assert "gelöscht" in widget.status.text()
+    assert control.calls == calls_before_drafts + [("apply", [
+        {"kind": "email_domain", "value": "example.TEST", "reason": "Aktualisierter Test"},
+    ], [])]
+    assert widget.entry_list.rowCount() == 2
+    assert widget.entry_list.item(1, 4).text() == "Gespeichert"
+    assert not widget._pending_additions
+    assert not widget._pending_deletions
+    assert not widget.apply_button.isEnabled()
+    assert not widget.discard_button.isEnabled()
+    assert widget.rebuild_button.isEnabled()
+    assert "gespeichert" in widget.status.text()
+    assert not any(call[0] == "start" for call in control.calls)
     assert set(control.threads).isdisjoint({threading.get_ident()})
 
 
-def test_offline_and_failed_mutation_preserve_input_and_allow_reload(application, make_widget):
+def test_offline_and_failed_apply_preserve_drafts_and_allow_reload(application, make_widget):
     control = _Control()
     control.failure = "synthetic unavailable"
     widget = make_widget(control)
@@ -253,22 +306,331 @@ def test_offline_and_failed_mutation_preserve_input_and_allow_reload(application
     control.failure = ""
     widget.reload_button.click()
     _flush(application, widget)
-    widget.value_input.setText("second@example.test")
-    widget.reason_input.setText("Testeingabe")
+    _stage_entry(widget, "second@example.test", "Testeingabe")
+    pending = dict(widget._pending_additions)
     control.failure = "synthetic write failure"
-    widget.add_button.click()
+    widget.apply_button.click()
     _flush(application, widget)
-    assert widget.value_input.text() == "second@example.test"
-    assert widget.reason_input.text() == "Testeingabe"
-    assert widget.entry_list.rowCount() == 1
+    assert not widget.value_input.text()
+    assert not widget.reason_input.text()
+    assert widget._pending_additions == pending
+    assert widget.entry_list.rowCount() == 2
+    assert widget.entry_list.item(1, 1).text() == "second@example.test"
+    assert widget.entry_list.item(1, 2).text() == "Testeingabe"
     assert "synthetic write failure" in widget.status.text()
-    assert not widget.add_button.isEnabled()
+    assert not widget.apply_button.isEnabled()
     assert not widget.rebuild_button.isEnabled()
+    assert widget.discard_button.isEnabled()
 
     control.failure = ""
     widget.reload_button.click()
     _flush(application, widget)
-    assert widget.add_button.isEnabled()
+    assert widget._pending_additions == pending
+    assert widget.entry_list.rowCount() == 2
+    assert widget.apply_button.isEnabled()
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert not widget._pending_additions
+    assert widget.entry_list.rowCount() == 2
+    assert widget.rebuild_button.isEnabled()
+
+
+def test_multiple_additions_and_selected_deletions_use_one_batch(application, make_widget):
+    control = _Control()
+    control.entries.extend((_entry(2, value="second@example.test"),
+                            _entry(3, value="retained@example.test")))
+    widget = make_widget(control)
+    _flush(application, widget)
+    initial_calls = list(control.calls)
+    _stage_entry(widget, "new@example.test", "Neue E-Mail")
+    _stage_entry(widget, "new-domain.test", "Neue Domain", "email_domain")
+    _select_rows(widget, 0, 1)
+    widget.delete_button.click()
+    assert widget._pending_deletions == {1, 2}
+    assert widget.entry_list.rowCount() == 5
+    assert all(widget.entry_list.item(row, 4).text() == "Entfernung · unbestätigt"
+               for row in (0, 1))
+    assert all(widget.entry_list.item(row, 1).font().strikeOut() for row in (0, 1))
+    assert "2 neue Sperren" in widget.pending_status.text()
+    assert "2 Entfernungen" in widget.pending_status.text()
+    assert "(4)" in widget.apply_button.text()
+    assert control.calls == initial_calls
+    assert len(control.entries) == 3
+
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert control.calls == initial_calls + [("apply", [
+        {"kind": "email", "value": "new@example.test", "reason": "Neue E-Mail"},
+        {"kind": "email_domain", "value": "new-domain.test", "reason": "Neue Domain"},
+    ], [1, 2])]
+    assert {entry["value"] for entry in control.entries} == {
+        "retained@example.test", "new@example.test", "new-domain.test",
+    }
+    assert widget.entry_list.rowCount() == 3
+    assert all(widget.entry_list.item(row, 4).text() == "Gespeichert" for row in range(3))
+    assert not widget._pending_additions
+    assert not widget._pending_deletions
+    assert widget.rebuild_button.isEnabled()
+
+
+def test_removal_can_be_undone_and_all_drafts_discarded_without_server_calls(
+    application, make_widget
+):
+    control = _Control()
+    widget = make_widget(control)
+    _flush(application, widget)
+    initial_calls = list(control.calls)
+    _stage_entry(widget, "discarded@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    assert widget._pending_deletions == {1}
+    assert widget.delete_button.text() == "Entfernung zurücknehmen"
+    widget.delete_button.click()
+    assert not widget._pending_deletions
+    assert not widget.entry_list.item(0, 1).font().strikeOut()
+    assert widget.entry_list.item(0, 4).text() == "Gespeichert"
+
+    _select_rows(widget, 1)
+    widget.delete_button.click()
+    assert not widget._pending_additions
+    assert widget.entry_list.rowCount() == 1
+    assert not widget.apply_button.isEnabled()
+    _stage_entry(widget, "discarded-again@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    widget.discard_button.click()
+    assert not widget._pending_additions
+    assert not widget._pending_deletions
+    assert widget.entry_list.rowCount() == 1
+    assert widget.entry_list.item(0, 4).text() == "Gespeichert"
+    assert widget.rebuild_button.isEnabled()
+    assert not widget.apply_button.isEnabled()
+    assert not widget.discard_button.isEnabled()
+    assert control.entries == [_entry()]
+    assert control.calls == initial_calls
+
+
+@pytest.mark.parametrize("other_selection", ["saved", "draft"])
+def test_mixed_removal_selection_keeps_existing_deletion_staged(
+    application, make_widget, other_selection
+):
+    control = _Control()
+    if other_selection == "saved":
+        control.entries.append(_entry(2, value="second@example.test"))
+    widget = make_widget(control)
+    _flush(application, widget)
+    initial_calls = list(control.calls)
+    saved_entries = list(control.entries)
+    if other_selection == "draft":
+        _stage_entry(widget, "mixed-draft@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    assert widget._pending_deletions == {1}
+
+    _select_rows(widget, 0, 1)
+    assert widget.delete_button.text() == "Auswahl entfernen"
+    widget.delete_button.click()
+    expected_deletions = {1, 2} if other_selection == "saved" else {1}
+    assert widget._pending_deletions == expected_deletions
+    assert not widget._pending_additions
+    assert widget.entry_list.rowCount() == len(expected_deletions)
+    assert all(widget.entry_list.item(row, 4).text() == "Entfernung · unbestätigt"
+               for row in range(widget.entry_list.rowCount()))
+    assert all(widget.entry_list.item(row, 1).font().strikeOut()
+               for row in range(widget.entry_list.rowCount()))
+    assert control.entries == saved_entries
+    assert control.calls == initial_calls
+
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert control.calls == initial_calls + [("apply", [], sorted(expected_deletions))]
+    assert control.entries == []
+    assert widget.entry_list.rowCount() == 0
+
+
+def test_failed_publication_clears_saved_drafts_and_retries_empty_batch(
+    application, make_widget
+):
+    control = _Control()
+    control.published = False
+    widget = make_widget(control)
+    _flush(application, widget)
+    _stage_entry(widget, "publication@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert [entry["value"] for entry in control.entries] == ["publication@example.test"]
+    assert not widget._pending_additions
+    assert not widget._pending_deletions
+    assert widget.entry_list.item(0, 4).text() == "Gespeichert"
+    assert "gespeichert" in widget.status.text()
+    assert "noch nicht" in widget.status.text()
+    assert widget.apply_button.text() == "Veröffentlichung wiederholen"
+    assert widget.apply_button.isEnabled()
+    assert not widget.discard_button.isEnabled()
+    assert not widget.rebuild_button.isEnabled()
+
+    widget.reload_button.click()
+    _flush(application, widget)
+    assert widget.apply_button.text() == "Veröffentlichung wiederholen"
+    control.published = True
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert [call for call in control.calls if call[0] == "apply"] == [
+        ("apply", [{"kind": "email", "value": "publication@example.test",
+                    "reason": "Testeintrag"}], [1]),
+        ("apply", [], []),
+    ]
+    assert not widget._publication_pending
+    assert not widget.apply_button.isEnabled()
+    assert widget.rebuild_button.isEnabled()
+    assert not any(call[0] == "start" for call in control.calls)
+
+
+def test_fresh_widget_retries_server_publication_with_one_empty_batch(application, make_widget):
+    control = _Control()
+    control.recognition_blocklist_state = Mock(return_value={
+        "entries": tuple(control.entries), "publication_pending": True,
+    })
+    widget = make_widget(control)
+    _flush(application, widget)
+    control.recognition_blocklist_state.assert_called_once_with()
+    assert control.calls == [("job",)]
+    assert widget._publication_pending
+    assert not widget._pending_additions
+    assert not widget._pending_deletions
+    assert widget.entry_list.rowCount() == 1
+    assert widget.apply_button.text() == "Veröffentlichung wiederholen"
+    assert widget.apply_button.isEnabled()
+    assert not widget.discard_button.isEnabled()
+    assert not widget.rebuild_button.isEnabled()
+
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert control.calls == [("job",), ("apply", [], [])]
+    assert control.entries == [_entry()]
+    assert not widget._publication_pending
+    assert not widget.apply_button.isEnabled()
+    assert widget.rebuild_button.isEnabled()
+
+
+def test_reload_clears_resolved_server_publication_flag_and_preserves_drafts(
+    application, make_widget
+):
+    control = _Control()
+    state = {"entries": tuple(control.entries), "publication_pending": True}
+    control.recognition_blocklist_state = Mock(return_value=state)
+    widget = make_widget(control)
+    _flush(application, widget)
+    assert widget._publication_pending
+    _stage_entry(widget, "pending-during-publication@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    pending = dict(widget._pending_additions)
+
+    state["publication_pending"] = False
+    widget.reload_button.click()
+    _flush(application, widget)
+    assert control.recognition_blocklist_state.call_count == 2
+    assert not widget._publication_pending
+    assert widget._pending_additions == pending
+    assert widget._pending_deletions == {1}
+    assert widget.entry_list.rowCount() == 2
+    assert widget.entry_list.item(0, 4).text() == "Entfernung · unbestätigt"
+    assert widget.entry_list.item(1, 4).text() == "Neue Sperre · unbestätigt"
+    assert widget.apply_button.text() == "Änderungen bestätigen (2)"
+    assert widget.apply_button.isEnabled()
+    assert not widget.rebuild_button.isEnabled()
+    assert control.calls == [("job",), ("job",)]
+
+    widget.discard_button.click()
+    assert not widget.apply_button.isEnabled()
+    assert widget.rebuild_button.isEnabled()
+
+
+@pytest.mark.parametrize("unsupported_status", [None, 404, 405, 501])
+def test_older_server_preserves_drafts_without_falling_back_to_individual_writes(
+    application, make_widget, unsupported_status
+):
+    control = _Control()
+    widget = make_widget(control)
+    _flush(application, widget)
+    control.apply_recognition_blocklist_changes = (
+        None if unsupported_status is None else
+        Mock(side_effect=ApiRejectedError(unsupported_status, "synthetic batch unsupported"))
+    )
+    _stage_entry(widget, "old-server@example.test")
+    _select_rows(widget, 0)
+    widget.delete_button.click()
+    pending = dict(widget._pending_additions)
+    initial_calls = list(control.calls)
+    widget.apply_button.click()
+    _flush(application, widget)
+    assert widget._pending_additions == pending
+    assert widget._pending_deletions == {1}
+    assert widget.entry_list.rowCount() == 2
+    assert control.entries == [_entry()]
+    assert control.calls == initial_calls
+    assert widget.discard_button.isEnabled()
+    assert not widget.rebuild_button.isEnabled()
+    if unsupported_status is None:
+        assert "aktualisierten Server und Client" in widget.status.text()
+    else:
+        control.apply_recognition_blocklist_changes.assert_called_once()
+        assert "synthetic batch unsupported" in widget.status.text()
+
+
+def test_rebuild_shows_aggregate_worker_status_and_supports_older_servers(application, make_widget):
+    control = _Control()
+    control.job = _job("running")
+    control.job["document_workers"] = DocumentWorkerStatus(
+        state="running", worker_limit=4, active_workers=2, queued_documents=6,
+        discovered_documents=20, processed_documents=12, reused_documents=8,
+        extracted_documents=4, failed_documents=1,
+    ).to_dict()
+    widget = make_widget(control)
+    _flush(application, widget)
+    assert "Worker aktiv: 2 / 4" in widget.job_status.text()
+    assert "Warteschlange: 6" in widget.job_status.text()
+    assert "Wiederverwendet: 8" in widget.job_status.text()
+    assert "Fehler: 1" in widget.job_status.text()
+    del control.job["document_workers"]
+    widget.poll_rebuild()
+    _flush(application, widget)
+    assert "Worker" not in widget.job_status.text()
+    assert "vollständig neu aufgebaut" in widget.job_status.text()
+
+
+def test_indexserver_shows_live_workers_during_catalog_and_recognition(application, make_window):
+    window = make_window(_Control())
+    workers = DocumentWorkerStatus(
+        state="running", worker_limit=4, active_workers=2, queued_documents=6,
+        discovered_documents=20, processed_documents=12, reused_documents=8,
+        extracted_documents=4, failed_documents=1,
+    ).to_dict()
+    for index_state in ("running", "completed"):
+        payload = {"state": "online", "index": {
+            "state": index_state, "progress": {"phase": "catalog"}},
+            "document_workers": workers,
+        }
+        window._apply_status_details(payload)
+        assert "Dokumentinhalte" in window.content_status_label.text()
+        assert "Worker aktiv: 2 / 4" in window.worker_summary_label.text()
+        assert "Warteschlange: 6" in window.worker_summary_label.text()
+        assert "Verarbeitet: 12" in window.content_detail_label.text()
+        assert "Wiederverwendet: 8" in window.content_detail_label.text()
+        assert "Fehler: 1" in window.content_detail_label.text()
+        assert window.content_progress_bar.maximum() == 0
+    workers.update(state="cancelled", active_workers=0, queued_documents=0)
+    window._apply_status_details(payload)
+    assert "abgebrochen" in window.content_status_label.text()
+    assert "Worker aktiv: 0 / 4" in window.worker_summary_label.text()
+    del payload["document_workers"]
+    window._apply_status_details(payload)
+    assert "keine Dokument-Worker-Statistik" in window.worker_summary_label.text()
+    assert window.worker_output.toPlainText() == ""
+    assert "CPU" in window.resource_profile.toolTip() and "RAM" in window.resource_profile.toolTip()
 
 
 def test_rebuild_start_poll_cancel_and_terminal_error(application, make_widget):
@@ -318,22 +680,25 @@ def test_rejected_blocklist_request_keeps_running_job_cancellable(
     control.job = _job("running")
     widget = make_widget(control)
     _flush(application, widget)
-    control.add_recognition_blocklist_entry = Mock(
+    control.apply_recognition_blocklist_changes = Mock(
         side_effect=ApiRejectedError(
             status,
             "raw_error_payload",
             {"error": {"code": "resource_busy", "message": "synthetic request rejected"}},
         )
     )
-    widget.value_input.setText("synthetic-retry@example.test")
-    widget.add_button.click()
+    _stage_entry(widget, "synthetic-retry@example.test")
+    pending = dict(widget._pending_additions)
+    widget.apply_button.click()
     _flush(application, widget)
     assert "synthetic request rejected" in widget.status.text()
     assert "resource_busy" not in widget.status.text()
-    assert widget.value_input.text() == "synthetic-retry@example.test"
-    assert widget.add_button.isEnabled()
+    assert widget._pending_additions == pending
+    assert widget.entry_list.item(1, 1).text() == "synthetic-retry@example.test"
+    assert widget.apply_button.isEnabled()
     assert widget.cancel_button.isEnabled()
-    assert widget.entry_list.rowCount() == 1
+    assert widget.entry_list.rowCount() == 2
+    control.apply_recognition_blocklist_changes.assert_called_once()
     widget.cancel_button.click()
     _flush(application, widget)
     assert control.calls[-1] == ("cancel", "synthetic-job-1")
@@ -345,16 +710,20 @@ def test_server_or_authorization_errors_disable_mutations(application, make_widg
     control.job = _job("running")
     widget = make_widget(control)
     _flush(application, widget)
-    control.add_recognition_blocklist_entry = Mock(
+    control.apply_recognition_blocklist_changes = Mock(
         side_effect=ApiRejectedError(status, "synthetic server rejection")
     )
-    widget.value_input.setText("synthetic-retry@example.test")
-    widget.add_button.click()
+    _stage_entry(widget, "synthetic-retry@example.test")
+    pending = dict(widget._pending_additions)
+    widget.apply_button.click()
     _flush(application, widget)
     assert "synthetic server rejection" in widget.status.text()
     assert not widget.add_button.isEnabled()
+    assert not widget.apply_button.isEnabled()
     assert not widget.cancel_button.isEnabled()
     assert widget.reload_button.isEnabled()
+    assert widget._pending_additions == pending
+    assert widget.entry_list.rowCount() == 2
 
 
 def test_existing_rebuild_survives_widget_close_and_reopen(application, make_widget):
@@ -447,7 +816,8 @@ def test_small_window_keeps_footer_and_scrolled_actions_accessible(
         assert widget.rect().contains(top_left)
         assert widget.rect().contains(top_left + button.rect().bottomRight())
     assert widget.scroll.horizontalScrollBar().maximum() == 0
-    for button in (widget.add_button, widget.delete_button, widget.rebuild_button, widget.cancel_button):
+    for button in (widget.add_button, widget.delete_button, widget.apply_button,
+                   widget.discard_button, widget.rebuild_button, widget.cancel_button):
         widget.scroll.ensureWidgetVisible(button)
         application.processEvents()
         top_left = button.mapTo(widget.scroll.viewport(), QPoint())
@@ -547,6 +917,49 @@ def test_switching_tabs_preserves_form_selection_and_refreshes_rebuild(
     assert "abgeschlossen" in page.job_status.text()
     assert page.rebuild_button.isEnabled()
     assert not page.cancel_button.isEnabled()
+
+
+def test_pending_changes_survive_reload_tab_switch_and_window_reopen(application, make_window):
+    control = _Control()
+    window = make_window(control)
+    window.show()
+    page = window.recognition_admin_page
+    window.tabs.setCurrentWidget(page)
+    _flush(application, page)
+    _stage_entry(page, "persistent-draft@example.test", "Noch nicht bestätigt")
+    _select_rows(page, 0)
+    page.delete_button.click()
+    pending = dict(page._pending_additions)
+
+    def assert_preserved():
+        assert page._pending_additions == pending
+        assert page._pending_deletions == {1}
+        assert page.entry_list.rowCount() == 3
+        assert page.entry_list.item(0, 4).text() == "Entfernung · unbestätigt"
+        assert page.entry_list.item(2, 1).text() == "persistent-draft@example.test"
+        assert page.entry_list.item(2, 4).text() == "Neue Sperre · unbestätigt"
+        assert page._selected_ids() == {1}
+        assert page.apply_button.isEnabled()
+        assert not page.rebuild_button.isEnabled()
+        assert not any(call[0] in {"apply", "start"} for call in control.calls)
+
+    control.entries.append(_entry(2, value="external-update@example.test"))
+    page.reload_button.click()
+    _flush(application, page)
+    assert_preserved()
+    window.tabs.setCurrentIndex(1)
+    application.processEvents()
+    assert not page._timer.isActive()
+    window.tabs.setCurrentWidget(page)
+    _flush(application, page)
+    assert_preserved()
+    window.hide()
+    application.processEvents()
+    assert not page._timer.isActive()
+    window.show()
+    _flush(application, page)
+    assert window.recognition_admin_page is page
+    assert_preserved()
 
 
 def test_hiding_indexserver_pauses_polling_and_reopening_refreshes_same_page(
