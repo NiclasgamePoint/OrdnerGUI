@@ -175,6 +175,7 @@ def test_tray_restores_v041_header_tabs_cards_and_status_badge(
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
         "Übersicht",
         "Indexeinstellungen",
+        "Kundenerkennung",
         "Aktivität",
     ]
     overview = window.tabs.widget(0)

@@ -1,0 +1,880 @@
+{
+  "schema_version": 1,
+  "provenance": "Entirely invented synthetic examples; no customer files or database were read. Structured format labels evaluate recognition only, not parser or OCR accuracy. Customer identities are disjoint across labeled splits. These authored regression cases are not an independent human-annotated acceptance holdout.",
+  "cases": [
+    {
+      "id": "phone-format-0",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "text",
+      "split": "development",
+      "content": "Auftraggeber: Ada Beispiel\nTelefon: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "phone-format-1",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "text",
+      "split": "development",
+      "content": "Auftraggeber: Ada Beispiel\nTelefon: +49 30 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "phone-format-2",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "text",
+      "split": "development",
+      "content": "Auftraggeber: Ada Beispiel\nTelefon: 0049 30 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "phone-format-3",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "text",
+      "split": "development",
+      "content": "Auftraggeber: Ada Beispiel\nTelefon: +49 (0)30 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "international-uk",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "pdf-text",
+      "split": "development",
+      "content": "Absender: Ada Beispiel\nPhone: +44 20 7946 0958",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+442079460958"
+        }
+      ]
+    },
+    {
+      "id": "international-us",
+      "customer_id": "evaluation-private",
+      "customer_name": "Toni Test",
+      "group": "private",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Empfänger: Toni Test\nTelefon: +1 202-555-0123",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+12025550123"
+        }
+      ]
+    },
+    {
+      "id": "phone-extension",
+      "customer_id": "evaluation-private",
+      "customer_name": "Toni Test",
+      "group": "private",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Toni Test\nTel: +49 30 12345678 ext. 42",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678;ext=42"
+        }
+      ]
+    },
+    {
+      "id": "email-plus",
+      "customer_id": "development-private",
+      "customer_name": "Ada Beispiel",
+      "group": "private",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Ada Beispiel\nMail: Ada+projekt@EXAMPLE.ORG",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "Ada+projekt@example.org"
+        }
+      ]
+    },
+    {
+      "id": "two-mailboxes",
+      "customer_id": "evaluation-private",
+      "customer_name": "Toni Test",
+      "group": "private",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Toni Test\nMail: a@example.org\nMail: b@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "a@example.org"
+        },
+        {
+          "field_name": "email",
+          "value": "b@example.org"
+        }
+      ]
+    },
+    {
+      "id": "numeric-negative-0",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nDatum: 09.09.2026",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-1",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nDatum: 2026-09-09",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-2",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nIBAN: DE89 3704 0044 0532 0130 00",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-3",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nRechnungsnummer: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-4",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "spreadsheet",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nFlurstück: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-5",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "spreadsheet",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nMenge: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-6",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "spreadsheet",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nPreis: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-7",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nSteuernummer: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-8",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nFax: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-9",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nTelefon: 12",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-10",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nTelefon: 030\n12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-11",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "spreadsheet",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\n030  12345678  12,00",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-12",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nBetrag: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-13",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\n030 12345678 EUR",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-14",
+      "customer_id": "development-numeric",
+      "customer_name": "Nora Zahlen",
+      "group": "numeric",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Nora Zahlen\nKundennummer: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "numeric-negative-15",
+      "customer_id": "evaluation-numeric",
+      "customer_name": "Paul Rechenfall",
+      "group": "numeric",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Paul Rechenfall\nPLZ: 10115",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-0",
+      "customer_id": "development-invalid-email",
+      "customer_name": "Elif Postprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Elif Postprobe\nMail: a..b@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-1",
+      "customer_id": "evaluation-invalid-email",
+      "customer_name": "Theo Mailprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Theo Mailprobe\nMail: .broken@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-2",
+      "customer_id": "development-invalid-email",
+      "customer_name": "Elif Postprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Elif Postprobe\nMail: name@example..org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-3",
+      "customer_id": "evaluation-invalid-email",
+      "customer_name": "Theo Mailprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Theo Mailprobe\nMail: name@-example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-4",
+      "customer_id": "development-invalid-email",
+      "customer_name": "Elif Postprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Elif Postprobe\nMail: name @example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "email-negative-5",
+      "customer_id": "evaluation-invalid-email",
+      "customer_name": "Theo Mailprobe",
+      "group": "invalid-email",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Theo Mailprobe\nMail: name@example",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "party-excluded-Lieferant",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Lieferant: Andere Partei\nMail: other@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "party-excluded-Auftragnehmer",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Auftragnehmer: Andere Partei\nMail: other@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "party-excluded-Behörde",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Behörde: Andere Partei\nMail: other@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "party-excluded-Baustelle",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Baustelle: Andere Partei\nMail: other@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "party-excluded-Projektadresse",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Projektadresse: Andere Partei\nMail: other@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "own-sender",
+      "customer_id": "development-multi-party",
+      "customer_name": "Lina Parteienfall",
+      "group": "multi-party",
+      "format": "text",
+      "split": "development",
+      "content": "Absender: Eigenes Planungsbüro\nMail: own@example.org\nEmpfänger: Lina Parteienfall\nMail: ada@example.org",
+      "blocks": [],
+      "own_identities": [
+        "Eigenes Planungsbüro"
+      ],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "ada@example.org"
+        }
+      ]
+    },
+    {
+      "id": "customer-sender",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Absender: Robin Rollenprobe\nMail: ada@example.org\nEmpfänger: Eigenes Planungsbüro\nMail: own@example.org",
+      "blocks": [],
+      "own_identities": [
+        "Eigenes Planungsbüro"
+      ],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "ada@example.org"
+        }
+      ]
+    },
+    {
+      "id": "unknown-sender",
+      "customer_id": "development-multi-party",
+      "customer_name": "Lina Parteienfall",
+      "group": "multi-party",
+      "format": "text",
+      "split": "development",
+      "content": "Absender: Unbekannte Partei\nMail: other@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "wrong-named-customer",
+      "customer_id": "evaluation-multi-party",
+      "customer_name": "Robin Rollenprobe",
+      "group": "multi-party",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Auftraggeber: Robin Rollenprobemann\nMail: wrong@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "atomic-address",
+      "customer_id": "development-address",
+      "customer_name": "Kim Adressprobe",
+      "group": "address",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Kim Adressprobe\nMusterstraße 12\n10115 Berlin",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "address",
+          "value": {
+            "street": "Musterstraße 12",
+            "postal_code": "10115",
+            "city": "Berlin"
+          }
+        }
+      ]
+    },
+    {
+      "id": "project-address",
+      "customer_id": "evaluation-address",
+      "customer_name": "Noa Ortsprobe",
+      "group": "address",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Noa Ortsprobe\nMusterstraße 12\n10115 Berlin\n\nBaustelle: Projektort\nBaustraße 8\n20095 Hamburg",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "address",
+          "value": {
+            "street": "Musterstraße 12",
+            "postal_code": "10115",
+            "city": "Berlin"
+          }
+        }
+      ]
+    },
+    {
+      "id": "split-address",
+      "customer_id": "development-address",
+      "customer_name": "Kim Adressprobe",
+      "group": "address",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Kim Adressprobe\nMusterstraße 12\n\n10115 Berlin",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "foreign-address-review",
+      "customer_id": "evaluation-address",
+      "customer_name": "Noa Ortsprobe",
+      "group": "address",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Noa Ortsprobe\nBeispielgasse 12\n8000 Zürich",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "postbox-review",
+      "customer_id": "evaluation-address",
+      "customer_name": "Noa Ortsprobe",
+      "group": "address",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Noa Ortsprobe\nPostfach 12\n10115 Berlin",
+      "blocks": [],
+      "own_identities": [],
+      "expected": []
+    },
+    {
+      "id": "named-contact",
+      "customer_id": "development-contacts",
+      "customer_name": "Alex Kontaktfall",
+      "group": "contacts",
+      "format": "text",
+      "split": "development",
+      "content": "Kunde: Alex Kontaktfall\nAnsprechpartner: Mira Muster (Planung)\nMail: mira@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "contact",
+          "value": {
+            "name": "Mira Muster",
+            "role": "Planung",
+            "email": "mira@example.org",
+            "phone": "+493012345678"
+          }
+        }
+      ]
+    },
+    {
+      "id": "multiple-contacts",
+      "customer_id": "evaluation-contacts",
+      "customer_name": "Jona Kontaktprobe",
+      "group": "contacts",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Jona Kontaktprobe\nAnsprechpartner: Mira Muster (Planung)\nMail: mira@example.org\nTel: 030 12345678\nAnsprechpartner: Toni Muster\nRolle: Abrechnung\nMail: toni@example.org\nTel: 030 12345678",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "contact",
+          "value": {
+            "name": "Mira Muster",
+            "role": "Planung",
+            "email": "mira@example.org",
+            "phone": "+493012345678"
+          }
+        },
+        {
+          "field_name": "contact",
+          "value": {
+            "name": "Toni Muster",
+            "role": "Abrechnung",
+            "email": "toni@example.org",
+            "phone": "+493012345678"
+          }
+        }
+      ]
+    },
+    {
+      "id": "company-given-name",
+      "customer_id": "development-company",
+      "customer_name": "Ada Beispiel GmbH",
+      "group": "company",
+      "format": "text",
+      "split": "development",
+      "content": "Auftraggeber: Ada Beispiel GmbH\nMail: office@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "company",
+          "value": "Ada Beispiel GmbH"
+        },
+        {
+          "field_name": "email",
+          "value": "office@example.org"
+        }
+      ]
+    },
+    {
+      "id": "company-legal-form",
+      "customer_id": "evaluation-company",
+      "customer_name": "Mira Muster UG (haftungsbeschränkt)",
+      "group": "company",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Absender: Mira Muster UG (haftungsbeschränkt)\nMail: ug@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "company",
+          "value": "Mira Muster UG (haftungsbeschränkt)"
+        },
+        {
+          "field_name": "email",
+          "value": "ug@example.org"
+        }
+      ]
+    },
+    {
+      "id": "ocr-structured",
+      "customer_id": "evaluation-structured",
+      "customer_name": "Sascha Blockprobe",
+      "group": "structured",
+      "format": "pdf-ocr",
+      "split": "evaluation",
+      "content": "",
+      "blocks": [
+        {
+          "text": "Kunde: Sascha Blockprobe\nE-Mail: scan@example.org",
+          "page": 3,
+          "block_id": "ocr-3-1",
+          "bbox": [
+            10,
+            20,
+            300,
+            80
+          ],
+          "extraction_method": "ocr",
+          "confidence": 0.96
+        }
+      ],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "scan@example.org"
+        }
+      ]
+    },
+    {
+      "id": "docx-header",
+      "customer_id": "development-structured",
+      "customer_name": "Sam Strukturfall",
+      "group": "structured",
+      "format": "docx",
+      "split": "development",
+      "content": "",
+      "blocks": [
+        {
+          "text": "Kunde: Sam Strukturfall",
+          "section": "header1",
+          "order": 0
+        },
+        {
+          "text": "Tel: 030 12345678",
+          "section": "header1",
+          "order": 1
+        }
+      ],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "xlsx-contacts",
+      "customer_id": "evaluation-structured",
+      "customer_name": "Sascha Blockprobe",
+      "group": "structured",
+      "format": "xlsx",
+      "split": "evaluation",
+      "content": "",
+      "blocks": [
+        {
+          "text": "Kunde",
+          "cell": "A1",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        },
+        {
+          "text": "Telefon",
+          "cell": "B1",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        },
+        {
+          "text": "E-Mail",
+          "cell": "C1",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        },
+        {
+          "text": "Sascha Blockprobe",
+          "cell": "A2",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        },
+        {
+          "text": "030 12345678",
+          "cell": "B2",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        },
+        {
+          "text": "sheet@example.org",
+          "cell": "C2",
+          "sheet": "Kontakte",
+          "kind": "table_cell"
+        }
+      ],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        },
+        {
+          "field_name": "email",
+          "value": "sheet@example.org"
+        }
+      ]
+    },
+    {
+      "id": "xls-contact-row",
+      "customer_id": "development-structured",
+      "customer_name": "Sam Strukturfall",
+      "group": "structured",
+      "format": "xls",
+      "split": "development",
+      "content": "",
+      "blocks": [
+        {
+          "text": "Kunde: Sam Strukturfall\nTelefon: 030 12345678",
+          "sheet": "Kontakte",
+          "cell": "A5:B5",
+          "kind": "table_row"
+        }
+      ],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "phone",
+          "value": "+493012345678"
+        }
+      ]
+    },
+    {
+      "id": "repeated-source",
+      "customer_id": "evaluation-copies",
+      "customer_name": "Jule Kopierprobe",
+      "group": "copies",
+      "format": "text",
+      "split": "evaluation",
+      "content": "Kunde: Jule Kopierprobe\nMail: repeated@example.org\n\nKunde: Jule Kopierprobe\nMail: repeated@example.org",
+      "blocks": [],
+      "own_identities": [],
+      "expected": [
+        {
+          "field_name": "email",
+          "value": "repeated@example.org"
+        }
+      ]
+    }
+  ]
+}

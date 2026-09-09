@@ -1,5 +1,12 @@
 # Desktop-Client
 
+Die serverweite Sperrliste und den vollständigen Neuaufbau findest du unter
+**Indexserver → Tab „Kundenerkennung“**. Beide Funktionen arbeiten auf dem
+Server. Eingaben bleiben beim Tabwechsel erhalten; Statusabfragen pausieren in
+ausgeblendeten Tabs. Der Neuaufbau läuft nach dem Schließen des Fensters weiter;
+Status und Abbruch sind beim erneuten Öffnen verfügbar. Näheres beschreibt die
+[Verwaltung der Kundenerkennung](kundendatenerkennung.md#serverweite-sperrliste-und-vollständiger-neuaufbau).
+
 ## Verantwortung
 
 Der Desktop-Client zeigt und bearbeitet Kunden, durchsucht Kunden und Ordner im
@@ -12,6 +19,10 @@ Client-Application-Ports mit der getrennten 0.4.2-Architektur verbunden. Eine
 detaillierte Zuordnung der wiederhergestellten Ansichten und der noch
 ausstehenden neuen Bedienoberflächen steht unter
 [Wiederherstellung des v0.4.1-GUI-Designs](gui-design-restoration.md).
+
+Im Kundeneditor lässt sich die Kundenart über das gesamte Dropdown-Feld „Art“
+auswählen: Unternehmen, Privatperson oder Organisation. Abweichende Werte aus
+vorhandenen Kundendaten werden zusätzlich angeboten und beim Speichern erhalten.
 
 ## Lokaler Zustand
 
@@ -218,3 +229,9 @@ ausschließlich auf dem Server.
 Der nachträgliche Design-Rückbau ersetzt keine dieser Funktionen. Er stellt
 die v0.4.1-Interaktion wieder her und führt die neuen 0.4.2-Funktionen dahinter
 über Ports, Gateways und Presentermodelle aus.
+
+Die Kundendatenprüfung bündelt gleiche Informationen mit ihren Belegen, zeigt Konflikte und Teilabdeckung und kann einzelne Kunden serverseitig erneut prüfen. Bedienung, API und Betrieb sind in [Kundendatenerkennung](kundendatenerkennung.md) beschrieben.
+
+Die Vorschlagsprüfung passt Karten und Texte an die Dialogbreite an. Belege sind zunächst eingeklappt; Annehmen und Ablehnen stehen vor den Fundstellen. Quellen zeigen einen gekürzten Dateinamen, den unveränderten vollständigen Pfad im Tooltip und die Fundstelle im aufgeklappten Bereich. Der Dialog passt beim Öffnen auf den Bildschirm und lässt sich vergrößern.
+
+[Vorschau der Kundenprüfung mit ausschließlich erfundenen Testdaten](assets/customer-review-synthetic.png).

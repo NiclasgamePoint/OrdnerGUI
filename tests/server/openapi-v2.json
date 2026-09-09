@@ -432,6 +432,19 @@
             "title": "Email",
             "type": "string"
           },
+          "id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
           "name": {
             "default": "",
             "title": "Name",
@@ -699,6 +712,162 @@
         "title": "CustomerProjectModel",
         "type": "object"
       },
+      "CustomerRecognitionJobModel": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "finished_at": {
+            "default": "",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "reassess",
+              "extract"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "cancelled",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "mode",
+          "state",
+          "created_at"
+        ],
+        "title": "CustomerRecognitionJobModel",
+        "type": "object"
+      },
+      "CustomerRecognitionJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/CustomerRecognitionJobModel"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "title": "CustomerRecognitionJobResponse",
+        "type": "object"
+      },
+      "CustomerRecognitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "reassess",
+            "enum": [
+              "reassess",
+              "extract"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "CustomerRecognitionRequest",
+        "type": "object"
+      },
+      "CustomerRecognitionStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_version": {
+            "default": "",
+            "title": "Catalog Version",
+            "type": "string"
+          },
+          "counts": {
+            "additionalProperties": true,
+            "title": "Counts",
+            "type": "object"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "integer"
+          },
+          "field_provenance": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Field Provenance",
+            "type": "array"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerRecognitionJobModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_run_at": {
+            "default": "",
+            "title": "Last Run At",
+            "type": "string"
+          },
+          "migration_conflicts": {
+            "default": 0,
+            "title": "Migration Conflicts",
+            "type": "integer"
+          },
+          "pipeline_version": {
+            "default": "",
+            "title": "Pipeline Version",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id",
+          "state",
+          "reason",
+          "summary"
+        ],
+        "title": "CustomerRecognitionStatusResponse",
+        "type": "object"
+      },
       "CustomerResponse": {
         "additionalProperties": false,
         "properties": {
@@ -737,6 +906,19 @@
             "title": "Customer Id",
             "type": "integer"
           },
+          "evidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "evidence_count": {
+            "default": 1,
+            "title": "Evidence Count",
+            "type": "integer"
+          },
           "excerpt": {
             "title": "Excerpt",
             "type": "string"
@@ -752,6 +934,43 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "is_conflict": {
+            "default": false,
+            "title": "Is Conflict",
+            "type": "boolean"
+          },
+          "normalized_value": {
+            "default": "",
+            "title": "Normalized Value",
+            "type": "string"
+          },
+          "party_role": {
+            "default": "unknown",
+            "title": "Party Role",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "quality": {
+            "default": "legacy",
+            "enum": [
+              "strong",
+              "review",
+              "legacy"
+            ],
+            "title": "Quality",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
           },
           "resolved_at": {
             "title": "Resolved At",
@@ -777,7 +996,8 @@
             "default": "field",
             "enum": [
               "field",
-              "contact"
+              "contact",
+              "address"
             ],
             "title": "Suggestion Type",
             "type": "string"
@@ -807,6 +1027,16 @@
       "CustomerSuggestionsResponse": {
         "additionalProperties": false,
         "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "recognition": {
+            "additionalProperties": true,
+            "title": "Recognition",
+            "type": "object"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -817,6 +1047,11 @@
             },
             "title": "Suggestions",
             "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
@@ -1163,6 +1398,55 @@
             "title": "Excluded Folders",
             "type": "string"
           },
+          "extraction_memory_mb": {
+            "default": 768,
+            "maximum": 2048.0,
+            "minimum": 128.0,
+            "title": "Extraction Memory Mb",
+            "type": "integer"
+          },
+          "extraction_retention_days": {
+            "default": 30,
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Extraction Retention Days",
+            "type": "integer"
+          },
+          "extraction_retry_attempts": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Extraction Retry Attempts",
+            "type": "integer"
+          },
+          "extraction_retry_delay_seconds": {
+            "default": 300,
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Extraction Retry Delay Seconds",
+            "type": "integer"
+          },
+          "extraction_store_max_mb": {
+            "default": 1024,
+            "maximum": 102400.0,
+            "minimum": 16.0,
+            "title": "Extraction Store Max Mb",
+            "type": "integer"
+          },
+          "extraction_timeout_seconds": {
+            "default": 90,
+            "maximum": 900.0,
+            "minimum": 1.0,
+            "title": "Extraction Timeout Seconds",
+            "type": "integer"
+          },
+          "image_max_pixels": {
+            "default": 25000000,
+            "maximum": 100000000.0,
+            "minimum": 1000000.0,
+            "title": "Image Max Pixels",
+            "type": "integer"
+          },
           "interval_seconds": {
             "maximum": 172800.0,
             "minimum": 900.0,
@@ -1213,6 +1497,13 @@
             "title": "Ocr Timeout Seconds",
             "type": "integer"
           },
+          "pdf_max_pages": {
+            "default": 200,
+            "maximum": 2000.0,
+            "minimum": 1.0,
+            "title": "Pdf Max Pages",
+            "type": "integer"
+          },
           "pdf_text_timeout_seconds": {
             "minimum": 1.0,
             "title": "Pdf Text Timeout Seconds",
@@ -1226,6 +1517,23 @@
             "minimum": 0.0,
             "title": "Priority Documents Per Project",
             "type": "integer"
+          },
+          "recognition_documents_per_project_max": {
+            "default": 500,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Recognition Documents Per Project Max",
+            "type": "integer"
+          },
+          "recognition_own_names": {
+            "default": "",
+            "title": "Recognition Own Names",
+            "type": "string"
+          },
+          "recognition_pipeline_enabled": {
+            "default": true,
+            "title": "Recognition Pipeline Enabled",
+            "type": "boolean"
           },
           "resource_profile": {
             "enum": [
@@ -1318,6 +1626,97 @@
               }
             ],
             "title": "Excluded Folders"
+          },
+          "extraction_memory_mb": {
+            "anyOf": [
+              {
+                "maximum": 2048.0,
+                "minimum": 128.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Memory Mb"
+          },
+          "extraction_retention_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Retention Days"
+          },
+          "extraction_retry_attempts": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Retry Attempts"
+          },
+          "extraction_retry_delay_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Retry Delay Seconds"
+          },
+          "extraction_store_max_mb": {
+            "anyOf": [
+              {
+                "maximum": 102400.0,
+                "minimum": 16.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Store Max Mb"
+          },
+          "extraction_timeout_seconds": {
+            "anyOf": [
+              {
+                "maximum": 900.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Timeout Seconds"
+          },
+          "image_max_pixels": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 1000000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Max Pixels"
           },
           "interval_seconds": {
             "anyOf": [
@@ -1439,6 +1838,19 @@
             ],
             "title": "Ocr Timeout Seconds"
           },
+          "pdf_max_pages": {
+            "anyOf": [
+              {
+                "maximum": 2000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Max Pages"
+          },
           "pdf_text_timeout_seconds": {
             "anyOf": [
               {
@@ -1473,6 +1885,41 @@
               }
             ],
             "title": "Priority Documents Per Project"
+          },
+          "recognition_documents_per_project_max": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognition Documents Per Project Max"
+          },
+          "recognition_own_names": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognition Own Names"
+          },
+          "recognition_pipeline_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognition Pipeline Enabled"
           },
           "resource_profile": {
             "anyOf": [
@@ -1822,6 +2269,119 @@
         "title": "MutationEnvelopeRequest",
         "type": "object"
       },
+      "RecognitionBlocklistEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "email",
+              "phone",
+              "email_domain",
+              "contact_name",
+              "company"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "normalized_value": {
+            "title": "Normalized Value",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value",
+          "id",
+          "normalized_value",
+          "created_at"
+        ],
+        "title": "RecognitionBlocklistEntry",
+        "type": "object"
+      },
+      "RecognitionBlocklistMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/RecognitionBlocklistEntry"
+          }
+        },
+        "required": [
+          "entry"
+        ],
+        "title": "RecognitionBlocklistMutationResponse",
+        "type": "object"
+      },
+      "RecognitionBlocklistRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "email",
+              "phone",
+              "email_domain",
+              "contact_name",
+              "company"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value"
+        ],
+        "title": "RecognitionBlocklistRequest",
+        "type": "object"
+      },
+      "RecognitionBlocklistResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RecognitionBlocklistEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "RecognitionBlocklistResponse",
+        "type": "object"
+      },
       "RecognitionCaseModel": {
         "additionalProperties": false,
         "properties": {
@@ -2081,6 +2641,74 @@
           "confidence"
         ],
         "title": "RecognitionEvidenceModel",
+        "type": "object"
+      },
+      "RecognitionRebuildJobModel": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "null"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "finished_at": {
+            "default": "",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "const": "rebuild",
+            "default": "rebuild",
+            "title": "Mode",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "cancelled",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "created_at"
+        ],
+        "title": "RecognitionRebuildJobModel",
+        "type": "object"
+      },
+      "RecognitionRebuildResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecognitionRebuildJobModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RecognitionRebuildResponse",
         "type": "object"
       },
       "RecognitionRunModel": {
@@ -2460,6 +3088,19 @@
               }
             ],
             "title": "Idempotency Key"
+          },
+          "reason": {
+            "default": "",
+            "enum": [
+              "",
+              "not_a_value",
+              "wrong_customer",
+              "outdated",
+              "already_present",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -3706,6 +4347,260 @@
         ]
       }
     },
+    "/v2/admin/recognition/blocklist": {
+      "get": {
+        "operationId": "recognition_blocklist_v2_admin_recognition_blocklist_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionBlocklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Recognition Blocklist",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      },
+      "post": {
+        "operationId": "add_recognition_blocklist_v2_admin_recognition_blocklist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecognitionBlocklistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionBlocklistMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Recognition Blocklist",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      }
+    },
+    "/v2/admin/recognition/blocklist/{entry_id}": {
+      "delete": {
+        "operationId": "delete_recognition_blocklist_v2_admin_recognition_blocklist__entry_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Delete Recognition Blocklist V2 Admin Recognition Blocklist  Entry Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Recognition Blocklist",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      }
+    },
     "/v2/admin/recognition/cases/{signature}/decision": {
       "post": {
         "operationId": "decide_recognition_case_v2_admin_recognition_cases__signature__decision_post",
@@ -3814,6 +4709,246 @@
           }
         ],
         "summary": "Decide Recognition Case",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      }
+    },
+    "/v2/admin/recognition/rebuild": {
+      "get": {
+        "operationId": "recognition_rebuild_status_v2_admin_recognition_rebuild_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Recognition Rebuild Status",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      },
+      "post": {
+        "operationId": "start_recognition_rebuild_v2_admin_recognition_rebuild_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Recognition Rebuild",
+        "tags": [
+          "admin",
+          "recognition"
+        ]
+      }
+    },
+    "/v2/admin/recognition/rebuild/{job_id}": {
+      "delete": {
+        "operationId": "cancel_recognition_rebuild_v2_admin_recognition_rebuild__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecognitionRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Recognition Rebuild",
         "tags": [
           "admin",
           "recognition"
@@ -5904,6 +7039,286 @@
         ]
       }
     },
+    "/v2/customers/{customer_id}/recognition": {
+      "post": {
+        "operationId": "start_customer_recognition_v2_customers__customer_id__recognition_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerRecognitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerRecognitionJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Customer Recognition",
+        "tags": [
+          "recognition"
+        ]
+      }
+    },
+    "/v2/customers/{customer_id}/recognition-status": {
+      "get": {
+        "operationId": "customer_recognition_status_v2_customers__customer_id__recognition_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerRecognitionStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Customer Recognition Status",
+        "tags": [
+          "recognition"
+        ]
+      }
+    },
+    "/v2/customers/{customer_id}/recognition/{job_id}": {
+      "delete": {
+        "operationId": "cancel_customer_recognition_v2_customers__customer_id__recognition__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerRecognitionJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client authentication required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent or state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Customer Recognition",
+        "tags": [
+          "recognition"
+        ]
+      }
+    },
     "/v2/customers/{customer_id}/suggestions": {
       "get": {
         "operationId": "customer_suggestions_v2_customers__customer_id__suggestions_get",
@@ -5931,6 +7346,39 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_groups",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Groups",
+              "type": "boolean"
             }
           }
         ],

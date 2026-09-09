@@ -5,11 +5,22 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from papagui_server.adapters.candidate_schema import initialize_candidate_schema
+
 from papagui_server.domain.source_paths import coerce_source_path, source_uri
 
 
-def initialize_customer_schema(connection: sqlite3.Connection) -> None:
+def initialize_customer_schema(connection: sqlite3.Connection, *, force: bool = False) -> None:
     """Create the current schema inside a recoverable explicit transaction."""
+    # Every document result opens a short UoW. Do not rescan legacy customers,
+    # paths and provenance for every read or evidence insertion after migration.
+    metadata_exists = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='candidate_schema_metadata'"
+    ).fetchone()
+    if not force and metadata_exists and connection.execute(
+        "SELECT 1 FROM candidate_schema_metadata WHERE key='storage_layout_version' AND value='4'"
+    ).fetchone():
+        return
     try:
         connection.executescript(
             """
@@ -188,6 +199,7 @@ def initialize_customer_schema(connection: sqlite3.Connection) -> None:
         _migrate_recognition_run(connection)
         _normalize_legacy_paths(connection)
         _migrate_legacy_suggestions(connection)
+        initialize_candidate_schema(connection, _ensure_columns)
         # Keep the schema upgrade inside the explicit transaction opened above.
         # ``sqlite3.Connection.executescript`` would implicitly commit pending
         # statements before running a second script.
@@ -208,6 +220,9 @@ def initialize_customer_schema(connection: sqlite3.Connection) -> None:
             "ON api_idempotency(created_at)",
         ):
             connection.execute(statement)
+        connection.execute(
+            "INSERT OR REPLACE INTO candidate_schema_metadata VALUES ('storage_layout_version','4')"
+        )
         connection.commit()
     except Exception:
         connection.rollback()

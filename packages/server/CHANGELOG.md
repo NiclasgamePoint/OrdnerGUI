@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Die serverweite Sperrliste lässt sich während laufender Index- und
+  Neuaufbauaufträge bearbeiten. Neue Sperren gelten auch für anschließend
+  gespeicherte Vorschläge desselben Laufs.
+
+- Datumsangaben mit PDF-/OCR-Abständen werden als Telefonnummern ausgeschlossen;
+  Kontaktvorschläge benötigen plausible Namen. Bereits migrierte offene
+  Altvorschläge werden ebenfalls geprüft, historische Entscheidungen bleiben erhalten.
+- Serverweite Sperrliste für Kontaktwerte und vollständiger, abbrechbarer
+  Neuaufbau einschließlich erneuter Dokumentextraktion über authentifizierte API.
+
 - Separate Adminpasswörter und flüchtige Adminsitzungen entfernt. Sämtliche
   Servereinstellungen und Wartungsaktionen verwenden nur noch den Client-Token.
 
@@ -25,3 +35,9 @@
 
 Historische gemeinsame Änderungen bis einschließlich 0.4.1 stehen im
 [Repository-Changelog](../../CHANGELOG.md).
+
+### Kundendatenerkennung
+
+- Strukturierte Office/PDF/OCR-Auslesung mit privatem Cache, getrennten Ressourcenbudgets und nachvollziehbarer Teilabdeckung.
+- Normalisierte Kandidaten, Parteien, Adress-/Kontaktgruppen, Entscheidungen und Herkunft; Kunden-Schema 3.
+- Koordinierte Kundenjobs und additive Review-/Status-API.

@@ -78,7 +78,7 @@ def test_folder_and_document_recognition_are_safe_and_idempotent(tmp_path: Path)
     assert second_result["suggestions"] == 0
 
 
-def test_recognition_ignores_document_values_already_in_master_data(tmp_path: Path) -> None:
+def test_recognition_exposes_conflicting_values_without_changing_master_data(tmp_path: Path) -> None:
     source = tmp_path / "source"
     project = source / "Service" / "2026" / "Firma GmbH, Berlin"
     project.mkdir(parents=True)
@@ -109,7 +109,14 @@ def test_recognition_ignores_document_values_already_in_master_data(tmp_path: Pa
     result = container.recognition.synchronize(
         source, source_id="primary", minimum_year=2016
     )
-    assert result["suggestions"] == 0
+    assert result["suggestions"] == 2
+    with factory() as work:
+        current = work.customers.list()[0]
+        assert current["email"] == "known@example.org"
+        assert current["phone"] == "030 999999"
+        suggestions = work.suggestions.list_for_customer(current["id"], status="pending")
+        assert {value["field_name"] for value in suggestions} == {"email", "phone"}
+        assert all(value["is_conflict"] for value in suggestions)
 
 
 def test_recognition_helpers_handle_invalid_inputs(tmp_path: Path, monkeypatch) -> None:

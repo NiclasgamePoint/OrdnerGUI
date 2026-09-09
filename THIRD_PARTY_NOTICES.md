@@ -25,3 +25,7 @@ notices belonging to the selected native builds.
 
 Python dependencies retain their respective upstream licenses. A complete,
 version-specific SBOM and license report is required before any public release.
+
+## Local recognition libraries
+
+The server additionally uses phonenumbers, email-validator, python-docx, openpyxl, xlrd, pdfplumber and Pillow. Exact runtime and transitive versions are pinned in `packages/server/requirements-lock.txt`; package metadata retains the upstream license notices. Tesseract and its German language data are installed by the server Dockerfile. Test-only reportlab and xlwt generate synthetic format fixtures and are not runtime server dependencies. No document model weights or external model service are bundled.

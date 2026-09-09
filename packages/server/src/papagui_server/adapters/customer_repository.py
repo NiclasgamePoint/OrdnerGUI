@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from papagui_server.adapters.customer_contacts import replace_contacts
+from papagui_server.adapters.candidate_schema import record_provenance
+
 from collections.abc import Iterable
 import sqlite3
 from typing import Any
@@ -58,6 +61,12 @@ class SqliteCustomerRepository:
         ).fetchone()
         return self.get(int(row[0])) if row is not None else None
 
+    def field_provenance(self, customer_id: int) -> list[dict]:
+        return [dict(row) for row in self._connection.execute(
+            "SELECT field_name,target_id,origin,candidate_id,updated_at FROM customer_field_provenance WHERE customer_id=?",
+            (customer_id,),
+        ).fetchall()]
+
     def create(self, customer: dict[str, Any]) -> dict[str, Any]:
         values = self._normalized_customer(customer)
         folder_path = str(values.get("folder_path", "")).strip()
@@ -77,6 +86,9 @@ class SqliteCustomerRepository:
         )
         customer_id = int(cursor.lastrowid)
         self._replace_children(customer_id, values, folder_path)
+        record_provenance(self._connection, customer_id,
+                          [key for key in CUSTOMER_FIELDS if values.get(key)],
+                          origin=str(customer.get("_origin", "manual")))
         created = self.get(customer_id)
         assert created is not None
         return created
@@ -109,8 +121,12 @@ class SqliteCustomerRepository:
         if cursor.rowcount != 1:
             raise CustomerConflictError(self.get(customer_id))
         self._replace_children(customer_id, values, folder_path)
+        record_provenance(self._connection, customer_id,
+                          [key for key in CUSTOMER_FIELDS if values.get(key) != current.get(key)],
+                          origin="manual")
         saved = self.get(customer_id)
         assert saved is not None
+        self._suggestions.reconcile_customer(saved)
         return saved
 
     def delete(self, customer_id: int, expected_revision: int) -> None:
@@ -228,22 +244,7 @@ class SqliteCustomerRepository:
     def _replace_children(
         self, customer_id: int, customer: dict[str, Any], primary_folder: str
     ) -> None:
-        self._connection.execute("DELETE FROM contacts WHERE customer_id=?", (customer_id,))
-        self._connection.executemany(
-            "INSERT INTO contacts (customer_id, name, role, email, phone) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [
-                (
-                    customer_id,
-                    str(item.get("name", "")).strip(),
-                    str(item.get("role", "")).strip(),
-                    str(item.get("email", "")).strip(),
-                    str(item.get("phone", "")).strip(),
-                )
-                for item in customer.get("contacts", [])
-                if isinstance(item, dict)
-            ],
-        )
+        replace_contacts(self._connection, customer_id, customer.get("contacts", []))
         self._replace_values(
             "customer_services", "name", customer_id, customer.get("service_types", [])
         )

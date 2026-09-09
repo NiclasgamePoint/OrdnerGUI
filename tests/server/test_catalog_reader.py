@@ -15,9 +15,7 @@ def _reader(tmp_path: Path) -> SqliteCatalogReader:
     first = source / "Planung" / "2025" / "Acme GmbH, Köln"
     (first / "Unterlagen").mkdir(parents=True)
     (first / "Angebot.txt").write_text("Geheimertext Alpha", encoding="utf-8")
-    (first / "Unterlagen" / "Plan.md").write_text(
-        "Geheimertext Beta", encoding="utf-8"
-    )
+    (first / "Unterlagen" / "Plan.md").write_text("Geheimertext Beta", encoding="utf-8")
     second = source / "Beratung" / "2026" / "Beta AG, Bonn"
     second.mkdir(parents=True)
     (second / "Zeta.csv").write_text("nummer,wert\n1,Omega", encoding="utf-8")
@@ -53,9 +51,12 @@ def test_reader_exposes_portable_search_facets_and_folder_tree(tmp_path: Path) -
     )
     assert planning["total"] == 1
     root_id = planning["items"][0]["project_root_id"]
-    assert reader.search(
-        source_id="primary", project_root_id=root_id, sort="size", limit=1, offset=1
-    )["items"][0]["filename"] == "Plan.md"
+    assert (
+        reader.search(source_id="primary", project_root_id=root_id, sort="size", limit=1, offset=1)[
+            "items"
+        ][0]["filename"]
+        == "Plan.md"
+    )
 
     facets = reader.facets(source_id="primary")
     assert facets["domains"] == ["Ablage", "Beratung", "Planung"]
@@ -82,9 +83,7 @@ def test_reader_projects_document_bounds_and_validation(tmp_path: Path) -> None:
     ]
     root = reader.project_root(source_id="primary", project_root_id=roots[0]["id"])
     assert root["source"]["relative_path"] == "Planung/2025/Acme GmbH, Köln"
-    evidence = reader.document_evidence(
-        source_id="primary", documents_per_project=1
-    )
+    evidence = reader.document_evidence(source_id="primary", documents_per_project=1)
     assert len(evidence) == 2
     assert len({item["project_root_id"] for item in evidence}) == 2
 

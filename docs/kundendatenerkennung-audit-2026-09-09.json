@@ -1,0 +1,544 @@
+{
+  "phone_diagnostics": {
+    "n": 18661,
+    "overlapping_features": {
+      "parse_possible": 10544,
+      "parse_valid": 6135,
+      "contains_linebreak": 7964,
+      "not_start_0_or_plus": 14102,
+      "no_phone_label_in_excerpt": 17076,
+      "date_format": 729
+    },
+    "by_type": {
+      "pdf": 17546,
+      "xlsx": 928,
+      "docx": 178,
+      "doc": 9
+    },
+    "valid_by_type": {
+      "pdf": 6019,
+      "xlsx": 73,
+      "docx": 39,
+      "doc": 4
+    },
+    "warning": "Diagnostic only: libphonenumber valid means number plan conformity, not customer ownership or measured precision.",
+    "phonenumbers_version": "9.0.34"
+  },
+  "empty_customers": [
+    {
+      "customer": "K-7902699b",
+      "projects": 1,
+      "files": 1,
+      "file_types": {
+        "docx": 1
+      },
+      "eligible": 1,
+      "fts": 1,
+      "documents": [
+        {
+          "document": "D-ee84eb20",
+          "type": "docx",
+          "chars": 567,
+          "current_candidate_counts": {},
+          "address_zip_city_signal": false,
+          "postal_address_label_signal": false,
+          "salutation_signal": false,
+          "placeholder_signals": 0
+        }
+      ]
+    },
+    {
+      "customer": "K-624b60c5",
+      "projects": 1,
+      "files": 31,
+      "file_types": {
+        "jpg": 30,
+        "jbf": 1
+      },
+      "eligible": 0,
+      "fts": 0,
+      "documents": []
+    },
+    {
+      "customer": "K-7f2253d7",
+      "projects": 1,
+      "files": 2,
+      "file_types": {
+        "docx": 1,
+        "pdf": 1
+      },
+      "eligible": 2,
+      "fts": 2,
+      "documents": [
+        {
+          "document": "D-7feb61d9",
+          "type": "docx",
+          "chars": 6736,
+          "current_candidate_counts": {},
+          "address_zip_city_signal": true,
+          "postal_address_label_signal": false,
+          "salutation_signal": false,
+          "placeholder_signals": 0
+        },
+        {
+          "document": "D-6acdb9f0",
+          "type": "pdf",
+          "chars": 7148,
+          "current_candidate_counts": {},
+          "address_zip_city_signal": true,
+          "postal_address_label_signal": false,
+          "salutation_signal": false,
+          "placeholder_signals": 0
+        }
+      ]
+    }
+  ],
+  "top_phone_sources": [
+    {
+      "customer": "K-4ec9599f",
+      "source": "D-1479046d",
+      "type": "pdf",
+      "phone_candidates": 3067,
+      "chars": 614527,
+      "numeric_fraction": 0.107,
+      "number_plan_valid_candidates": 803,
+      "technical_unit_signals": 122,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-86e50149",
+      "source": "D-dfbcaa88",
+      "type": "pdf",
+      "phone_candidates": 1627,
+      "chars": 405256,
+      "numeric_fraction": 0.102,
+      "number_plan_valid_candidates": 420,
+      "technical_unit_signals": 104,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-4fc82b26",
+      "source": "D-7b0c8cb4",
+      "type": "pdf",
+      "phone_candidates": 1375,
+      "chars": 407220,
+      "numeric_fraction": 0.094,
+      "number_plan_valid_candidates": 393,
+      "technical_unit_signals": 191,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-81b8a03f",
+      "source": "D-ed9da7de",
+      "type": "pdf",
+      "phone_candidates": 969,
+      "chars": 934527,
+      "numeric_fraction": 0.028,
+      "number_plan_valid_candidates": 213,
+      "technical_unit_signals": 266,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-48449a14",
+      "source": "D-de0bb3d3",
+      "type": "pdf",
+      "phone_candidates": 946,
+      "chars": 865258,
+      "numeric_fraction": 0.036,
+      "number_plan_valid_candidates": 392,
+      "technical_unit_signals": 127,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-e29c9c18",
+      "source": "D-e935e474",
+      "type": "pdf",
+      "phone_candidates": 359,
+      "chars": 747456,
+      "numeric_fraction": 0.03,
+      "number_plan_valid_candidates": 161,
+      "technical_unit_signals": 402,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-4523540f",
+      "source": "D-ab97bb8c",
+      "type": "pdf",
+      "phone_candidates": 279,
+      "chars": 259236,
+      "numeric_fraction": 0.029,
+      "number_plan_valid_candidates": 56,
+      "technical_unit_signals": 14,
+      "pdf_binary_signals": false
+    },
+    {
+      "customer": "K-c6f3ac57",
+      "source": "D-a69ca951",
+      "type": "pdf",
+      "phone_candidates": 252,
+      "chars": 1034685,
+      "numeric_fraction": 0.009,
+      "number_plan_valid_candidates": 46,
+      "technical_unit_signals": 228,
+      "pdf_binary_signals": false
+    }
+  ],
+  "mapped_suggestion_sources": {
+    "matched_rows": 19242,
+    "total": 19249,
+    "unique_sources": 750
+  },
+  "catalog_metadata": [
+    {
+      "key": "built_at",
+      "value": "2026-09-09T16:49:13.421268+00:00"
+    },
+    {
+      "key": "schema_version",
+      "value": "2"
+    }
+  ],
+  "all_format_counts": {
+    "docx": 117,
+    "pdf": 1572,
+    "xlsx": 39,
+    "doc": 388,
+    "": 5,
+    "jpg": 3891,
+    "jbf": 135,
+    "jpeg": 742,
+    "jfif": 4,
+    "zip": 56,
+    "png": 8,
+    "mdproj": 6,
+    "xml": 6,
+    "xls": 588,
+    "psp": 1,
+    "gif": 58,
+    "txt": 5,
+    "mdb": 4,
+    "ptn": 2,
+    "ptn2": 2,
+    "ini2": 2,
+    "ppt": 26,
+    "rtf": 8,
+    "eml": 6,
+    "dwg": 107,
+    "rdf": 135,
+    "ldt": 16,
+    "bak": 13,
+    "d81": 8,
+    "p81": 2,
+    "mht": 3,
+    "ctb": 12,
+    "dwt": 2,
+    "log": 52,
+    "dxf": 3,
+    "fmp": 3,
+    "2008": 2,
+    "tif": 1,
+    "pc3": 3,
+    "d82": 1,
+    "d83": 1,
+    "eps": 1,
+    "plt": 5,
+    "ttf": 4,
+    "shx": 3,
+    "bk1": 2,
+    "bk2": 1,
+    "bk3": 1,
+    "bk4": 1,
+    "elx": 10
+  },
+  "project_text_coverage": {
+    "project_roots": 83,
+    "with_no_files": 0,
+    "with_no_eligible": 1,
+    "with_no_fts": 1,
+    "files_outside_recognized_roots": 3823,
+    "fts_outside_recognized_roots": 1229,
+    "fts_inside_roots": 948
+  },
+  "active_components": {
+    "customers": "20260909T164940.452640Z-763e3ffb",
+    "index": "20260909T164938.371077Z-d05a271c"
+  },
+  "limitations": [
+    "Local stored snapshot only; no service requested or started.",
+    "Read-only SQLite mode=ro; short SELECTs; no sensitive contact values or document paths exported.",
+    "Company ignored when calling customer empty: all 81 contain automatic company.",
+    "Legacy content/state.db uses different document keys than current catalog; no live coverage inference from unmatched states.",
+    "Phone diagnostics are not manually labelled precision; valid DE number plan does not establish phone/customer relationship."
+  ],
+  "baseline": {
+    "source": "active client snapshot",
+    "customer_database": "client-data/generations/customers/20260909T164940.452640Z-763e3ffb/customers.db",
+    "catalog_database": "client-data/generations/index/20260909T164938.371077Z-d05a271c/index/catalog/active.db",
+    "customers": 81,
+    "projects": 83,
+    "pending_suggestions": 19249,
+    "all_suggestions": 19252,
+    "contacts": 1,
+    "only_company_filled_no_contact": 55,
+    "only_company_no_pending": 3,
+    "customers_300_plus": 16,
+    "only_company_300_plus": 8,
+    "max_pending": 3526,
+    "median_pending": 54,
+    "top_customers": [
+      {
+        "id": "K-4ec9599f",
+        "filled": 5,
+        "contacts": 0,
+        "pending": 3526,
+        "projects": 1
+      },
+      {
+        "id": "K-4fc82b26",
+        "filled": 1,
+        "contacts": 0,
+        "pending": 1832,
+        "projects": 1
+      },
+      {
+        "id": "K-86e50149",
+        "filled": 2,
+        "contacts": 0,
+        "pending": 1748,
+        "projects": 1
+      },
+      {
+        "id": "K-81b8a03f",
+        "filled": 4,
+        "contacts": 0,
+        "pending": 1272,
+        "projects": 1
+      },
+      {
+        "id": "K-48449a14",
+        "filled": 5,
+        "contacts": 0,
+        "pending": 1175,
+        "projects": 1
+      },
+      {
+        "id": "K-4523540f",
+        "filled": 5,
+        "contacts": 0,
+        "pending": 803,
+        "projects": 1
+      },
+      {
+        "id": "K-e29c9c18",
+        "filled": 5,
+        "contacts": 0,
+        "pending": 705,
+        "projects": 1
+      },
+      {
+        "id": "K-f369cb89",
+        "filled": 4,
+        "contacts": 0,
+        "pending": 553,
+        "projects": 1
+      },
+      {
+        "id": "K-71ee45a3",
+        "filled": 1,
+        "contacts": 0,
+        "pending": 474,
+        "projects": 1
+      },
+      {
+        "id": "K-da4ea2a5",
+        "filled": 1,
+        "contacts": 0,
+        "pending": 471,
+        "projects": 1
+      }
+    ],
+    "field_distribution": [
+      {
+        "kind": "city",
+        "n": 27
+      },
+      {
+        "kind": "contact",
+        "n": 92
+      },
+      {
+        "kind": "email",
+        "n": 415
+      },
+      {
+        "kind": "phone",
+        "n": 18661
+      },
+      {
+        "kind": "postal_code",
+        "n": 23
+      },
+      {
+        "kind": "street",
+        "n": 31
+      }
+    ],
+    "rule_distribution": [
+      {
+        "rule": "phone-pattern",
+        "n": 18661
+      },
+      {
+        "rule": "email-pattern",
+        "n": 379
+      },
+      {
+        "rule": "vollständiger Adressblock",
+        "n": 81
+      },
+      {
+        "rule": "Name im frühen Empfängeradressblock",
+        "n": 55
+      },
+      {
+        "rule": "E-Mail-Fund",
+        "n": 36
+      },
+      {
+        "rule": "kundenseitige Vertragsrolle",
+        "n": 20
+      },
+      {
+        "rule": "Personenname aus Projektordner",
+        "n": 7
+      },
+      {
+        "rule": "Kundenname aus Dokumentfeld",
+        "n": 6
+      },
+      {
+        "rule": "Anrede/Ansprechpartner",
+        "n": 3
+      },
+      {
+        "rule": "persönliche Empfängeranrede",
+        "n": 1
+      }
+    ],
+    "decisions": [
+      {
+        "status": "accepted",
+        "n": 1
+      },
+      {
+        "status": "pending",
+        "n": 19249
+      },
+      {
+        "status": "rejected",
+        "n": 2
+      }
+    ],
+    "latest_recognition_run": [
+      {
+        "id": 14,
+        "started_at": "2026-09-09T16:49:13.990555+00:00",
+        "finished_at": "2026-09-09T16:49:38.365222+00:00",
+        "detected": 83,
+        "created": 0,
+        "assigned": 0,
+        "pending": 13
+      }
+    ]
+  },
+  "duplicate_groups": [
+    {
+      "kind": "city",
+      "groups": 27,
+      "rows": 27,
+      "extra_rows": 0,
+      "max_repeat": 1
+    },
+    {
+      "kind": "contact",
+      "groups": 92,
+      "rows": 92,
+      "extra_rows": 0,
+      "max_repeat": 1
+    },
+    {
+      "kind": "email",
+      "groups": 208,
+      "rows": 415,
+      "extra_rows": 207,
+      "max_repeat": 13
+    },
+    {
+      "kind": "phone",
+      "groups": 17005,
+      "rows": 18661,
+      "extra_rows": 1656,
+      "max_repeat": 20
+    },
+    {
+      "kind": "postal_code",
+      "groups": 23,
+      "rows": 23,
+      "extra_rows": 0,
+      "max_repeat": 1
+    },
+    {
+      "kind": "street",
+      "groups": 31,
+      "rows": 31,
+      "extra_rows": 0,
+      "max_repeat": 1
+    }
+  ],
+  "duplicate_same_value_and_source": [
+    {
+      "groups": 19234,
+      "extra_rows": 15,
+      "max_repeat": 2
+    }
+  ],
+  "active_catalog_metadata": [
+    {
+      "key": "built_at",
+      "value": "2026-09-09T16:49:13.421268+00:00"
+    },
+    {
+      "key": "schema_version",
+      "value": "2"
+    }
+  ],
+  "active_catalog_counts": [
+    {
+      "files": 8063,
+      "fts": 2177,
+      "eligible": 2767,
+      "no_project": 3823
+    }
+  ],
+  "default_24_document_limit_simulation": {
+    "fts_inside_projects": 948,
+    "selected": 802,
+    "omitted": 146,
+    "projects_above_limit": 13,
+    "pending_regex_rows_outside_current_selection": 0,
+    "note": "Simulation with default 24; configured limit not read from server settings to avoid secrets."
+  },
+  "methodology": {
+    "open": "sqlite3.connect(Path(db).absolute().as_uri()+\"?mode=ro\",uri=True,timeout=2)",
+    "read_only": "SELECT-only statements; fetchall completes each read before closing connection; no services contacted or started.",
+    "group_duplicate_values": "SELECT customer_id,kind,lower(trim(value)),count(*) FROM customer_document_suggestions WHERE status='pending' GROUP BY 1,2,3",
+    "group_duplicate_sources": "Same grouping plus source_path. This is simple lexical grouping, not semantic canonicalization.",
+    "phone_checks": "phonenumbers.parse(value,\"DE\"), is_possible_number, is_valid_number; features count overlapping predicates for newline, date regex, prefix and phone labels.",
+    "empty_definition": "company ignored because every customer has automatic company. Empty means email, phone, street, postal_code, city empty and no contacts.",
+    "time_note": "Detailed diagnostics began on local server DB; baseline subsequently verified against active client generation after externally driven pointer change. Customer counts/rule distributions remained identical. Final baseline reflects recognition run 14. Legacy data/customers.db does not represent active architecture."
+  },
+  "initial_active_components": {
+    "customers": "20260909T164841.893036Z-3fd1ddbb",
+    "index": "20260909T164840.015862Z-a5bc9f1e"
+  }
+}

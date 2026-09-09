@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import re
 import sqlite3
 from typing import Any
@@ -17,6 +18,8 @@ from papagui_contracts import (
 )
 
 from papagui_server.domain.errors import ResourceNotFoundError
+from papagui_server.adapters.extraction_store import ExtractionStore
+from papagui_server.adapters.catalog_storage import document_priority
 
 
 class SqliteCatalogReader:
@@ -29,8 +32,40 @@ class SqliteCatalogReader:
         "size": "files.file_size DESC, files.relative_path ASC",
     }
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, extraction_store_path: Path | None = None) -> None:
         self.database_path = database_path
+        # Explicit paths support pinned server snapshots. Portable client snapshots
+        # need no private cache and simply return text plus compact catalog metadata.
+        if extraction_store_path is None:
+            for parent in database_path.parents:
+                if parent.name == "index":
+                    extraction_store_path = parent.parent / "extraction" / "artifacts.db"
+                    break
+        self._extraction_store = (
+            ExtractionStore(extraction_store_path) if extraction_store_path else None
+        )
+
+    @contextmanager
+    def snapshot(self):
+        """Pin file/project metadata for a complete recognition run."""
+        with TemporaryDirectory(prefix="papagui-catalog-snapshot-") as temporary:
+            path = Path(temporary) / "catalog.db"
+            with self._connection() as source:
+                destination = sqlite3.connect(path)
+                try:
+                    source.backup(destination)
+                finally:
+                    destination.close()
+            yield SqliteCatalogReader(
+                path, self._extraction_store.database_path if self._extraction_store else None
+            )
+
+    def snapshot_version(self) -> str:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM index_metadata WHERE key='built_at'"
+            ).fetchone()
+        return str(row[0]) if row else ""
 
     def search(
         self,
@@ -145,7 +180,7 @@ class SqliteCatalogReader:
                   FROM folders
                   LEFT JOIN project_roots ON project_roots.id=folders.project_root_id
                   LEFT JOIN files ON files.folder_id=folders.id
-                 WHERE {' AND '.join(clauses)}
+                 WHERE {" AND ".join(clauses)}
                  GROUP BY folders.id
                  ORDER BY folders.relative_path COLLATE NOCASE
                 """,
@@ -182,7 +217,9 @@ class SqliteCatalogReader:
             source=source,
             name=str(row["name"]),
             parent_id=int(row["parent_id"]) if row["parent_id"] is not None else None,
-            project_root_id=(int(row["project_root_id"]) if row["project_root_id"] is not None else None),
+            project_root_id=(
+                int(row["project_root_id"]) if row["project_root_id"] is not None else None
+            ),
             file_count=int(stats[0]),
             total_size=int(stats[1]),
             last_modified=str(stats[2]) if stats[2] is not None else None,
@@ -216,46 +253,220 @@ class SqliteCatalogReader:
         return self._project(row).to_dict()
 
     def document_evidence(
-        self, *, source_id: str, documents_per_project: int = 24
+        self,
+        *,
+        source_id: str,
+        documents_per_project: int = 24,
+        project_root_ids: list[int] | tuple[int, ...] | None = None,
+        offset_per_project: int = 0,
     ) -> list[dict[str, Any]]:
-        """Read bounded extracted text for recognition without exposing host paths."""
+        """Rank before loading bounded text batches; a second round uses an offset."""
         self._validate_source_id(source_id)
-        if (
-            isinstance(documents_per_project, bool)
-            or not 1 <= documents_per_project <= 500
-        ):
+        if isinstance(documents_per_project, bool) or not 1 <= documents_per_project <= 500:
             raise ValueError("Ungültiges Dokumentlimit.")
+        if (
+            isinstance(offset_per_project, bool)
+            or not isinstance(offset_per_project, int)
+            or offset_per_project < 0
+        ):
+            raise ValueError("Ungültiger Dokumentoffset.")
+        project_clause, ids = self._project_filter(project_root_ids)
+        if project_root_ids is not None and not ids:
+            return []
+        result: list[dict[str, Any]] = []
+        with self._connection() as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(files)")}
+            modern = "extraction_status" in columns
+            connection.create_function("document_priority", 2, document_priority)
+            priority = (
+                "files.extraction_priority"
+                if modern
+                else "document_priority(files.filename, substr(content.content,1,12000))"
+            )
+            metadata = (
+                "files.extraction_status, files.extraction_reason, files.extraction_version"
+                if modern
+                else "'ok' AS extraction_status, '' AS extraction_reason, '' AS extraction_version"
+            )
+            rows = connection.execute(
+                f"""WITH ranked AS (
+                    SELECT files.path, files.project_root_id, files.source_id,
+                           files.relative_path, files.modified_date, files.content_hash,
+                           {metadata}, ROW_NUMBER() OVER (
+                               PARTITION BY files.project_root_id
+                               ORDER BY {priority} DESC, files.modified_date DESC,
+                                        files.relative_path COLLATE NOCASE) AS ranking
+                      FROM files JOIN file_content_fts content ON content.path=files.path
+                     WHERE files.source_id=? AND files.project_root_id IS NOT NULL
+                           {project_clause}
+                ) SELECT ranked.*, content.content AS content
+                    FROM ranked JOIN file_content_fts content ON content.path=ranked.path
+                   WHERE ranking>? AND ranking<=?
+                   ORDER BY project_root_id, ranking""",
+                (source_id, *ids, offset_per_project, offset_per_project + documents_per_project),
+            )
+            while batch := rows.fetchmany(16):
+                for row in batch:
+                    artifact = (
+                        self._extraction_store.read(
+                            str(row["content_hash"]), str(row["extraction_version"])
+                        )
+                        if self._extraction_store
+                        else None
+                    )
+                    blocks: list[dict[str, Any]] = []
+                    if artifact:
+                        for order, block in enumerate(artifact.blocks):
+                            item = block.to_dict()
+                            item["order"] = order
+                            item["block_id"] = str(order)
+                            item["extraction_method"] = block.method
+                            blocks.append(item)
+                    result.append(
+                        {
+                            "project_root_id": int(row["project_root_id"]),
+                            "source": SourcePath(
+                                str(row["source_id"]), str(row["relative_path"])
+                            ).to_dict(),
+                            "content": str(row["content"]),
+                            "modified_at": str(row["modified_date"]),
+                            "content_hash": str(row["content_hash"]),
+                            "blocks": blocks,
+                            "extraction_status": str(row["extraction_status"]),
+                            "extraction_reason": str(row["extraction_reason"]),
+                            "parser_version": artifact.parser_version if artifact else "",
+                            "extraction_version": str(row["extraction_version"]),
+                        }
+                    )
+        return result
+
+    def source_paths(
+        self,
+        *,
+        source_id: str,
+        project_root_ids: list[int] | tuple[int, ...] | None = None,
+    ) -> list[dict[str, str]]:
+        self._validate_source_id(source_id)
+        clause, ids = self._project_filter(project_root_ids)
+        if project_root_ids is not None and not ids:
+            return []
         with self._connection() as connection:
             rows = connection.execute(
-                """
-                SELECT files.project_root_id, files.source_id, files.relative_path,
-                       files.modified_date, file_content_fts.content
-                  FROM files
-                  JOIN file_content_fts ON file_content_fts.path=files.path
-                 WHERE files.source_id=? AND files.project_root_id IS NOT NULL
-                 ORDER BY files.project_root_id, files.modified_date DESC,
-                          files.relative_path COLLATE NOCASE
-                """,
-                (source_id,),
-            ).fetchall()
-        counts: dict[int, int] = {}
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            project_root_id = int(row["project_root_id"])
-            if counts.get(project_root_id, 0) >= documents_per_project:
-                continue
-            counts[project_root_id] = counts.get(project_root_id, 0) + 1
-            result.append(
-                {
-                    "project_root_id": project_root_id,
-                    "source": SourcePath(
-                        str(row["source_id"]), str(row["relative_path"])
-                    ).to_dict(),
-                    "content": str(row["content"]),
-                    "modified_at": str(row["modified_date"]),
-                }
+                "SELECT files.source_id, files.relative_path FROM files WHERE source_id=? "
+                "AND project_root_id IS NOT NULL " + clause + " ORDER BY relative_path",
+                (source_id, *ids),
             )
-        return result
+            return [SourcePath(str(row[0]), str(row[1])).to_dict() for row in rows]
+
+    def source_states(
+        self,
+        *,
+        source_id: str,
+        project_root_ids: list[int] | tuple[int, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        self._validate_source_id(source_id)
+        clause, ids = self._project_filter(project_root_ids)
+        if project_root_ids is not None and not ids:
+            return []
+        with self._connection() as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(files)")}
+            status = (
+                "extraction_status"
+                if "extraction_status" in columns
+                else "CASE WHEN full_text_indexed=1 THEN 'ok' ELSE 'unsupported' END"
+            )
+            rows = connection.execute(
+                f"SELECT source_id, relative_path, content_hash, {status} FROM files "
+                f"WHERE source_id=? AND project_root_id IS NOT NULL {clause} ORDER BY relative_path",
+                (source_id, *ids),
+            )
+            return [
+                {
+                    "source": SourcePath(str(row[0]), str(row[1])).to_dict(),
+                    "content_hash": str(row[2]),
+                    "extraction_status": str(row[3]),
+                }
+                for row in rows
+            ]
+
+    def coverage(
+        self,
+        *,
+        source_id: str,
+        project_root_ids: list[int] | tuple[int, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        self._validate_source_id(source_id)
+        clause, ids = self._project_filter(project_root_ids, table="project_roots", column="id")
+        if project_root_ids is not None and not ids:
+            return []
+        result: dict[int, dict[str, Any]] = {}
+        with self._connection() as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(files)")}
+            modern = "extraction_status" in columns
+            status = (
+                "files.extraction_status"
+                if modern
+                else "CASE WHEN files.full_text_indexed=1 THEN 'ok' ELSE 'unsupported' END"
+            )
+            reason = "files.extraction_reason" if modern else "'legacy_catalog'"
+            page_sql = (
+                "COALESCE(SUM(files.extraction_pages_total),0), COALESCE(SUM(files.extraction_pages_processed),0), SUM(CASE WHEN files.content_eligible=1 AND files.extraction_pages_total IS NULL THEN 1 ELSE 0 END)"
+                if modern
+                else "0,0,COUNT(files.id)"
+            )
+            rows = connection.execute(
+                f"""
+                SELECT project_roots.id, {status} AS status, {reason} AS reason,
+                    COUNT(files.id), COALESCE(SUM(files.content_eligible),0),
+                    COALESCE(SUM(files.full_text_indexed),0), {page_sql}
+                FROM project_roots LEFT JOIN files ON files.project_root_id=project_roots.id
+                WHERE project_roots.source_id=? {clause}
+                GROUP BY project_roots.id, status, reason ORDER BY project_roots.id
+                """,
+                (source_id, *ids),
+            )
+            for row in rows:
+                item = result.setdefault(
+                    int(row[0]),
+                    {
+                        "project_root_id": int(row[0]),
+                        "files_total": 0,
+                        "files_eligible": 0,
+                        "files_extracted": 0,
+                        "status_counts": {},
+                        "reason_counts": {},
+                        "pages_total": 0,
+                        "pages_processed": 0,
+                        "pages_unknown_documents": 0,
+                    },
+                )
+                for key, index in (
+                    ("files_total", 3),
+                    ("files_eligible", 4),
+                    ("files_extracted", 5),
+                    ("pages_total", 6),
+                    ("pages_processed", 7),
+                    ("pages_unknown_documents", 8),
+                ):
+                    item[key] += int(row[index] or 0)
+                if row[3]:
+                    item["status_counts"][str(row[1])] = item["status_counts"].get(
+                        str(row[1]), 0
+                    ) + int(row[3])
+                    if row[2]:
+                        item["reason_counts"][str(row[2])] = item["reason_counts"].get(
+                            str(row[2]), 0
+                        ) + int(row[3])
+        return list(result.values())
+
+    @staticmethod
+    def _project_filter(project_root_ids, *, table="files", column="project_root_id"):
+        if project_root_ids is None:
+            return "", ()
+        ids = tuple(project_root_ids)
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in ids):
+            raise ValueError("Ungültige Projektwurzel.")
+        return f"AND {table}.{column} IN ({','.join('?' for _ in ids)})", ids
 
     @contextmanager
     def _connection(self):
@@ -295,7 +506,9 @@ class SqliteCatalogReader:
             project_name=str(row["project_name"]),
             relative_dir=str(row["relative_dir"]),
             folder_id=int(row["folder_id"]) if row["folder_id"] is not None else None,
-            project_root_id=(int(row["project_root_id"]) if row["project_root_id"] is not None else None),
+            project_root_id=(
+                int(row["project_root_id"]) if row["project_root_id"] is not None else None
+            ),
         )
 
     @staticmethod
@@ -305,7 +518,9 @@ class SqliteCatalogReader:
             source=SourcePath(str(row["source_id"]), str(row["relative_path"])),
             name=str(row["name"]),
             parent_id=int(row["parent_id"]) if row["parent_id"] is not None else None,
-            project_root_id=(int(row["project_root_id"]) if row["project_root_id"] is not None else None),
+            project_root_id=(
+                int(row["project_root_id"]) if row["project_root_id"] is not None else None
+            ),
             file_count=int(row["file_count"]),
             total_size=int(row["total_size"]),
             last_modified=str(row["last_modified"]) if row["last_modified"] is not None else None,

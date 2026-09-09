@@ -92,6 +92,8 @@ class CatalogIndexerPort(Protocol):
         settings: ServerSettings,
         cancelled: Callable[[], bool],
         progress: Callable[[int, str], None],
+        force_extraction: bool = False,
+        project_root_ids: list[int] | None = None,
     ) -> Path: ...
     def delete(self) -> None: ...
 

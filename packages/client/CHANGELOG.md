@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Der Tab „Kundenerkennung“ auf der Indexserver-Seite enthält die serverweite
+  Sperrliste und den vollständigen Neuaufbau mit Status und Abbruch. Eingaben
+  bleiben beim Tabwechsel erhalten; ausgeblendete Tabs pausieren Statusabfragen.
+
+- Dropdown „Art“ im Kundeneditor öffnet sich auch beim Klick auf die Textfläche;
+  vorhandene Kundenarten außerhalb der Standardauswahl bleiben erhalten.
+- Kundendetailseiten öffnen sofort und laden Projektmetadaten, Journalzustand
+  und serverseitige Vorschläge asynchron; doppelte Requests sowie verspätete
+  Antworten eines zuvor gewählten Kunden werden verworfen.
 - Einen GUI-Hänger mit anschließendem `SIGABRT` bei Volltextsuchen behoben:
   Die FTS-Ergebnismenge wird jetzt einmal je Suche statt einmal je Katalogzeile
   berechnet.
@@ -44,3 +53,10 @@
 
 Historische gemeinsame Änderungen bis einschließlich 0.4.1 stehen im
 [Repository-Changelog](../../CHANGELOG.md).
+
+### Kundendatenprüfung
+
+- Gruppierte Vorschläge mit Quellen, Konflikten, Pagination und aktueller Revision nach jeder Entscheidung.
+- Gezielte Neusuche, nachvollziehbare Abdeckung, lesbarer Offline-Stand und stabile Kontakt-IDs.
+
+- Kundenprüfung visuell überarbeitet: kompakte Karten, aufklappbare Belege, erreichbare Entscheidungen, umbrechende Texte und gekürzte Quellnamen ohne horizontales Scrollen; Hell-/Dunkelmodus und kleine Dialoggrößen mit synthetischen Daten geprüft.

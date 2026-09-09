@@ -46,3 +46,12 @@ class SQLiteCustomerSnapshot:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
         return connection
+
+    def customer_suggestions_page(self, customer_id: int, status: str = "pending", *,
+                                  limit: int = 30, offset: int = 0):
+        from .sqlite_suggestion_snapshot import read_suggestion_page
+
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("invalid suggestion page")
+        with closing(self._connect()) as connection:
+            return read_suggestion_page(connection, customer_id, status, limit, offset)

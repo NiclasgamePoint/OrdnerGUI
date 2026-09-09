@@ -23,8 +23,8 @@ from papagui_server.application.ports import (
 )
 from papagui_server.domain.customer_recognition import (
     CustomerIdentityPolicy,
-    document_candidates,
 )
+from papagui_server.application.document_recognition import DocumentRecognitionService, all_customers
 from papagui_server.domain.errors import ResourceNotFoundError
 from papagui_server.domain.errors import CustomerConflictError
 from papagui_server.domain.folder_structure import normalize_identity
@@ -53,9 +53,12 @@ class RecognitionApplicationService:
         self._source_id = source_id
         self._documents_per_project = documents_per_project
         self._settings = settings
+        self.documents = DocumentRecognitionService(unit_of_work, catalog, settings, documents_per_project)
 
     def synchronize(
-        self, _source_path: Path, *, source_id: str, minimum_year: int
+        self, _source_path: Path, *, source_id: str, minimum_year: int,
+        cancelled=lambda: False,
+        exhaustive: bool = False,
     ) -> dict[str, int]:
         roots = [
             CatalogProjectRoot.from_dict(value)
@@ -75,23 +78,35 @@ class RecognitionApplicationService:
         }
         try:
             with self._unit_of_work() as work:
-                customers = work.customers.list(limit=2_000, offset=0)
+                customers = all_customers(work.customers)
                 grouped: dict[str, list[CatalogProjectRoot]] = defaultdict(list)
                 for root in roots:
                     grouped[root.recognition_key].append(root)
                 for key in sorted(grouped):
+                    if cancelled():
+                        raise InterruptedError("Kundenerkennung abgebrochen.")
                     self._process_group(work, grouped[key], customers, run_id, stats)
-                    customers = work.customers.list(limit=2_000, offset=0)
+                    customers = all_customers(work.customers)
                 work.recognition.mark_unseen_stale(run_id)
-                stats["suggestions"] = self._document_suggestions(work, source_id)
+                work.commit()
+            document_options = {"exhaustive": True} if exhaustive else {}
+            stats["suggestions"] = self.documents.run(source_id, cancelled=cancelled, **document_options)["suggestions"]
+            with self._unit_of_work() as work:
                 work.recognition.finish_run(run_id, stats)
                 work.commit()
-        except Exception as error:
+        except Exception:
             with self._unit_of_work() as work:
-                work.recognition.finish_run(run_id, stats, error=str(error))
+                work.recognition.finish_run(run_id, stats, error="recognition_failed")
                 work.commit()
             raise
         return stats
+
+    def customer_project_root_ids(self, customer_id: int) -> list[int]:
+        with self._unit_of_work() as work:
+            if work.customers.get(customer_id) is None:
+                raise ResourceNotFoundError("Kunde nicht gefunden.")
+            return [int(root["id"]) for root in self._catalog.list_project_roots(source_id=self._source_id)
+                    if work.projects.customer_id_for_source(SourcePath.from_dict(root["source"])) == customer_id]
 
     def run_now(self, *, minimum_year: int) -> dict[str, int]:
         result = self.synchronize(
@@ -172,11 +187,11 @@ class RecognitionApplicationService:
             elif decision is RecognitionDecisionAction.ACCEPT:
                 if customer_id is not None:
                     raise ValueError("accept erstellt einen neuen Kunden ohne customer_id.")
-                city = case.cities[0] if len(case.cities) == 1 else ""
                 created = work.customers.create(
                     {
                         "display_name": case.display_name,
-                        "city": city,
+                        "city": "",
+                        "_origin": "folder",
                         "entity_type": self._identity_policy.entity_type(
                             case.display_name
                         ),
@@ -253,7 +268,7 @@ class RecognitionApplicationService:
             )
         ]
         reason = ""
-        if len(cities) > 1:
+        if len(cities) > 1 and not owners and not exact:
             reason = "different_cities"
         elif len(owners) > 1:
             reason = "conflicting_project_owners"
@@ -264,17 +279,12 @@ class RecognitionApplicationService:
             owner_customer = work.customers.get(owner)
             if owner_customer is None:
                 reason = "missing_project_owner"
-            elif self._city_conflicts(str(owner_customer.get("city", "")), cities):
-                reason = "different_cities"
             else:
                 self._assign(work, roots, owner, stats)
                 return
         elif len(exact) == 1:
-            if self._city_conflicts(str(exact[0].get("city", "")), cities):
-                reason = "different_cities"
-            else:
-                self._assign(work, roots, int(exact[0]["id"]), stats)
-                return
+            self._assign(work, roots, int(exact[0]["id"]), stats)
+            return
         elif candidate_pool:
             reason = "similar_name"
         if reason:
@@ -289,7 +299,8 @@ class RecognitionApplicationService:
         customer = work.customers.create(
             {
                 "display_name": root.customer_name,
-                "city": cities[0] if cities else "",
+                "city": "",
+                "_origin": "folder",
                 "entity_type": self._identity_policy.entity_type(root.customer_name),
                 "folder_path": source_uri(root.source),
                 "folder_paths": [source_uri(item.source) for item in roots],
@@ -364,54 +375,10 @@ class RecognitionApplicationService:
             suggested_customer_ids=tuple(suggested),
         )
 
-    def _document_suggestions(self, work: Any, source_id: str) -> int:
-        roots = {
-            item.id: item
-            for item in (
-                CatalogProjectRoot.from_dict(value)
-                for value in self._catalog.list_project_roots(source_id=source_id)
-            )
-        }
-        count = 0
-        document_limit = (
-            self._settings.load().priority_documents_per_project
-            if self._settings is not None
-            else self._documents_per_project
-        )
-        if document_limit == 0:
-            return 0
-        for document in self._catalog.document_evidence(
-            source_id=source_id,
-            documents_per_project=document_limit,
-        ):
-            root = roots.get(int(document["project_root_id"]))
-            if root is None:
-                continue
-            customer_id = work.projects.customer_id_for_source(root.source)
-            customer = work.customers.get(customer_id) if customer_id is not None else None
-            if customer is None:
-                continue
-            source = SourcePath.from_dict(document["source"])
-            for candidate in document_candidates(str(document["content"])):
-                if str(customer.get(candidate.field_name, "")).strip():
-                    continue
-                fingerprint = hashlib.sha256(
-                    f"{customer_id}\0{candidate.field_name}\0"
-                    f"{candidate.value.casefold()}\0{source.source_id}\0"
-                    f"{source.relative_path}".encode("utf-8")
-                ).hexdigest()
-                if work.suggestions.add(
-                    customer_id,
-                    kind=candidate.field_name,
-                    value=candidate.value,
-                    source_path=source_uri(source),
-                    excerpt=candidate.excerpt,
-                    fingerprint=fingerprint,
-                    confidence=candidate.confidence,
-                    rule=candidate.rule,
-                ):
-                    count += 1
-        return count
+    def run_for_customer(self, customer_id: int, *, cancelled=lambda: False) -> dict[str, int]:
+        result = self.documents.run(self._source_id, customer_id=customer_id, cancelled=cancelled)
+        self._publisher.publish_customers()
+        return result
 
     def _roots_by_source(
         self, source_id: str

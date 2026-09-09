@@ -77,9 +77,10 @@ class SqliteCustomerMapper:
                 "role": str(item[1]),
                 "email": str(item[2]),
                 "phone": str(item[3]),
+                "id": str(item[4]),
             }
             for item in self._connection.execute(
-                "SELECT name, role, email, phone FROM contacts "
+                "SELECT name, role, email, phone, uid FROM contacts "
                 "WHERE customer_id=? ORDER BY id",
                 (customer_id,),
             )

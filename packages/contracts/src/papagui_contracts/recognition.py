@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Mapping
 
@@ -12,6 +12,7 @@ from ._base import (
     mapping_get,
     optional_int,
     require_int,
+    require_bool,
     require_mapping,
     require_string,
     string_tuple,
@@ -232,6 +233,14 @@ class CustomerSuggestion(JsonDto):
     contact: Contact | None = None
     created_at: str = ""
     resolved_at: str = ""
+    normalized_value: str = ""
+    party_role: str = "unknown"
+    quality: str = "legacy"
+    reasons: tuple[str, ...] = ()
+    payload: dict = field(default_factory=dict)
+    evidence: tuple[dict, ...] = ()
+    evidence_count: int = 1
+    is_conflict: bool = False
 
     def __post_init__(self) -> None:
         require_int(self.id, "id", minimum=1)
@@ -253,12 +262,39 @@ class CustomerSuggestion(JsonDto):
                 object.__setattr__(self, "status", CustomerSuggestionStatus(str(self.status)))
             except ValueError as error:
                 raise ContractValidationError("unknown customer suggestion status") from error
-        if self.suggestion_type not in {"field", "contact"}:
+        if self.suggestion_type not in {"field", "contact", "address"}:
             raise ContractValidationError("unknown customer suggestion type")
         if self.contact is not None and not isinstance(self.contact, Contact):
             raise ContractValidationError("contact must be a Contact DTO")
         if self.suggestion_type == "contact" and self.contact is None:
             raise ContractValidationError("contact suggestion requires contact data")
+        require_string(self.normalized_value, "normalized_value", allow_empty=True)
+        require_string(self.party_role, "party_role")
+        if self.quality not in {"strong", "review", "legacy"}:
+            raise ContractValidationError("unknown suggestion quality")
+        object.__setattr__(self, "reasons", string_tuple(self.reasons, "reasons"))
+        require_bool(self.is_conflict, "is_conflict")
+        require_int(self.evidence_count, "evidence_count", minimum=0)
+        payload = dict(require_mapping(self.payload, "payload"))
+        if self.suggestion_type == "address":
+            if not payload or set(payload) - {"street", "postal_code", "city", "address_kind"}:
+                raise ContractValidationError("address requires address fields")
+            for key, value in payload.items():
+                require_string(value, key, allow_empty=True)
+        object.__setattr__(self, "payload", payload)
+        if not isinstance(self.evidence, (tuple, list)):
+            raise ContractValidationError("evidence must be an array")
+        evidence = []
+        for item in self.evidence:
+            item = dict(require_mapping(item, "evidence"))
+            if "source" in item:
+                item["source"] = SourcePath.from_dict(
+                    require_mapping(item["source"], "source")
+                ).to_dict()
+            if item.get("page") is not None:
+                require_int(item["page"], "page", minimum=1)
+            evidence.append(item)
+        object.__setattr__(self, "evidence", tuple(evidence))
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "CustomerSuggestion":
@@ -311,6 +347,14 @@ class CustomerSuggestion(JsonDto):
                 "resolved_at",
                 allow_empty=True,
             ),
+            normalized_value=mapping_get(payload, "normalized_value", ""),
+            party_role=mapping_get(payload, "party_role", "unknown"),
+            quality=mapping_get(payload, "quality", "legacy"),
+            reasons=string_tuple(mapping_get(payload, "reasons", ()), "reasons"),
+            payload=dict(require_mapping(mapping_get(payload, "payload", {}), "payload")),
+            evidence=mapping_get(payload, "evidence", ()),
+            evidence_count=mapping_get(payload, "evidence_count", 1),
+            is_conflict=mapping_get(payload, "is_conflict", False),
         )
 
 

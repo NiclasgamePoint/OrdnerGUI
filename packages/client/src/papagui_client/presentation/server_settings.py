@@ -36,6 +36,17 @@ class ServerSettingsPresenter:
         "priority_documents_per_project",
         "newest_years_first",
         "minimum_customer_year",
+        "recognition_pipeline_enabled",
+        "recognition_own_names",
+        "recognition_documents_per_project_max",
+        "extraction_timeout_seconds",
+        "extraction_memory_mb",
+        "pdf_max_pages",
+        "image_max_pixels",
+        "extraction_retry_attempts",
+        "extraction_retry_delay_seconds",
+        "extraction_store_max_mb",
+        "extraction_retention_days",
     )
 
     def present(self, response: Mapping[str, object]) -> ServerSettingsViewModel:

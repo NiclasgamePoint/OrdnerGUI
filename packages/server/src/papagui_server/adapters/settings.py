@@ -20,6 +20,11 @@ class JsonSettingsRepository:
         with self._lock:
             try:
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
+                # Extend only the former shipped default; custom selections remain explicit.
+                old_extensions = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
+                if (isinstance(payload, dict) and "recognition_pipeline_enabled" not in payload
+                        and payload.get("content_extensions") == old_extensions):
+                    payload["content_extensions"] = ServerSettings().content_extensions
                 return ServerSettings.from_mapping(payload)
             except FileNotFoundError:
                 return self.defaults

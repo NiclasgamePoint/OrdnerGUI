@@ -301,6 +301,64 @@ class HttpServerControlGateway:
             raise ApiUnavailableError("server returned an invalid recognition summary")
         return RecognitionRunSummary.from_dict(value)
 
+    def recognition_blocklist(self) -> tuple[dict[str, Any], ...]:
+        response = self._transport.json("GET", "/v2/admin/recognition/blocklist")
+        entries = response.get("entries")
+        if not isinstance(entries, list) or any(
+            not isinstance(entry, Mapping) for entry in entries
+        ):
+            raise ApiUnavailableError("server returned an invalid recognition blocklist")
+        return tuple(dict(entry) for entry in entries)
+
+    def add_recognition_blocklist_entry(
+        self, kind: str, value: str, reason: str = ""
+    ) -> dict[str, Any]:
+        response = self._transport.json(
+            "POST",
+            "/v2/admin/recognition/blocklist",
+            {"kind": kind, "value": value, "reason": reason},
+        )
+        entry = response.get("entry")
+        if not isinstance(entry, Mapping):
+            raise ApiUnavailableError("server returned an invalid recognition blocklist entry")
+        return dict(entry)
+
+    def delete_recognition_blocklist_entry(self, entry_id: int) -> bool:
+        response = self._transport.json(
+            "DELETE", f"/v2/admin/recognition/blocklist/{int(entry_id)}"
+        )
+        if response.get("deleted") is not True:
+            raise ApiUnavailableError("server did not confirm recognition blocklist deletion")
+        return True
+
+    def recognition_rebuild(self) -> dict[str, Any] | None:
+        response = self._transport.json("GET", "/v2/admin/recognition/rebuild")
+        if "job" not in response:
+            raise ApiUnavailableError("server returned an invalid recognition rebuild status")
+        job = response["job"]
+        if job is None:
+            return None
+        return self._recognition_rebuild_job(response)
+
+    def start_recognition_rebuild(self) -> dict[str, Any]:
+        response = self._transport.json("POST", "/v2/admin/recognition/rebuild", {})
+        return self._recognition_rebuild_job(response)
+
+    def cancel_recognition_rebuild(self, job_id: str) -> dict[str, Any]:
+        response = self._transport.json(
+            "DELETE",
+            "/v2/admin/recognition/rebuild/"
+            f"{urllib.parse.quote(str(job_id), safe='')}",
+        )
+        return self._recognition_rebuild_job(response)
+
+    @staticmethod
+    def _recognition_rebuild_job(response: Mapping[str, Any]) -> dict[str, Any]:
+        job = response.get("job")
+        if not isinstance(job, Mapping) or not job.get("id") or not job.get("state"):
+            raise ApiUnavailableError("server returned an invalid recognition rebuild job")
+        return dict(job)
+
     def decide_recognition(
         self,
         signature: str,

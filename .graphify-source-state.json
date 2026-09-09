@@ -1,7 +1,9 @@
 {
-  "file_count": 294,
-  "fingerprint": "24e5e0dd1ffb02eb16ec4b39b26c57364760bd5ec20c8a12d6d12dc24cf8daf2",
+  "file_count": 337,
+  "fingerprint": "da29b6ab458431c555df814f55e45b8582e551eb6a3c4e0a13d23a711eb04d2e",
   "graphify_version": "0.9.53",
   "output_policy": "local-and-gitignored",
-  "schema": 1
+  "schema": 1,
+  "graph_scope": "packages/{contracts,server,client}/src/**/*.py",
+  "semantic_documents_included": false
 }

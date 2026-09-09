@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
@@ -40,6 +41,21 @@ from papagui_server.domain.errors import (
 )
 
 
+def _job_finished_after_run(job: dict[str, Any], last_run_at: str) -> bool:
+    """Do not let an older failed recheck mask a later successful index run."""
+    if not last_run_at:
+        return True
+    try:
+        finished = datetime.fromisoformat(str(job.get("finished_at", "")).replace("Z", "+00:00"))
+        evaluated = datetime.fromisoformat(last_run_at.replace("Z", "+00:00"))
+        finished = finished if finished.tzinfo else finished.replace(tzinfo=timezone.utc)
+        evaluated = evaluated if evaluated.tzinfo else evaluated.replace(tzinfo=timezone.utc)
+        return finished >= evaluated
+    except (ValueError, TypeError):
+        # An unknown timestamp is not evidence of a newer successful evaluation.
+        return True
+
+
 def create_app(
     container: ServerContainer,
     *,
@@ -50,10 +66,12 @@ def create_app(
     async def lifespan(_app: FastAPI):
         if manage_lifecycle:
             container.coordinator.start(run_on_start=run_on_start)
+            container.recognition_jobs.start()
         try:
             yield
         finally:
             if manage_lifecycle:
+                container.recognition_jobs.stop()
                 container.coordinator.stop()
 
     app = FastAPI(
@@ -522,11 +540,14 @@ def create_app(
     async def customer_suggestions(
         customer_id: int,
         suggestion_status: str | None = Query(default=None, alias="status"),
+        limit: int = Query(default=500, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+        include_groups: bool = Query(default=False),
     ) -> dict[str, Any]:
-        values, revision = container.suggestions.list_for_customer(
-            customer_id, status=suggestion_status
+        return container.suggestions.page(
+            customer_id, status=suggestion_status, limit=limit, offset=offset,
+            include_groups=include_groups,
         )
-        return {"suggestions": values, "revision": revision}
 
     @app.post(
         "/v2/customers/{customer_id}/suggestions/{suggestion_id}/decision",
@@ -547,8 +568,57 @@ def create_app(
             action=payload.action,
             expected_revision=payload.expected_revision,
             idempotency_key=idempotency_header or payload.idempotency_key,
+            reason=payload.reason,
         )
         return _mutation_response(result)
+
+    @app.get("/v2/customers/{customer_id}/recognition-status", dependencies=[Depends(require_client)], tags=["recognition"], response_model=api_models.CustomerRecognitionStatusResponse)
+    async def customer_recognition_status(customer_id: int) -> dict[str, Any]:
+        value = container.suggestions.recognition_status(customer_id)
+        value["job"] = container.recognition_jobs.latest(customer_id)
+        if value["job"] and value["job"]["state"] in {"queued", "running"}:
+            value["state"] = "running"
+            value["summary"] = "Die Kundendaten werden geprüft."
+        elif (
+            value["job"]
+            and value["job"]["state"] in {"error", "cancelled"}
+            and _job_finished_after_run(value["job"], value.get("last_run_at", ""))
+        ):
+            value["state"] = "partial" if value["job"]["state"] == "cancelled" else "error"
+            value["summary"] = "Die letzte Prüfung wurde abgebrochen." if value["state"] == "partial" else "Die letzte Prüfung ist fehlgeschlagen."
+        return value
+
+    @app.post("/v2/customers/{customer_id}/recognition", dependencies=[Depends(require_client)], tags=["recognition"], response_model=api_models.CustomerRecognitionJobResponse, status_code=202)
+    async def start_customer_recognition(customer_id: int, payload: api_models.CustomerRecognitionRequest) -> dict[str, Any]:
+        return {"job": container.recognition_jobs.request(customer_id, mode=payload.mode)}
+
+    @app.delete("/v2/customers/{customer_id}/recognition/{job_id}", dependencies=[Depends(require_client)], tags=["recognition"], response_model=api_models.CustomerRecognitionJobResponse)
+    async def cancel_customer_recognition(customer_id: int, job_id: str) -> dict[str, Any]:
+        return {"job": container.recognition_jobs.cancel(customer_id, job_id)}
+
+    @app.get("/v2/admin/recognition/blocklist", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistResponse)
+    def recognition_blocklist() -> dict[str, Any]:
+        return {"entries": container.recognition_blocklist.list()}
+
+    @app.post("/v2/admin/recognition/blocklist", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionBlocklistMutationResponse)
+    def add_recognition_blocklist(payload: api_models.RecognitionBlocklistRequest) -> dict[str, Any]:
+        return {"entry": container.recognition_blocklist.add(payload.kind, payload.value, reason=payload.reason)}
+
+    @app.delete("/v2/admin/recognition/blocklist/{entry_id}", dependencies=[Depends(require_client)], tags=["admin", "recognition"])
+    def delete_recognition_blocklist(entry_id: int) -> dict[str, bool]:
+        return {"deleted": container.recognition_blocklist.delete(entry_id)}
+
+    @app.get("/v2/admin/recognition/rebuild", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionRebuildResponse)
+    async def recognition_rebuild_status() -> dict[str, Any]:
+        return {"job": container.recognition_jobs.latest(None)}
+
+    @app.post("/v2/admin/recognition/rebuild", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionRebuildResponse, status_code=202)
+    async def start_recognition_rebuild() -> dict[str, Any]:
+        return {"job": container.recognition_jobs.request(None, mode="rebuild")}
+
+    @app.delete("/v2/admin/recognition/rebuild/{job_id}", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionRebuildResponse)
+    async def cancel_recognition_rebuild(job_id: str) -> dict[str, Any]:
+        return {"job": container.recognition_jobs.cancel(None, job_id)}
 
     @app.get("/v2/recognition/cases", dependencies=[Depends(require_client)], tags=["recognition"], response_model=api_models.RecognitionCasesResponse)
     async def recognition_cases(
@@ -564,11 +634,10 @@ def create_app(
 
     @app.post("/v2/admin/recognition/runs", dependencies=[Depends(require_client)], tags=["admin", "recognition"], response_model=api_models.RecognitionRunResponse)
     def run_recognition() -> dict[str, Any]:
-        return {
-            "summary": container.recognition.run_now(
+        with container.coordinator.operation_lock:
+            return {"summary": container.recognition.run_now(
                 minimum_year=container.settings.get().minimum_customer_year
-            )
-        }
+            )}
 
     @app.post(
         "/v2/admin/recognition/cases/{signature}/decision",

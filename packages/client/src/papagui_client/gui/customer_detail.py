@@ -28,7 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from papagui_contracts import Contact, Customer, CustomerJournalEntry, CustomerProject
+from papagui_contracts import Customer, CustomerJournalEntry, CustomerProject
+
+from .customer_suggestions import (
+    CustomerSuggestionsDialog as _CustomerSuggestionsDialog,
+    quality_label,
+    recognition_text,
+)
 
 from .dialogs.centered_popup import CenteredPopupDialog
 from .widgets.buttons import AppButton, CountBadgeButton
@@ -223,194 +229,6 @@ class _JournalEntryCard(QFrame):
             self.deleteRequested.emit(self.view)
 
 
-FIELD_LABELS = {
-    "company": "Unternehmen",
-    "contact_name": "Kontaktname",
-    "email": "E-Mail-Adresse",
-    "phone": "Telefonnummer",
-    "street": "Straße und Hausnummer",
-    "postal_code": "Postleitzahl",
-    "city": "Ort",
-    "entity_type": "Kundentyp",
-}
-
-
-class _CustomerSuggestionsDialog(CenteredPopupDialog):
-    decisionRequested = Signal(object, str, int)
-
-    def __init__(
-        self,
-        suggestions,
-        revision: int,
-        parent=None,
-        customer: Customer | None = None,
-    ):
-        super().__init__(parent)
-        self._suggestions = tuple(suggestions)
-        self._revision = revision
-        self._customer = customer
-        self.resize(760, 600)
-        self.setMinimumSize(620, 440)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        body = QFrame()
-        body.setObjectName("RecognitionReviewBody")
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
-
-        title = QLabel("Kontaktdaten prüfen")
-        title.setObjectName("PopupSectionTitle")
-        layout.addWidget(title)
-        hint = QLabel(
-            "Diese Kunden- oder Kontaktdaten waren nicht sicher genug. "
-            "Du kannst jeden Vorschlag bestätigen oder ablehnen."
-        )
-        hint.setObjectName("PopupCaption")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("PageScrollArea")
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        content.setObjectName("ThemedScrollContent")
-        suggestion_layout = QVBoxLayout(content)
-        suggestion_layout.setContentsMargins(4, 4, 8, 4)
-        suggestion_layout.setSpacing(10)
-        if not self._suggestions:
-            empty = QLabel("Keine Kunden- oder Kontaktdaten mehr zu prüfen.")
-            empty.setObjectName("SearchSectionMessage")
-            suggestion_layout.addWidget(empty)
-        for suggestion in self._suggestions:
-            suggestion_layout.addWidget(self._card(suggestion))
-        suggestion_layout.addStretch(1)
-        scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
-
-        close_row = QHBoxLayout()
-        self.rescan_button = AppButton(
-            "Kontaktdaten neu suchen", AppButton.SECONDARY
-        )
-        self.rescan_button.setEnabled(False)
-        self.rescan_button.setToolTip(
-            "Erfordert einen neuen serverseitigen Erkennungslauf; dieser wird im "
-            "Indexserver-Fenster gestartet."
-        )
-        close_row.addWidget(self.rescan_button)
-        close_row.addStretch(1)
-        close_button = AppButton("Schließen")
-        close_button.clicked.connect(self.accept)
-        close_row.addWidget(close_button)
-        layout.addLayout(close_row)
-        root.addWidget(body)
-
-    def _card(self, suggestion) -> QWidget:
-        card = QFrame()
-        card.setObjectName("PageCard")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        contact = getattr(suggestion, "contact", None)
-        if getattr(suggestion, "suggestion_type", "field") == "contact" and contact:
-            heading_text = f"Ansprechpartner: {contact.name or '-'}"
-        else:
-            heading_text = (
-                f"{FIELD_LABELS.get(suggestion.field_name, suggestion.field_name)}: "
-                f"{suggestion.value}"
-            )
-        heading = QLabel(heading_text)
-        heading.setObjectName("SectionTitle")
-        heading.setWordWrap(True)
-        layout.addWidget(heading)
-        if getattr(suggestion, "suggestion_type", "field") == "contact" and contact:
-            for label, value in (
-                ("Rolle", contact.role),
-                ("E-Mail", contact.email),
-                ("Telefon", contact.phone),
-            ):
-                detail = QLabel(f"{label}: {value or '-'}")
-                detail.setObjectName("PopupCaption")
-                detail.setWordWrap(True)
-                layout.addWidget(detail)
-            conflict = self._contact_conflict_text(contact)
-            if conflict:
-                warning = QLabel(conflict)
-                warning.setObjectName("PopupWarning")
-                warning.setAccessibleName("Abweichung von manuellen Kundendaten")
-                warning.setWordWrap(True)
-                layout.addWidget(warning)
-        for text in (
-            f"Sicherheit: {suggestion.confidence:.0%}",
-            f"Begründung: {suggestion.rule}" if suggestion.rule else "",
-            f"Quelle: {suggestion.source.source_id}:{suggestion.source.relative_path}",
-            f"Textausschnitt: {suggestion.excerpt}" if suggestion.excerpt else "",
-        ):
-            if text:
-                label = QLabel(text)
-                label.setObjectName("PopupCaption")
-                label.setWordWrap(True)
-                layout.addWidget(label)
-        actions = QHBoxLayout()
-        actions.addStretch(1)
-        reject = AppButton("Ablehnen", AppButton.DANGER)
-        accept = AppButton("Annehmen")
-        reject.clicked.connect(
-            lambda _checked=False, value=suggestion: self._decide(value, "reject")
-        )
-        accept.clicked.connect(
-            lambda _checked=False, value=suggestion: self._decide(value, "accept")
-        )
-        actions.addWidget(reject)
-        actions.addWidget(accept)
-        layout.addLayout(actions)
-        return card
-
-    def _contact_conflict_text(self, proposed: Contact) -> str:
-        """Describe conflicting manual contact fields without mutating either side."""
-
-        if self._customer is None:
-            return ""
-        for existing in self._customer.contacts:
-            same_name = bool(
-                proposed.name.strip()
-                and existing.name.strip().casefold() == proposed.name.strip().casefold()
-            )
-            same_email = bool(
-                proposed.email.strip()
-                and existing.email.strip().casefold()
-                == proposed.email.strip().casefold()
-            )
-            if not (same_name or same_email):
-                continue
-            conflicts = []
-            for label, current, new in (
-                ("Rolle", existing.role, proposed.role),
-                ("E-Mail", existing.email, proposed.email),
-                ("Telefon", existing.phone, proposed.phone),
-            ):
-                current_value = current.strip()
-                new_value = new.strip()
-                if (
-                    current_value
-                    and new_value
-                    and current_value.casefold() != new_value.casefold()
-                ):
-                    conflicts.append(
-                        f"{label}: „{current_value}“ statt „{new_value}“"
-                    )
-            if conflicts:
-                return (
-                    "Abweichung von manuell gepflegten Kontaktdaten; vorhandene "
-                    "Angaben bleiben erhalten: "
-                    + "; ".join(conflicts)
-                )
-        return ""
-
-    def _decide(self, suggestion, action: str) -> None:
-        self.decisionRequested.emit(suggestion, action, self._revision)
-
-
 class CustomerDetailWidget(QWidget):
     """Customer details with the original master-data and services cards."""
 
@@ -425,6 +243,9 @@ class CustomerDetailWidget(QWidget):
     journalEditRequested = Signal(object)
     journalDeleteRequested = Signal(object)
     suggestionDecisionRequested = Signal(object, str, int)
+    suggestionPageRequested = Signal(int)
+    suggestionSourceRequested = Signal(object)
+    recognitionRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -433,6 +254,14 @@ class CustomerDetailWidget(QWidget):
         self._journal_views = ()
         self._suggestions = ()
         self._suggestion_revision = 0
+        self._suggestion_total = 0
+        self._suggestion_offset = 0
+        self._suggestion_has_more = False
+        self._recognition_status = {}
+        self._suggestion_error = ""
+        self._suggestion_offline = False
+        self._suggestion_busy = False
+        self._suggestion_dialog = None
         self._notes_sync_in_progress = False
         self._folder_rows: list[ResultRow] = []
         self._journal_cards: list[_JournalEntryCard] = []
@@ -563,6 +392,11 @@ class CustomerDetailWidget(QWidget):
         buttons.addWidget(self.edit_button, 1)
         buttons.addWidget(self.review_button, 1)
         layout.addLayout(buttons)
+        self.recognition_status_label = QLabel("")
+        self.recognition_status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.recognition_status_label.setWordWrap(True)
+        self.recognition_status_label.setObjectName("PopupCaption")
+        layout.addWidget(self.recognition_status_label)
         return card
 
     def _build_notes_tab(self) -> QWidget:
@@ -783,6 +617,12 @@ class CustomerDetailWidget(QWidget):
                 )
             )
 
+    def set_project_summaries(self, summaries: dict[str, dict]) -> None:
+        """Refresh project metadata without resetting editable customer fields."""
+
+        if self._customer is not None:
+            self._set_projects(self._customer.projects, summaries)
+
     @staticmethod
     def _project_source(project: CustomerProject) -> str:
         if project.source is None:
@@ -813,23 +653,89 @@ class CustomerDetailWidget(QWidget):
             )
             self._journal_cards.append(card)
 
-    def set_suggestions(self, suggestions, revision: int) -> None:
+    def set_suggestions(self, suggestions, revision: int, *, total=None, offset=0,
+                        has_more=False, recognition=None, offline=False) -> None:
         self._suggestions = tuple(suggestions)
         self._suggestion_revision = revision
+        self._suggestion_total = len(self._suggestions) if total is None else total
+        self._suggestion_offset = offset
+        self._suggestion_has_more = has_more
+        self._recognition_status = dict(recognition or {})
+        self._suggestion_offline = offline
+        self._suggestion_error = ""
         self.suggestions.clear()
         for suggestion in self._suggestions:
             self.suggestions.addItem(
                 f"{suggestion.field_name}: {suggestion.value} "
-                f"({suggestion.confidence:.0%})\n"
+                f"({quality_label(suggestion)})\n"
                 f"{suggestion.source.source_id}:{suggestion.source.relative_path} · "
                 f"{suggestion.rule}\n{suggestion.excerpt}"
             )
-        count = len(self._suggestions)
+        count = self._suggestion_total
+        self.review_button.setEnabled(True)
         self.review_button.set_count(count)
         self.review_button.setToolTip(
             f"{count} Kontaktdaten zu prüfen"
             if count
             else "Keine Kontaktdaten zu prüfen"
+        )
+        self.recognition_status_label.setText(
+            ("Offline – gespeicherter Datenstand. " if offline else "")
+            + recognition_text(self._recognition_status)
+        )
+        self._update_suggestion_dialog()
+
+    def set_suggestions_loading(self, revision: int) -> None:
+        """Expose a non-blocking loading state while the server is queried."""
+
+        self.set_suggestions((), revision)
+        self.review_button.setEnabled(False)
+        self.review_button.setToolTip("Kundendaten werden geladen …")
+        self.recognition_status_label.setText("Kundendaten werden geladen …")
+
+    def set_suggestions_error(self, error: str, revision: int) -> None:
+        """Keep the detail page usable when the optional server query fails."""
+
+        self._suggestion_error = error
+        self._suggestion_revision = revision
+        self.review_button.setEnabled(True)
+        self.review_button.setToolTip(
+            f"Kundendaten konnten nicht geladen werden: {error}"
+        )
+        self.recognition_status_label.setText(f"Kundendaten konnten nicht geladen werden: {error}")
+        self._update_suggestion_dialog()
+
+    def _update_suggestion_dialog(self) -> None:
+        dialog = self._suggestion_dialog
+        if dialog is not None and hasattr(dialog, "set_data"):
+            dialog.set_data(
+                self._suggestions, self._suggestion_revision, self._customer,
+                total=self._suggestion_total, offset=self._suggestion_offset,
+                has_more=self._suggestion_has_more, recognition=self._recognition_status,
+                offline=self._suggestion_offline, error=self._suggestion_error,
+            )
+            dialog.set_busy(self._suggestion_busy)
+
+    def set_suggestions_busy(self, busy: bool) -> None:
+        self._suggestion_busy = busy
+        if self._suggestion_dialog is not None:
+            self._suggestion_dialog.set_busy(busy)
+
+    def suggestion_rejection_reason(self, suggestion_id: int) -> str:
+        if self._suggestion_dialog is None:
+            return ""
+        return self._suggestion_dialog._rejection_reasons.get(suggestion_id, "")
+
+    def apply_suggestion_decision(self, suggestion_id: int, customer: Customer) -> None:
+        """Keep a live dialog and the next write on the returned server revision."""
+        self.set_customer(customer)
+        self._suggestions = tuple(item for item in self._suggestions if item.id != suggestion_id)
+        self._suggestion_revision = customer.revision
+        self._suggestion_total = max(0, self._suggestion_total - 1)
+        self.set_suggestions(
+            self._suggestions, customer.revision, total=self._suggestion_total,
+            offset=self._suggestion_offset, has_more=self._suggestion_has_more,
+            recognition=self._recognition_status,
         )
 
     def selected_journal_view(self):
@@ -855,16 +761,24 @@ class CustomerDetailWidget(QWidget):
             )
 
     def _open_suggestions(self) -> None:
-        if not self._suggestions:
-            return
         dialog = _CustomerSuggestionsDialog(
             self._suggestions,
             self._suggestion_revision,
             self,
             self._customer,
         )
+        self._suggestion_dialog = dialog
         dialog.decisionRequested.connect(self.suggestionDecisionRequested.emit)
-        dialog.exec()
+        if hasattr(dialog, "pageRequested"):
+            dialog.pageRequested.connect(self.suggestionPageRequested.emit)
+            dialog.sourceRequested.connect(self.suggestionSourceRequested.emit)
+            dialog.recognitionRequested.connect(self.recognitionRequested.emit)
+            dialog.manualResolutionRequested.connect(self.customerEditRequested.emit)
+            self._update_suggestion_dialog()
+        try:
+            dialog.exec()
+        finally:
+            self._suggestion_dialog = None
 
     def _create_journal_entry(self) -> None:
         body = self.journal_input.toPlainText().strip()

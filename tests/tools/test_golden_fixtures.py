@@ -44,7 +44,7 @@ def test_v0_4_1_customer_database_fixture_survives_v2_schema_migration(
     backup = migrate_customer_database(database, state)
 
     assert backup is not None and backup.is_file()
-    assert json.loads(state.read_text(encoding="utf-8"))["customer_schema"] == 2
+    assert json.loads(state.read_text(encoding="utf-8"))["customer_schema"] == 3
     with sqlite3.connect(database) as connection:
         customer = connection.execute(
             "SELECT display_name, revision FROM customers WHERE id=1"

@@ -48,12 +48,23 @@ class IndexSettings(JsonDto):
     ocr_extension_threshold: int = 500
     ocr_timeout_seconds: int = 10
     pdf_text_timeout_seconds: int = 45
-    content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
+    content_extensions: str = "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini,jpg,jpeg,png,tif,tiff,bmp,webp"
     excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
     resource_profile: ResourceProfile = ResourceProfile.BALANCED
     preferred_document_patterns: str = "anschreiben,angebot,auftrag,vertrag"
     priority_documents_per_project: int = 24
     newest_years_first: bool = True
+    extraction_timeout_seconds: int = 90
+    extraction_memory_mb: int = 768
+    pdf_max_pages: int = 200
+    image_max_pixels: int = 25000000
+    extraction_retry_attempts: int = 3
+    extraction_retry_delay_seconds: int = 300
+    extraction_store_max_mb: int = 1024
+    extraction_retention_days: int = 30
+    recognition_documents_per_project_max: int = 500
+    recognition_pipeline_enabled: bool = True
+    recognition_own_names: str = ''
 
     def __post_init__(self) -> None:
         require_int(
@@ -94,6 +105,17 @@ class IndexSettings(JsonDto):
             minimum=0,
         )
         require_bool(self.newest_years_first, "newest_years_first")
+        require_int(self.extraction_timeout_seconds, "extraction_timeout_seconds", minimum=1, maximum=900)
+        require_int(self.extraction_memory_mb, "extraction_memory_mb", minimum=128, maximum=2048)
+        require_int(self.pdf_max_pages, "pdf_max_pages", minimum=1, maximum=2000)
+        require_int(self.image_max_pixels, "image_max_pixels", minimum=1000000, maximum=100000000)
+        require_int(self.extraction_retry_attempts, "extraction_retry_attempts", minimum=1, maximum=10)
+        require_int(self.extraction_retry_delay_seconds, "extraction_retry_delay_seconds", minimum=1, maximum=86400)
+        require_int(self.extraction_store_max_mb, "extraction_store_max_mb", minimum=16, maximum=102400)
+        require_int(self.extraction_retention_days, "extraction_retention_days", minimum=1, maximum=365)
+        require_int(self.recognition_documents_per_project_max, "recognition_documents_per_project_max", minimum=1, maximum=500)
+        require_bool(self.recognition_pipeline_enabled, "recognition_pipeline_enabled")
+        require_string(self.recognition_own_names, "recognition_own_names", allow_empty=True)
         if not isinstance(self.resource_profile, ResourceProfile):
             try:
                 profile = ResourceProfile(str(self.resource_profile))
@@ -179,4 +201,15 @@ class IndexSettings(JsonDto):
             ),
             priority_documents_per_project=integer("priority_documents_per_project", 0),
             newest_years_first=boolean("newest_years_first"),
+            extraction_timeout_seconds=integer("extraction_timeout_seconds", 1, 900),
+            extraction_memory_mb=integer("extraction_memory_mb", 128, 2048),
+            pdf_max_pages=integer("pdf_max_pages", 1, 2000),
+            image_max_pixels=integer("image_max_pixels", 1000000, 100000000),
+            extraction_retry_attempts=integer("extraction_retry_attempts", 1, 10),
+            extraction_retry_delay_seconds=integer("extraction_retry_delay_seconds", 1, 86400),
+            extraction_store_max_mb=integer("extraction_store_max_mb", 16, 102400),
+            extraction_retention_days=integer("extraction_retention_days", 1, 365),
+            recognition_documents_per_project_max=integer("recognition_documents_per_project_max", 1, 500),
+            recognition_pipeline_enabled=boolean("recognition_pipeline_enabled"),
+            recognition_own_names=require_string(mapping_get(payload, "recognition_own_names", ""), "recognition_own_names", allow_empty=True),
         )

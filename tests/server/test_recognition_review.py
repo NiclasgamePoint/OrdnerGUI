@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import sqlite3
 
 import httpx
 import pytest
@@ -19,11 +20,11 @@ from papagui_server.domain.models import ServerSettings
 from tests.tools.golden_fixtures import materialize_sqlite_fixture
 
 
-def _ambiguous_container(tmp_path: Path):
+def _ambiguous_container(tmp_path: Path, *, same_city: bool = False):
     source = tmp_path / "source"
     for service, year, label in (
         ("Planung", "2026", "Alpha GmbH, Köln"),
-        ("Beratung", "2025", "Alpha GmbH, Bonn"),
+        ("Beratung", "2025", "Alpha GmbH, Köln" if same_city else "Alpha GmbH, Bonn"),
     ):
         folder = source / service / year / label
         folder.mkdir(parents=True)
@@ -150,14 +151,17 @@ def test_accept_creates_customer_projects_and_is_idempotent(tmp_path: Path) -> N
 
 
 def test_assign_requires_current_revision_and_persists_project_links(tmp_path: Path) -> None:
-    container = _ambiguous_container(tmp_path)
-    target = _seed_customer(container, city="Hamburg")
+    container = _ambiguous_container(tmp_path, same_city=True)
+    target = _seed_customer(container, display_name="Alphaa GmbH", city="Hamburg")
     container.recognition.synchronize(
         container.configuration.source_path,
         source_id="primary",
         minimum_year=2016,
     )
-    signature = container.recognition.list_cases()[0]["signature"]
+    case = container.recognition.list_cases()[0]
+    assert case["reason"] == "similar_name"
+    assert case["suggested_customer_ids"] == [target["id"]]
+    signature = case["signature"]
     with pytest.raises(ResourceNotFoundError):
         container.recognition.decide(
             signature,
@@ -374,6 +378,14 @@ def test_migrated_contact_suggestion_can_be_accepted_without_overwrite(
     materialize_sqlite_fixture(
         "migration/customers-v0.4.1.sql", data / "customers.db"
     )
+    # Use a plausible invented person and a syntactically valid reserved email
+    # domain for the acceptance path. Invalid legacy suggestions are tested
+    # separately; this historical golden fixture intentionally has placeholders.
+    with sqlite3.connect(data / "customers.db") as connection:
+        connection.execute(
+            "UPDATE customer_data_suggestions SET contact_name='Max Winter',"
+            "contact_email='max@example.org' WHERE suggestion_type='contact'"
+        )
     source = tmp_path / "source"
     (source / "Beratung").mkdir(parents=True)
     container = build_container(
@@ -386,7 +398,7 @@ def test_migrated_contact_suggestion_can_be_accepted_without_overwrite(
     )
     suggestions, revision = container.suggestions.list_for_customer(1)
     contact = next(item for item in suggestions if item["suggestion_type"] == "contact")
-    assert contact["contact"]["email"] == "max@beispiel.invalid"
+    assert contact["contact"]["email"] == "max@example.org"
     accepted = container.suggestions.decide(
         1,
         contact["id"],
@@ -397,7 +409,7 @@ def test_migrated_contact_suggestion_can_be_accepted_without_overwrite(
     assert accepted.body["customer"]["revision"] == revision + 1
     assert {item["email"] for item in accepted.body["customer"]["contacts"]} == {
         "erika@beispiel.invalid",
-        "max@beispiel.invalid",
+        "max@example.org",
     }
 
 
@@ -405,17 +417,19 @@ def test_recognition_assign_http_conflict_returns_current_customer(
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
-        container = _ambiguous_container(tmp_path)
-        target = _seed_customer(container, city="Hamburg")
+        container = _ambiguous_container(tmp_path, same_city=True)
+        target = _seed_customer(container, display_name="Alphaa GmbH", city="Hamburg")
         container.recognition.synchronize(
             container.configuration.source_path,
             source_id="primary",
             minimum_year=2016,
         )
-        signature = container.recognition.list_cases()[0]["signature"]
+        case = container.recognition.list_cases()[0]
+        assert case["reason"] == "similar_name"
+        signature = case["signature"]
         changed = container.customers.update_customer(
             target["id"],
-            {"display_name": "Alpha GmbH", "city": "Hamburg"},
+            {"display_name": "Alphaa GmbH", "city": "Hamburg"},
             expected_revision=target["revision"],
             idempotency_key="parallel-customer-change",
         ).body["customer"]

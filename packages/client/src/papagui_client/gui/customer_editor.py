@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -134,8 +134,11 @@ class CustomerEditorDialog(CenteredPopupDialog):
         form.setVerticalSpacing(10)
 
         self.entity_type = QComboBox()
-        self.entity_type.setEditable(True)
         self.entity_type.addItems(("Unternehmen", "Privatperson", "Organisation"))
+        # Preserve imported/legacy values without turning the selector into a
+        # line edit, whose text area consumes clicks instead of opening the list.
+        if self.entity_type.findText(self._original.entity_type) < 0:
+            self.entity_type.addItem(self._original.entity_type)
         self.entity_type.setCurrentText(self._original.entity_type)
 
         self.display_name = QLineEdit(self._original.display_name)
@@ -321,7 +324,10 @@ class CustomerEditorDialog(CenteredPopupDialog):
         for column, value in enumerate(
             (contact.name, contact.role, contact.phone, contact.email)
         ):
-            self.contacts_table.setItem(row, column, QTableWidgetItem(value))
+            item = QTableWidgetItem(value)
+            if column == 0:
+                item.setData(Qt.ItemDataRole.UserRole, getattr(contact, "id", None))
+            self.contacts_table.setItem(row, column, item)
 
     def _update_contact_role_visibility(self, *_args) -> None:
         is_company = self.entity_type.currentText().strip() == "Unternehmen"
@@ -348,6 +354,8 @@ class CustomerEditorDialog(CenteredPopupDialog):
                         role=values[1],
                         phone=values[2],
                         email=values[3],
+                        id=self.contacts_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                        if self.contacts_table.item(row, 0) is not None else None,
                     )
                 )
         return tuple(contacts)

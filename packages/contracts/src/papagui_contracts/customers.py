@@ -39,10 +39,15 @@ class Contact(JsonDto):
     role: str = ""
     email: str = ""
     phone: str = ""
+    id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("name", "role", "email", "phone"):
             require_string(getattr(self, field_name), field_name, allow_empty=True)
+        if self.id is not None:
+            require_string(self.id, "contact.id")
+            if len(self.id) > 128:
+                raise ContractValidationError("contact.id is too long")
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "Contact":
@@ -52,6 +57,7 @@ class Contact(JsonDto):
             role=require_string(mapping_get(payload, "role", ""), "role", allow_empty=True),
             email=require_string(mapping_get(payload, "email", ""), "email", allow_empty=True),
             phone=require_string(mapping_get(payload, "phone", ""), "phone", allow_empty=True),
+            id=mapping_get(payload, "id", None),
         )
 
 

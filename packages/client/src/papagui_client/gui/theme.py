@@ -955,6 +955,75 @@ def build_stylesheet(
         border-radius: 14px;
     }}
 
+    QWidget#RecognitionReviewContent,
+    QScrollArea#RecognitionReviewScroll,
+    QScrollArea#RecognitionReviewScroll QWidget#qt_scrollarea_viewport,
+    QWidget#ReviewCardActions,
+    QWidget#ReviewEvidencePanel {{
+        background: transparent;
+        border: none;
+    }}
+
+    QFrame#CustomerSuggestionCard {{
+        background-color: {surface};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 10px;
+    }}
+
+    QFrame#ReviewSourceCard {{
+        background-color: {card};
+        border: 1px solid {border};
+        border-radius: 8px;
+    }}
+
+    QLabel#ReviewTitle {{
+        color: {text};
+        font-size: {scaled(20)}px;
+        font-weight: 700;
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ReviewValue {{
+        color: {text};
+        font-size: {scaled(16)}px;
+        font-weight: 700;
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ReviewField, QLabel#ReviewGroupTitle {{
+        color: {text};
+        font-weight: 600;
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ReviewCurrent, QLabel#ReviewExcerpt {{
+        color: {text};
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ReviewMeta, QLabel#ReviewSourcePath, QLabel#ReviewStatus {{
+        color: {muted};
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#ReviewWarning {{
+        color: {text};
+        font-weight: 600;
+        background: transparent;
+        border: none;
+    }}
+
+    QPushButton#ReviewSourceButton {{
+        text-align: left;
+        font-weight: 600;
+    }}
+
     QFrame#ExistingCustomerAssignment {{
         background-color: {chip};
         color: {text};

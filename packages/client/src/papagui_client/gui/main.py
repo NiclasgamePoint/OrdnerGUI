@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field, replace
 import os
 import sys
 
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from papagui_client.composition import ClientContainer
+from papagui_client.adapters.http_api import ApiConflictError
+from papagui_client.adapters.http_review import SuggestionPage
 from papagui_client.presentation.coordinators import ClientPage, ConflictCase
 from papagui_client.application.models import (
     GlobalSearchHit,
@@ -46,6 +49,23 @@ from .widgets import AppHeader, IndexStatusBar, SearchFilterPopup
 
 
 STYLE = build_stylesheet("light", "#2db89d", 100, 13)
+
+
+@dataclass(frozen=True, slots=True)
+class _CustomerDetailLoadResult:
+    """I/O result that can safely cross from the worker into the GUI thread."""
+
+    request_id: int
+    customer_key: str
+    summaries: dict[str, dict]
+    journal_views: tuple
+    suggestions: tuple
+    suggestion_revision: int
+    suggestion_error: str = ""
+    suggestion_total: int | None = None
+    suggestion_has_more: bool = False
+    recognition: dict = field(default_factory=dict)
+    offline: bool = False
 
 
 class _CatalogBrowserCompatibility:
@@ -75,6 +95,12 @@ class ClientMainWindow(QMainWindow):
         self._customer_views = []
         self._syncing = False
         self._closing = False
+        self._customer_detail_request_id = 0
+        self._suggestion_write_busy = False
+        self._recognition_poll = QTimer(self)
+        self._recognition_poll.setSingleShot(True)
+        self._recognition_poll.setInterval(2500)
+        self._recognition_poll.timeout.connect(self._poll_customer_recognition)
         self._folder_routes: dict[object, tuple[str, str]] = {}
         self._last_search_page = None
         self._application_statistics = ApplicationStatistics()
@@ -187,6 +213,9 @@ class ClientMainWindow(QMainWindow):
         self.customer_detail.suggestionDecisionRequested.connect(
             self.decide_customer_suggestion
         )
+        self.customer_detail.suggestionPageRequested.connect(self.load_suggestion_page)
+        self.customer_detail.suggestionSourceRequested.connect(self.open_suggestion_source)
+        self.customer_detail.recognitionRequested.connect(self.start_customer_recognition)
         self.folder_page.backRequested.connect(self.navigator.back)
         self.folder_page.folderExpansionRequested.connect(
             self._load_folder_children
@@ -450,11 +479,10 @@ class ClientMainWindow(QMainWindow):
 
     def open_customer_page(self, key: object) -> None:
         normalized = str(key)
-        for row, view in enumerate(self._customer_views):
+        for view in self._customer_views:
             if view.key == normalized or (
                 view.customer.id is not None and str(view.customer.id) == normalized
             ):
-                self.customer_list.setCurrentRow(row)
                 self.navigator.navigate("customer", view.key)
                 return
         self.status_bar.set_text("Der ausgewählte Kunde existiert nicht mehr.")
@@ -519,11 +547,11 @@ class ClientMainWindow(QMainWindow):
         normalized = str(key)
         for row, view in enumerate(self._customer_views):
             if view.key == normalized:
+                self.page_stack.setCurrentWidget(self.customer_page)
                 if self.customer_list.currentRow() != row:
                     self.customer_list.setCurrentRow(row)
                 else:
                     self._show_customer_detail(row)
-                self.page_stack.setCurrentWidget(self.customer_page)
                 return
         self.status_bar.set_text("Der ausgewählte Kunde existiert nicht mehr.")
         QTimer.singleShot(0, self.navigator.back)
@@ -869,28 +897,199 @@ class ClientMainWindow(QMainWindow):
         self.refresh_customers()
 
     def _show_customer_detail(self, row: int) -> None:
+        self._recognition_poll.stop()
+        self.customer_detail.set_suggestions_busy(False)
+        self._customer_detail_request_id += 1
+        request_id = self._customer_detail_request_id
         selected = self._customer_views[row] if 0 <= row < len(self._customer_views) else None
         customer = selected.customer if selected is not None else None
-        summaries = self._customer_project_summaries(customer) if customer is not None else {}
-        self.customer_detail.set_customer(customer, summaries)
+        self.customer_detail.set_customer(customer)
+        self.customer_detail.set_journal(())
         if customer is None or customer.id is None:
-            self.customer_detail.set_journal(())
             self.customer_detail.set_suggestions((), 0)
             return
+
+        self.customer_detail.set_suggestions_loading(customer.revision)
+        customer_key = selected.key
+        task = BackgroundTask(
+            lambda: self._load_customer_detail(
+                request_id,
+                customer_key,
+                customer,
+            )
+        )
+        task.signals.succeeded.connect(self._apply_customer_detail)
+        self._start_task(task)
+
+    def _load_customer_detail(
+        self,
+        request_id: int,
+        customer_key: str,
+        customer,
+    ) -> _CustomerDetailLoadResult:
+        """Load all potentially blocking detail data outside Qt's GUI thread."""
+
+        summaries = self._customer_project_summaries(customer)
         try:
             journals = getattr(self._container, "journals", None)
-            self.customer_detail.set_journal(
-                journals.list(customer.id) if journals is not None else ()
-            )
+            journal_views = tuple(journals.list(customer.id)) if journals is not None else ()
         except Exception:
-            self.customer_detail.set_journal(())
+            journal_views = ()
+        suggestion_error = ""
+        page = None
         try:
-            suggestions, revision = self._container.review_gateway.customer_suggestions(
-                customer.id, "pending"
+            page = self._read_suggestion_page(customer.id)
+            suggestions, revision = page.suggestions, page.revision
+        except Exception as exc:
+            suggestions, revision = (), customer.revision
+            suggestion_error = str(exc)
+        return _CustomerDetailLoadResult(
+            request_id=request_id,
+            customer_key=customer_key,
+            summaries=summaries,
+            journal_views=journal_views,
+            suggestions=tuple(suggestions),
+            suggestion_revision=revision,
+            suggestion_error=suggestion_error,
+            suggestion_total=page.total if page else None,
+            suggestion_has_more=page.has_more if page else False,
+            recognition=page.recognition if page else {},
+            offline=page.offline if page else False,
+        )
+
+    def _apply_customer_detail(self, result: _CustomerDetailLoadResult) -> None:
+        """Apply only the newest response; older requests may finish later."""
+
+        if self._closing or result.request_id != self._customer_detail_request_id:
+            return
+        selected = self._selected_customer()
+        if selected is None or selected.key != result.customer_key:
+            return
+        self.customer_detail.set_project_summaries(result.summaries)
+        self.customer_detail.set_journal(result.journal_views)
+        if result.suggestion_error:
+            self.customer_detail.set_suggestions_error(
+                result.suggestion_error,
+                result.suggestion_revision,
             )
-            self.customer_detail.set_suggestions(suggestions, revision)
-        except Exception:
-            self.customer_detail.set_suggestions((), customer.revision)
+        else:
+            self.customer_detail.set_suggestions(
+                result.suggestions,
+                result.suggestion_revision,
+                total=result.suggestion_total, has_more=result.suggestion_has_more,
+                recognition=result.recognition, offline=result.offline,
+            )
+            self._schedule_recognition_poll(result.recognition)
+
+    def _read_suggestion_page(self, customer_id, offset=0) -> SuggestionPage:
+        gateway = self._container.review_gateway
+        page_reader = getattr(gateway, "customer_suggestions_page", None)
+        if callable(page_reader):
+            page = page_reader(customer_id, "pending", limit=30, offset=offset)
+            if not page.offline:
+                try:
+                    status = gateway.recognition_status(customer_id)
+                    page = replace(page, recognition=status)
+                except Exception:
+                    # A legacy server may serve candidates without a status route.
+                    pass
+            return page
+        suggestions, revision = gateway.customer_suggestions(customer_id, "pending")
+        return SuggestionPage(tuple(suggestions[offset:offset + 30]), revision,
+                              len(suggestions), offset + 30 < len(suggestions))
+
+    def load_suggestion_page(self, offset: int = 0) -> None:
+        selected = self._selected_customer()
+        if selected is None or selected.customer.id is None or self._suggestion_write_busy:
+            self.customer_detail.set_suggestions_busy(False)
+            return
+        self._customer_detail_request_id += 1
+        request_id = self._customer_detail_request_id
+        customer_id = selected.customer.id
+        self.customer_detail.set_suggestions_busy(True)
+
+        def read_page():
+            try:
+                return customer_id, request_id, offset, self._read_suggestion_page(customer_id, offset), None
+            except Exception as error:
+                return customer_id, request_id, offset, None, error
+
+        task = BackgroundTask(read_page)
+        task.signals.succeeded.connect(self._apply_suggestion_page)
+        self._start_task(task)
+
+    def _apply_suggestion_page(self, result) -> None:
+        customer_id, request_id, offset, page, error = result
+        if not self._review_result_is_current(customer_id, request_id):
+            return
+        self.customer_detail.set_suggestions_busy(False)
+        if error is not None:
+            self.customer_detail.set_suggestions_error(str(error), self.customer_detail._suggestion_revision)
+            return
+        if offset and not page.suggestions and page.total:
+            # A decision can resolve several alternatives and remove the last page.
+            self.load_suggestion_page(min(offset - 30, ((page.total - 1) // 30) * 30))
+            return
+        self.customer_detail.set_suggestions(
+            page.suggestions, page.revision, total=page.total, offset=offset if page.total else 0,
+            has_more=page.has_more, recognition=page.recognition, offline=page.offline,
+        )
+        self._schedule_recognition_poll(page.recognition)
+
+    def _review_result_is_current(self, customer_id: int, request_id: int) -> bool:
+        selected = self._selected_customer()
+        return bool(not self._closing and request_id == self._customer_detail_request_id
+                    and selected is not None and selected.customer.id == customer_id)
+
+    def open_suggestion_source(self, source) -> None:
+        try:
+            path = str(self._container.paths.resolve(source))
+        except Exception as error:
+            QMessageBox.warning(self, "Quelle konnte nicht geöffnet werden", str(error))
+            return
+        self.open_native_file(path)
+
+    def start_customer_recognition(self, mode: str) -> None:
+        selected = self._selected_customer()
+        if selected is None or selected.customer.id is None or self._suggestion_write_busy:
+            return
+        customer_id = selected.customer.id
+        request_id = self._customer_detail_request_id
+        self.customer_detail.set_suggestions_busy(True)
+
+        def start():
+            try:
+                response = self._container.review_gateway.start_customer_recognition(customer_id, mode)
+                return customer_id, request_id, response, None
+            except Exception as error:
+                return customer_id, request_id, None, error
+
+        task = BackgroundTask(start)
+        task.signals.succeeded.connect(self._apply_recognition_start)
+        self._start_task(task)
+
+    def _apply_recognition_start(self, result) -> None:
+        customer_id, request_id, _response, error = result
+        if not self._review_result_is_current(customer_id, request_id):
+            return
+        self.customer_detail.set_suggestions_busy(False)
+        if error is not None:
+            self.customer_detail.set_suggestions_error(str(error), self.customer_detail._suggestion_revision)
+            return
+        self.customer_detail._recognition_status = {"state": "running"}
+        self.customer_detail.recognition_status_label.setText("Kundendaten werden auf dem Server geprüft …")
+        self.customer_detail._update_suggestion_dialog()
+        self._recognition_poll.start()
+
+    def _schedule_recognition_poll(self, recognition) -> None:
+        if recognition.get("state") == "running":
+            self._recognition_poll.start()
+
+    def _poll_customer_recognition(self) -> None:
+        if self._suggestion_write_busy:
+            self._recognition_poll.start()
+        else:
+            self.load_suggestion_page(self.customer_detail._suggestion_offset)
 
     def _customer_project_summaries(self, customer) -> dict[str, dict]:
         summaries: dict[str, dict] = {}
@@ -1024,25 +1223,61 @@ class ClientMainWindow(QMainWindow):
         if hit.record.kind is not GlobalSearchKind.CUSTOMER or hit.record.customer_id is None:
             return
         key = str(hit.record.customer_id)
-        for row, view in enumerate(self._customer_views):
+        for view in self._customer_views:
             if view.key == key:
-                self.tabs.setCurrentIndex(1)
-                self.customer_list.setCurrentRow(row)
-                self.navigator.navigate("customer", view.key)
+                self.open_customer_page(view.key)
                 break
 
     def decide_customer_suggestion(self, suggestion, action: str, revision: int) -> None:
-        try:
-            self._container.review_gateway.decide_suggestion(
-                suggestion.customer_id,
-                suggestion.id,
-                action,
-                revision,
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "Vorschlag konnte nicht verarbeitet werden", str(exc))
+        if self._suggestion_write_busy:
             return
-        self._show_customer_detail(self.customer_list.currentRow())
+        self._suggestion_write_busy = True
+        self._customer_detail_request_id += 1
+        request_id = self._customer_detail_request_id
+        self.customer_detail.set_suggestions_busy(True)
+        reason = self.customer_detail.suggestion_rejection_reason(suggestion.id) if action == "reject" else ""
+
+        def decide():
+            try:
+                result = self._container.review_gateway.decide_suggestion(
+                    suggestion.customer_id, suggestion.id, action, revision,
+                    **({"reason": reason} if reason else {}),
+                )
+                return suggestion.customer_id, request_id, suggestion.id, result, None
+            except Exception as error:
+                return suggestion.customer_id, request_id, suggestion.id, None, error
+
+        task = BackgroundTask(decide)
+        task.signals.succeeded.connect(self._apply_suggestion_decision)
+        self._start_task(task)
+
+    def _apply_suggestion_decision(self, outcome) -> None:
+        customer_id, request_id, suggestion_id, result, error = outcome
+        self._suggestion_write_busy = False
+        if not self._review_result_is_current(customer_id, request_id):
+            return
+        self.customer_detail.set_suggestions_busy(False)
+        if error is not None:
+            if isinstance(error, ApiConflictError) and error.current is not None:
+                self._replace_review_customer(error.current)
+                self.customer_detail._suggestion_revision = error.current.revision
+                self.customer_detail._update_suggestion_dialog()
+            self.customer_detail.set_suggestions_error(str(error), self.customer_detail._suggestion_revision)
+            QMessageBox.warning(self, "Vorschlag konnte nicht verarbeitet werden", str(error))
+            return
+        if result is None:
+            self._show_customer_detail(self.customer_list.currentRow())
+            return
+        _decided_suggestion, customer = result
+        self._replace_review_customer(customer)
+        self.customer_detail.apply_suggestion_decision(suggestion_id, customer)
+        self.load_suggestion_page(self.customer_detail._suggestion_offset)
+
+    def _replace_review_customer(self, customer) -> None:
+        self._customer_views = [replace(view, customer=customer)
+                                if view.customer.id == customer.id else view
+                                for view in self._customer_views]
+        self.customer_detail.set_customer(customer)
 
     def _save_customer(self, customer, *, local_key=None) -> None:
         try:
@@ -1135,6 +1370,7 @@ class ClientMainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closing = True
+        self._recognition_poll.stop()
         self.search_debounce.stop()
         self._container.sync.stop()
         self.catalog_browser.shutdown()
@@ -1142,8 +1378,8 @@ class ClientMainWindow(QMainWindow):
         self._pool.clear()
         for task in tuple(self._tasks):
             try:
-                task.signals.disconnect()
-            except RuntimeError:
+                task.signals.blockSignals(True)
+            except (AttributeError, RuntimeError):
                 pass
         self._pool.waitForDone(1_000)
         if self.tray_icon is not None:

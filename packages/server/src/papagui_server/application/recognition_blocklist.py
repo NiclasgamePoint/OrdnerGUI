@@ -1,0 +1,49 @@
+"""Manage global recognition exclusions and publish the updated review snapshot."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from papagui_server.application.ports import CustomerUnitOfWorkFactory, GenerationPublisherPort
+from papagui_server.domain.errors import ResourceNotFoundError
+
+
+class RecognitionBlocklistApplicationService:
+    def __init__(self, unit_of_work: CustomerUnitOfWorkFactory,
+                 publisher: GenerationPublisherPort) -> None:
+        self._unit_of_work = unit_of_work
+        self._publisher = publisher
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._unit_of_work() as work:
+            return work.blocklist.list()
+
+    def add(self, kind: str, value: str, reason: str = "") -> dict[str, Any]:
+        # SQLite serializes this short change with evidence writes. The long
+        # extraction/index lock must not prevent users from managing exclusions.
+        with self._unit_of_work() as work:
+            entry = work.blocklist.add(kind, value, reason)
+            self._reconcile_restored(work)
+            work.commit()
+        # The publisher protects snapshot creation and activation with its own
+        # lock, after the write transaction has released the database.
+        self._publisher.publish_customers()
+        return entry
+
+    def delete(self, entry_id: int) -> bool:
+        with self._unit_of_work() as work:
+            if not work.blocklist.delete(entry_id):
+                raise ResourceNotFoundError("Ausschluss nicht gefunden.")
+            self._reconcile_restored(work)
+            work.commit()
+        self._publisher.publish_customers()
+        return True
+
+    @staticmethod
+    def _reconcile_restored(work) -> None:
+        # A value may have been entered manually while its suggestion was
+        # blocked. Resolve that visibility before publishing an offline snapshot.
+        for customer_id in work.blocklist.restored_customer_ids:
+            customer = work.customers.get(customer_id)
+            if customer is not None:
+                work.suggestions.reconcile_customer(customer)

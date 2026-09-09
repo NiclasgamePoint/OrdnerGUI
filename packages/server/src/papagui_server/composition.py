@@ -19,6 +19,8 @@ from papagui_server.adapters.sqlite_customers import SqliteCustomerUnitOfWorkFac
 from papagui_server.application.customers import CustomerApplicationService
 from papagui_server.application.indexing import IndexAdminService, IndexRunCoordinator
 from papagui_server.application.recognition import RecognitionApplicationService
+from papagui_server.application.recognition_jobs import CustomerRecognitionJobs
+from papagui_server.application.recognition_blocklist import RecognitionBlocklistApplicationService
 from papagui_server.application.settings import SettingsApplicationService
 from papagui_server.application.suggestions import CustomerSuggestionApplicationService
 from papagui_server.domain.models import ServerSettings
@@ -65,6 +67,8 @@ class ServerContainer:
     customers: CustomerApplicationService
     suggestions: CustomerSuggestionApplicationService
     recognition: RecognitionApplicationService
+    recognition_jobs: CustomerRecognitionJobs
+    recognition_blocklist: RecognitionBlocklistApplicationService
     catalog: SqliteCatalogReader
     index_admin: IndexAdminService
     coordinator: IndexRunCoordinator
@@ -113,6 +117,46 @@ def build_container(configuration: RuntimeConfiguration) -> ServerContainer:
             allow_initialize=configuration.initialize_source_identity,
         ),
     )
+    def execute_recheck(customer_id, mode, cancelled):
+        if mode == "rebuild":
+            validate_recheck(None)
+            coordinator.rebuild_recognition_documents(cancelled)
+            if cancelled():
+                raise InterruptedError
+            recognition.synchronize(
+                configuration.source_path, source_id=configuration.source_id,
+                minimum_year=settings_repository.load().minimum_customer_year,
+                cancelled=cancelled, exhaustive=True,
+            )
+            if cancelled():
+                raise InterruptedError
+            publisher.publish_all()
+            return
+        roots = recognition.customer_project_root_ids(customer_id)
+        if mode == "extract" and roots:
+            coordinator.extract_customer_documents(roots, cancelled)
+        recognition.documents.run(configuration.source_id, customer_id=customer_id, cancelled=cancelled)
+        if cancelled():
+            raise InterruptedError
+        if mode == "extract":
+            publisher.publish_all()
+        else:
+            publisher.publish_customers()
+
+    def validate_recheck(customer_id):
+        if customer_id is None:
+            current = settings_repository.load()
+            if not current.recognition_pipeline_enabled or current.priority_documents_per_project == 0:
+                raise ValueError("Bitte zuerst die Kundendatenerkennung in den Servereinstellungen aktivieren.")
+            return
+        recognition.customer_project_root_ids(customer_id)
+
+    recognition_jobs = CustomerRecognitionJobs(
+        store=JsonRunStateRepository(configuration.data_path / "jobs" / "customer-rechecks.json"),
+        operation_lock=coordinator.operation_lock,
+        validate=validate_recheck,
+        execute=execute_recheck,
+    )
     settings = SettingsApplicationService(
         settings_repository, changed=coordinator.settings_changed
     )
@@ -127,6 +171,10 @@ def build_container(configuration: RuntimeConfiguration) -> ServerContainer:
         customers=CustomerApplicationService(unit_of_work, publisher),
         suggestions=CustomerSuggestionApplicationService(unit_of_work, publisher),
         recognition=recognition,
+        recognition_jobs=recognition_jobs,
+        recognition_blocklist=RecognitionBlocklistApplicationService(
+            unit_of_work, publisher,
+        ),
         catalog=catalog_reader,
         index_admin=IndexAdminService(coordinator),
         coordinator=coordinator,

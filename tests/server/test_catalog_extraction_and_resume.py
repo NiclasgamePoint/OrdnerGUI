@@ -84,18 +84,21 @@ def test_text_office_and_legacy_document_extractors(tmp_path: Path) -> None:
     directory.mkdir()
     assert extractor.extract(directory, settings) == ""
     assert extractor.extract(tmp_path / "file.doc", settings) == "external"
-    assert extractor.extract(tmp_path / "file.xls", settings) == "external"
+    assert extractor.extract_document(tmp_path / "file.xls", settings).status == "error"
     assert extractor.extract(tmp_path / "file.bin", settings) == ""
 
     docx = tmp_path / "document.docx"
     with zipfile.ZipFile(docx, "w") as bundle:
         bundle.writestr("word/document.xml", "<root><p>Alpha</p><p>Beta</p></root>")
     assert extractor.extract(docx, ServerSettings()) == "Alpha\nBeta"
+    import openpyxl
+
     xlsx = tmp_path / "sheet.xlsx"
-    with zipfile.ZipFile(xlsx, "w") as bundle:
-        bundle.writestr("xl/sharedStrings.xml", "<root><t>Gamma</t></root>")
-        bundle.writestr("xl/worksheets/sheet1.xml", "<root><v>Delta</v></root>")
-        bundle.writestr("ignored.xml", "<root><v>Ignored</v></root>")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["Gamma", "Delta"])
+    workbook.save(xlsx)
+    workbook.close()
     assert extractor.extract(xlsx, ServerSettings()) == "Gamma\nDelta"
     bad = tmp_path / "bad.docx"
     bad.write_bytes(b"not zip")
@@ -133,19 +136,13 @@ def test_pdf_uses_bounded_ocr_and_honours_cancel(monkeypatch, tmp_path: Path) ->
 
     no_ocr_runner = RecordingRunner(b"already enough text")
     no_ocr = DocumentTextExtractor(no_ocr_runner)
-    assert no_ocr.extract(
-        pdf, ServerSettings(ocr_extension_threshold=5)
-    ) == "already enough text"
+    assert no_ocr.extract(pdf, ServerSettings(ocr_extension_threshold=5)) == "already enough text"
     assert len(no_ocr_runner.calls) == 1
     disabled = RecordingRunner()
-    assert DocumentTextExtractor(disabled).extract(
-        pdf, ServerSettings(ocr_enabled=False)
-    ) == ""
+    assert DocumentTextExtractor(disabled).extract(pdf, ServerSettings(ocr_enabled=False)) == ""
     assert len(disabled.calls) == 1
     cancelled = RecordingRunner()
-    assert DocumentTextExtractor(cancelled).extract(
-        pdf, settings, lambda: True
-    ) == ""
+    assert DocumentTextExtractor(cancelled).extract(pdf, settings, lambda: True) == ""
 
 
 class CountingExtractor:
@@ -214,9 +211,10 @@ def test_scanner_incremental_removal_exclusions_and_three_backups(tmp_path: Path
     _build(indexer, source, full=False)
     connection = sqlite3.connect(indexer.active_path)
     try:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM files WHERE filename='keep.txt'"
-        ).fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT COUNT(*) FROM files WHERE filename='keep.txt'").fetchone()[0]
+            == 0
+        )
     finally:
         connection.close()
     indexer.delete()
@@ -296,14 +294,15 @@ def test_failed_atomic_activation_keeps_active_and_backups_unchanged(
     _build(indexer, source, full=True)
     _build(indexer, source, full=False)
     active_before = sha256_file(indexer.active_path)
-    backups_before = {
-        path.name: sha256_file(path) for path in indexer.backup_root.glob("*.db")
-    }
+    backups_before = {path.name: sha256_file(path) for path in indexer.backup_root.glob("*.db")}
     document.write_text("two", encoding="utf-8")
     real_replace = os.replace
 
     def fail_build_replace(source_path, destination_path):
-        if Path(source_path) == indexer.resume_path and Path(destination_path) == indexer.active_path:
+        if (
+            Path(source_path) == indexer.resume_path
+            and Path(destination_path) == indexer.active_path
+        ):
             raise OSError("activation failed")
         return real_replace(source_path, destination_path)
 

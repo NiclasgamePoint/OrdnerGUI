@@ -94,7 +94,8 @@ class ClientContainer:
             settings.sync_interval_seconds,
         )
         self.review_gateway = HttpReviewGateway(
-            settings.server_url, settings.api_token, settings.timeout_seconds
+            settings.server_url, settings.api_token, settings.timeout_seconds,
+            snapshot=SQLiteCustomerSnapshot(self.customer_database),
         )
         self.server_control = (
             HttpServerControlGateway(
@@ -202,7 +203,8 @@ class ClientContainer:
             timeout_seconds=settings.timeout_seconds,
         )
         self.review_gateway = HttpReviewGateway(
-            settings.server_url, settings.api_token, settings.timeout_seconds
+            settings.server_url, settings.api_token, settings.timeout_seconds,
+            snapshot=SQLiteCustomerSnapshot(self.customer_database),
         )
         self.server_control = (
             HttpServerControlGateway(

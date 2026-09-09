@@ -65,6 +65,17 @@ class IndexSettingsModel(ApiModel):
     preferred_document_patterns: str
     priority_documents_per_project: int = Field(ge=0)
     newest_years_first: bool
+    extraction_timeout_seconds: int = Field(default=90, ge=1, le=900)
+    extraction_memory_mb: int = Field(default=768, ge=128, le=2048)
+    pdf_max_pages: int = Field(default=200, ge=1, le=2000)
+    image_max_pixels: int = Field(default=25000000, ge=1000000, le=100000000)
+    extraction_retry_attempts: int = Field(default=3, ge=1, le=10)
+    extraction_retry_delay_seconds: int = Field(default=300, ge=1, le=86400)
+    extraction_store_max_mb: int = Field(default=1024, ge=16, le=102400)
+    extraction_retention_days: int = Field(default=30, ge=1, le=365)
+    recognition_documents_per_project_max: int = Field(default=500, ge=1, le=500)
+    recognition_pipeline_enabled: bool = True
+    recognition_own_names: str = ''
 
 
 class SettingsResponse(ApiModel):
@@ -91,6 +102,17 @@ class IndexSettingsPatchModel(ApiModel):
     preferred_document_patterns: str | None = None
     priority_documents_per_project: int | None = Field(default=None, ge=0)
     newest_years_first: bool | None = None
+    extraction_timeout_seconds: int | None = Field(default=None, ge=1, le=900)
+    extraction_memory_mb: int | None = Field(default=None, ge=128, le=2048)
+    pdf_max_pages: int | None = Field(default=None, ge=1, le=2000)
+    image_max_pixels: int | None = Field(default=None, ge=1000000, le=100000000)
+    extraction_retry_attempts: int | None = Field(default=None, ge=1, le=10)
+    extraction_retry_delay_seconds: int | None = Field(default=None, ge=1, le=86400)
+    extraction_store_max_mb: int | None = Field(default=None, ge=16, le=102400)
+    extraction_retention_days: int | None = Field(default=None, ge=1, le=365)
+    recognition_documents_per_project_max: int | None = Field(default=None, ge=1, le=500)
+    recognition_pipeline_enabled: bool | None = None
+    recognition_own_names: str | None = None
 
 
 class SettingsUpdateRequest(ApiModel):
@@ -180,6 +202,7 @@ class GenerationManifestResponse(ApiModel):
 
 
 class ContactModel(ApiModel):
+    id: str | None = Field(default=None, min_length=1, max_length=128)
     name: str = ""
     role: str = ""
     email: str = ""
@@ -441,8 +464,16 @@ class CustomerSuggestionModel(ApiModel):
     rule: str
     confidence: float
     status: Literal["pending", "accepted", "rejected"]
-    suggestion_type: Literal["field", "contact"] = "field"
+    suggestion_type: Literal["field", "contact", "address"] = "field"
     contact: ContactModel | None = None
+    normalized_value: str = ""
+    party_role: str = "unknown"
+    quality: Literal["strong", "review", "legacy"] = "legacy"
+    reasons: list[str] = Field(default_factory=list)
+    payload: dict = Field(default_factory=dict)
+    evidence: list[dict] = Field(default_factory=list)
+    evidence_count: int = 1
+    is_conflict: bool = False
     created_at: str
     resolved_at: str
 
@@ -450,9 +481,74 @@ class CustomerSuggestionModel(ApiModel):
 class CustomerSuggestionsResponse(ApiModel):
     suggestions: list[CustomerSuggestionModel]
     revision: int
+    total: int = 0
+    has_more: bool = False
+    recognition: dict = Field(default_factory=dict)
+
+
+class CustomerRecognitionRequest(ApiModel):
+    mode: Literal["reassess", "extract"] = "reassess"
+
+
+class CustomerRecognitionJobModel(ApiModel):
+    id: str
+    customer_id: int
+    mode: Literal["reassess", "extract"]
+    state: Literal["queued", "running", "completed", "cancelled", "error"]
+    created_at: str
+    finished_at: str = ""
+    error: str = ""
+
+
+class CustomerRecognitionJobResponse(ApiModel):
+    job: CustomerRecognitionJobModel
+
+
+class RecognitionRebuildJobModel(CustomerRecognitionJobModel):
+    customer_id: None = None
+    mode: Literal["rebuild"] = "rebuild"
+
+
+class RecognitionRebuildResponse(ApiModel):
+    job: RecognitionRebuildJobModel | None = None
+
+
+class RecognitionBlocklistRequest(ApiModel):
+    kind: Literal["email", "phone", "email_domain", "contact_name", "company"]
+    value: str = Field(min_length=1, max_length=320)
+    reason: str = Field(default="", max_length=500)
+
+
+class RecognitionBlocklistEntry(RecognitionBlocklistRequest):
+    id: int
+    normalized_value: str
+    created_at: str
+
+
+class RecognitionBlocklistResponse(ApiModel):
+    entries: list[RecognitionBlocklistEntry]
+
+
+class RecognitionBlocklistMutationResponse(ApiModel):
+    entry: RecognitionBlocklistEntry
+
+
+class CustomerRecognitionStatusResponse(ApiModel):
+    customer_id: int
+    state: str
+    reason: str
+    summary: str
+    counts: dict = Field(default_factory=dict)
+    last_run_at: str = ""
+    pipeline_version: str = ""
+    catalog_version: str = ""
+    migration_conflicts: int = 0
+    field_provenance: list[dict] = Field(default_factory=list)
+    job: CustomerRecognitionJobModel | None = None
 
 
 class SuggestionDecisionRequest(ApiModel):
+    reason: Literal["", "not_a_value", "wrong_customer", "outdated", "already_present", "other"] = ""
     action: Literal["accept", "reject"]
     expected_revision: int | None = Field(default=None, ge=0)
     idempotency_key: str | None = None

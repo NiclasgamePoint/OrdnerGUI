@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
 from papagui_client.gui.customer_detail import CustomerDataSuggestionsDialog
 from papagui_client.gui.customer_editor import CustomerEditorDialog
+from papagui_client.gui.theme import build_stylesheet
 from papagui_contracts import Contact, Customer, CustomerProject, SourcePath
 from papagui_contracts.recognition import CustomerSuggestion
 
@@ -16,6 +19,49 @@ def application() -> QApplication:
 
 def _label_texts(widget) -> set[str]:
     return {label.text() for label in widget.findChildren(QLabel)}
+
+
+@pytest.mark.parametrize("theme", ("light", "dark"))
+def test_customer_type_opens_by_click_and_saves_selection(application, theme):
+    dialog = CustomerEditorDialog(Customer(display_name="Muster"))
+    dialog.setStyleSheet(build_stylesheet(theme, "#2db89d", 100, 13))
+    dialog.show()
+    application.processEvents()
+    combo = dialog.entity_type
+    try:
+        QTest.mouseClick(combo, Qt.LeftButton, pos=combo.rect().center())
+        application.processEvents()
+        assert combo.view().isVisible()
+        index = combo.model().index(combo.findText("Privatperson"), 0)
+        # Qt briefly suppresses mouse releases after opening a combo popup.
+        QTest.qWait(QApplication.doubleClickInterval() + 20)
+        QTest.mouseMove(combo.view().viewport(), combo.view().visualRect(index).center())
+        QTest.mouseClick(
+            combo.view().viewport(), Qt.LeftButton,
+            pos=combo.view().visualRect(index).center(),
+        )
+        application.processEvents()
+        assert combo.currentText() == "Privatperson"
+        assert dialog.contacts_table.isColumnHidden(1)
+        QTest.mouseClick(dialog.save_button, Qt.LeftButton)
+        assert dialog.result() == dialog.DialogCode.Accepted
+        assert dialog.customer().entity_type == "Privatperson"
+    finally:
+        combo.hidePopup()
+        dialog.close()
+
+
+def test_customer_type_preserves_imported_values(application):
+    dialog = CustomerEditorDialog(
+        Customer(display_name="Muster", entity_type="Verein")
+    )
+    try:
+        assert dialog.entity_type.currentText() == "Verein"
+        assert dialog.customer().entity_type == "Verein"
+        dialog.entity_type.setCurrentText("Organisation")
+        assert dialog.customer().entity_type == "Organisation"
+    finally:
+        dialog.close()
 
 
 def test_editor_files_page_keeps_both_old_lists_and_server_projects_read_only(
@@ -95,11 +141,10 @@ def test_contact_suggestion_restores_details_and_manual_conflict_warning(applica
         (suggestion,), 3, customer=customer
     )
     texts = _label_texts(dialog)
-    assert "Ansprechpartner: Ada Lovelace" in texts
-    assert "Rolle: Einkauf" in texts
-    assert "E-Mail: ada@example.test" in texts
-    assert "Telefon: 456" in texts
-    warnings = dialog.findChildren(QLabel, "PopupWarning")
+    assert "Ansprechpartner" in texts
+    assert "Ada Lovelace" in texts
+    assert "Rolle: Einkauf · E-Mail: ada@example.test · Telefon: 456" in texts
+    warnings = dialog.findChildren(QLabel, "ReviewWarning")
     assert len(warnings) == 1
     assert "manuell gepflegten Kontaktdaten" in warnings[0].text()
     assert "Rolle: „Planung“ statt „Einkauf“" in warnings[0].text()
@@ -128,8 +173,7 @@ def test_contact_suggestion_without_matching_manual_contact_has_no_warning(appli
     dialog = CustomerDataSuggestionsDialog(
         (suggestion,), 3, customer=customer
     )
-    assert not dialog.findChildren(QLabel, "PopupWarning")
-    assert {"Rolle: Einkauf", "E-Mail: -", "Telefon: 555"}.issubset(
-        _label_texts(dialog)
-    )
+    assert not dialog.findChildren(QLabel, "ReviewWarning")
+    assert "Rolle: Einkauf · Telefon: 555" in _label_texts(dialog)
+    assert not any("E-Mail: -" in text for text in _label_texts(dialog))
     dialog.close()

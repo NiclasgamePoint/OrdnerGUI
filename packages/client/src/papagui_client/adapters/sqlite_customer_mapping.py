@@ -32,11 +32,13 @@ def optional_rows(
 def hydrate_customer(connection: sqlite3.Connection, row: sqlite3.Row) -> Customer:
     customer_id = int(row["id"])
     values: dict[str, Any] = dict(row)
+    contact_columns = {item[1] for item in connection.execute("PRAGMA table_info(contacts)")}
+    contact_identity = ",uid AS id" if "uid" in contact_columns else ""
     values["contacts"] = [
         dict(item)
         for item in optional_rows(
             connection,
-            "SELECT name,role,email,phone FROM contacts WHERE customer_id=? ORDER BY id",
+            f"SELECT name,role,email,phone{contact_identity} FROM contacts WHERE customer_id=? ORDER BY contacts.id",
             (customer_id,),
         )
     ]

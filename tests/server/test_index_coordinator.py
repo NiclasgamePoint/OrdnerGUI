@@ -151,7 +151,7 @@ def test_success_cancel_error_busy_and_status_paths(tmp_path: Path) -> None:
     failing_publisher.fail_index = True
     failed = _coordinator(tmp_path / "failed", publisher=failing_publisher)
     assert failed.run_once() == 1
-    assert failed.status()["index"]["message"] == "publish failed"
+    assert failed.status()["index"]["message"] == "Indexlauf fehlgeschlagen (index_run_failed)."
 
     after_catalog = Catalog()
     after_cancel = _coordinator(tmp_path / "after", catalog=after_catalog)

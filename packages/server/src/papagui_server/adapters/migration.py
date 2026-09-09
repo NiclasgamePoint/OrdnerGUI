@@ -20,7 +20,7 @@ def migrate_customer_database(
         current = json.loads(migration_state_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         current = {}
-    if current.get("customer_schema") == 2:
+    if current.get("customer_schema") == 3:
         SqliteCustomerUnitOfWorkFactory(database_path).initialize()
         return None
 
@@ -28,13 +28,13 @@ def migrate_customer_database(
     if database_path.is_file() and database_path.stat().st_size:
         backup_root = database_path.parent / "customer-backups"
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup = backup_root / f"customers-pre-v2-{timestamp}.db"
+        backup = backup_root / f"customers-pre-v3-{timestamp}.db"
         snapshot_sqlite(database_path, backup)
     SqliteCustomerUnitOfWorkFactory(database_path).initialize()
     atomic_json(
         migration_state_path,
         {
-            "customer_schema": 2,
+            "customer_schema": 3,
             "migrated_at": datetime.now(timezone.utc).isoformat(),
             "backup": str(backup) if backup is not None else None,
         },

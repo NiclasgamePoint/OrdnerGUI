@@ -381,6 +381,8 @@ def test_main_window_customer_detail_journal_review_and_global_navigation(
         review_gateway=control,
     )
     window = ClientMainWindow(container, automatic_sync=False)
+    assert window._pool.waitForDone(1_000)
+    application.processEvents()
     assert window.customer_detail.projects.count() == 1
     assert window.customer_detail.journal.count() == 1
     assert window.customer_detail.suggestions.count() == 1
@@ -403,6 +405,8 @@ def test_main_window_customer_detail_journal_review_and_global_navigation(
     ]
 
     window.decide_customer_suggestion(_suggestion(), "accept", 3)
+    assert window._pool.waitForDone(1_000)
+    application.processEvents()
     assert control.decisions[-1][:4] == (7, 4, "accept", 3)
     hit = GlobalSearchHit(
         GlobalSearchRecord(

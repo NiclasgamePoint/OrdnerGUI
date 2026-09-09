@@ -64,6 +64,7 @@ class IndexRunCoordinator:
         self._started_at = utc_now()
         self._started_monotonic = time.monotonic()
         self._lock = threading.RLock()
+        self.operation_lock = threading.RLock()
         self._wake = threading.Event()
         self._cancel = threading.Event()
         self._stopped = threading.Event()
@@ -266,8 +267,10 @@ class IndexRunCoordinator:
                     and time.monotonic() - self._last_full_reconciliation >= 86_400
                 )
                 self._execute_run(
-                    rebuild or delete or daily_full, run_id=requested_id or None
+                    rebuild or delete, run_id=requested_id or None
                 )
+                if daily_full:
+                    self._last_full_reconciliation = time.monotonic()
                 next_due = time.monotonic() + self._settings.load().interval_seconds
             elif settings.automatic_runs_enabled:
                 next_due = min(next_due, time.monotonic() + settings.interval_seconds)
@@ -277,7 +280,22 @@ class IndexRunCoordinator:
             self._persist_state()
 
     def _execute_run(self, full_rebuild: bool, *, run_id: str | None = None) -> int:
+        while not self._stopped.is_set() and not self._restart_requested.is_set():
+            if self.operation_lock.acquire(timeout=0.2):
+                break
+        else:
+            return 1
+        try:
+            if self._stopped.is_set() or self._restart_requested.is_set():
+                return 1
+            return self._execute_run_locked(full_rebuild, run_id=run_id)
+        finally:
+            self.operation_lock.release()
+
+    def _execute_run_locked(self, full_rebuild: bool, *, run_id: str | None = None) -> int:
         self._cancel.clear()
+        if self._stopped.is_set() or self._restart_requested.is_set():
+            return 1
         run_id = run_id or uuid.uuid4().hex
         with self._lock:
             self._state = MutableRunState(
@@ -306,7 +324,10 @@ class IndexRunCoordinator:
                 self.source_path,
                 source_id=self.source_id,
                 minimum_year=self._settings.load().minimum_customer_year,
+                cancelled=self._cancel.is_set,
             )
+            if self._cancel.is_set():
+                raise InterruptedError("Indexlauf abgebrochen.")
             self._set_phase("publishing")
             generation = self._publisher.publish_all()
             components = dict(generation.get("components") or {})
@@ -335,13 +356,13 @@ class IndexRunCoordinator:
                 self._state.queued_action = ""
                 self._persist_state()
             return 2
-        except Exception as error:
-            logger.exception("Indexlauf fehlgeschlagen")
+        except Exception:
+            logger.error("Indexlauf fehlgeschlagen; technische Diagnose: index_run_failed")
             with self._lock:
                 self._state.state = "error"
                 self._state.phase = "error"
                 self._state.completed_at = utc_now()
-                self._state.error = str(error)
+                self._state.error = "Indexlauf fehlgeschlagen (index_run_failed)."
                 self._state.queued_action = ""
                 self._persist_state()
             return 1
@@ -358,7 +379,42 @@ class IndexRunCoordinator:
             self._state.phase = phase
             self._persist_state()
 
+    def extract_customer_documents(self, project_root_ids: list[int], cancelled) -> None:
+        with self.operation_lock:
+            if self._source_guard is not None:
+                self._source_guard.ensure_ready(self.source_path, self.source_id)
+            self._catalog.build(
+                self.source_path, source_id=self.source_id, full_rebuild=False,
+                settings=self._settings.load(), cancelled=cancelled,
+                progress=lambda _count, _path: None, force_extraction=True,
+                project_root_ids=project_root_ids,
+            )
+
+    def rebuild_recognition_documents(self, cancelled) -> None:
+        """Build a fresh catalog and force extraction, retaining the active snapshot on failure."""
+        with self.operation_lock:
+            if self._source_guard is not None:
+                self._source_guard.ensure_ready(self.source_path, self.source_id)
+            self._catalog.build(
+                self.source_path, source_id=self.source_id, full_rebuild=True,
+                settings=self._settings.load(), cancelled=cancelled,
+                progress=lambda _count, _path: None, force_extraction=True,
+            )
+
     def _delete_index(self) -> None:
+        while not self._stopped.is_set() and not self._restart_requested.is_set():
+            if self.operation_lock.acquire(timeout=0.2):
+                break
+        else:
+            return
+        try:
+            if self._stopped.is_set() or self._restart_requested.is_set():
+                return
+            self._delete_index_locked()
+        finally:
+            self.operation_lock.release()
+
+    def _delete_index_locked(self) -> None:
         self._catalog.delete()
         content = self.data_path / "index" / "content"
         if content.exists():

@@ -42,12 +42,25 @@ from papagui_client.composition import ClientContainer
 from papagui_client.presentation.server_settings import ServerSettingsPresenter
 from papagui_client.presentation.tray import TrayHealth, TrayPresenter, TrayStatusViewModel
 
+from .recognition_admin import RecognitionAdminWidget
 from .recognition_review import RecognitionReviewDialog
 from .tasks import BackgroundTask
 from .theme import ThemeManager, build_stylesheet
 
 
 INSTANCE_NAME = "papagui-client-server-tray-v2"
+
+RECOGNITION_BUDGET_FIELDS = (
+    ("recognition_documents_per_project_max", "Prüfbare Dokumente je Projekt", 1, 500, ""),
+    ("extraction_timeout_seconds", "Zeitlimit je Dokument", 1, 900, " s"),
+    ("extraction_memory_mb", "Speicher je Dokumentleser", 128, 2048, " MiB"),
+    ("pdf_max_pages", "Maximale PDF-Seiten je Dokument", 1, 2000, ""),
+    ("image_max_pixels", "Maximale Bildgröße", 1_000_000, 100_000_000, " Pixel"),
+    ("extraction_retry_attempts", "Wiederholungsversuche bei Lesefehlern", 1, 10, ""),
+    ("extraction_retry_delay_seconds", "Pause vor erneutem Lesen", 1, 86_400, " s"),
+    ("extraction_store_max_mb", "Speicher für Dokumentauszüge", 16, 102_400, " MB"),
+    ("extraction_retention_days", "Aufbewahrung der Dokumentauszüge", 1, 365, " Tage"),
+)
 
 
 class ServerStatusBadge(QLabel):
@@ -155,6 +168,9 @@ class ServerTrayWindow(QDialog):
         self.tabs.setStyleSheet("QTabWidget#IndexControlTabs::tab-bar { left: 14px; }")
         self.tabs.addTab(self._overview(), "Übersicht")
         self.tabs.addTab(self._settings_page(), "Indexeinstellungen")
+        self.recognition_admin_page = RecognitionAdminWidget(self._container.server_control)
+        self.recognition_admin_page.reload_button.hide()
+        self.tabs.addTab(self.recognition_admin_page, "Kundenerkennung")
         self.tabs.addTab(self._activity_page(), "Aktivität")
         root.addWidget(self.tabs, 1)
 
@@ -165,7 +181,7 @@ class ServerTrayWindow(QDialog):
         footer.addStretch()
         refresh_button = QPushButton("Aktualisieren")
         refresh_button.setProperty("buttonRole", "secondary")
-        refresh_button.clicked.connect(self.refresh_status)
+        refresh_button.clicked.connect(self._refresh_current_page)
         footer.addWidget(refresh_button)
         close_button = QPushButton("Schließen")
         close_button.setProperty("buttonRole", "primary")
@@ -228,6 +244,7 @@ class ServerTrayWindow(QDialog):
         row.addWidget(self.review_button)
         row.addStretch()
         layout.addLayout(row)
+
 
     def _job_card(self, layout: QVBoxLayout) -> None:
         self.status_label = QLabel("Noch keine Indexierung gestartet")
@@ -378,6 +395,16 @@ class ServerTrayWindow(QDialog):
         )
         self.pdf_timeout = self.pdf_text_timeout_seconds
         form.addRow("PDF-Zeitlimit", self.pdf_text_timeout_seconds)
+        self.recognition_pipeline_enabled = self._check(form, "Kundendaten aus Dokumenten erkennen")
+        self.recognition_own_names = self._line(form, "Eigene Firma / eigene Namen")
+        self.recognition_own_names.setPlaceholderText("Namen mit Komma trennen")
+        self.recognition_own_names.setToolTip(
+            "Eigene Firmen- und Personennamen helfen, den eigenen Briefkopf von Kundendaten zu unterscheiden."
+        )
+        for name, label, minimum, maximum, suffix in RECOGNITION_BUDGET_FIELDS:
+            control = self._spin(minimum, maximum, suffix)
+            setattr(self, name, control)
+            form.addRow(label, control)
         layout.addLayout(form)
 
         row = QHBoxLayout()
@@ -459,6 +486,14 @@ class ServerTrayWindow(QDialog):
         except Exception:
             customers = ()
         RecognitionReviewDialog(control, customers, self).exec()
+
+    def open_recognition_admin(self) -> None:
+        self.tabs.setCurrentWidget(self.recognition_admin_page)
+
+    def _refresh_current_page(self) -> None:
+        self.refresh_status()
+        if self.tabs.currentWidget() is self.recognition_admin_page:
+            self.recognition_admin_page.reload()
 
     def show_status(self) -> None:
         self.refresh_status()
@@ -798,6 +833,7 @@ class ServerTrayWindow(QDialog):
                 "content_indexing_enabled",
                 "ocr_enabled",
                 "newest_years_first",
+                "recognition_pipeline_enabled",
             ):
                 getattr(self, name).setChecked(bool(model.values[name]))
             for name in (
@@ -810,12 +846,14 @@ class ServerTrayWindow(QDialog):
                 "pdf_text_timeout_seconds",
                 "priority_documents_per_project",
                 "minimum_customer_year",
+                *(field[0] for field in RECOGNITION_BUDGET_FIELDS),
             ):
                 getattr(self, name).setValue(int(model.values[name]))
             for name in (
                 "content_extensions",
                 "excluded_folders",
                 "preferred_document_patterns",
+                "recognition_own_names",
             ):
                 getattr(self, name).setText(str(model.values[name]))
             profile_index = self.resource_profile.findData(
@@ -871,6 +909,9 @@ class ServerTrayWindow(QDialog):
             "priority_documents_per_project": self.priority_documents_per_project.value(),
             "newest_years_first": self.newest_years_first.isChecked(),
             "minimum_customer_year": self.minimum_customer_year.value(),
+            "recognition_pipeline_enabled": self.recognition_pipeline_enabled.isChecked(),
+            "recognition_own_names": self.recognition_own_names.text().strip(),
+            **{field[0]: getattr(self, field[0]).value() for field in RECOGNITION_BUDGET_FIELDS},
         }
         return self._settings_presenter.validate(values)
 
@@ -943,6 +984,7 @@ class ServerTrayWindow(QDialog):
 
     def shutdown(self) -> None:
         self._shutting_down = True
+        self.recognition_admin_page.shutdown()
         self._timer.stop()
         self._animation.stop()
         self._pool.clear()

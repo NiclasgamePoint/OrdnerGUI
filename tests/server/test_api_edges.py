@@ -86,7 +86,9 @@ def test_auth_status_lifespan_and_strict_settings_errors(tmp_path: Path) -> None
         lifecycle = create_app(container, manage_lifecycle=True, run_on_start=False)
         async with lifecycle.router.lifespan_context(lifecycle):
             assert container.coordinator._thread is not None
+            assert container.recognition_jobs._thread is not None
         assert container.coordinator._thread is None
+        assert container.recognition_jobs._thread is None
 
     _run(scenario())
 

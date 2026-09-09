@@ -12,18 +12,21 @@ from papagui_server.adapters.customer_suggestions import (
     SqliteCustomerSuggestionRepository,
 )
 from papagui_server.adapters.recognition_repository import SqliteRecognitionRepository
+from papagui_server.adapters.recognition_blocklist import SqliteRecognitionBlocklistRepository
 
 
 class SqliteCustomerUnitOfWork:
     """One `BEGIN IMMEDIATE` transaction for every write use case."""
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, *, force_schema: bool = False) -> None:
         self._database_path = database_path
+        self._force_schema = force_schema
         self._connection: sqlite3.Connection | None = None
         self.customers: SqliteCustomerRepository
         self.projects: SqliteCustomerProjectRepository
         self.suggestions: SqliteCustomerSuggestionRepository
         self.recognition: SqliteRecognitionRepository
+        self.blocklist: SqliteRecognitionBlocklistRepository
         self._committed = False
 
     def __enter__(self) -> "SqliteCustomerUnitOfWork":
@@ -33,7 +36,7 @@ class SqliteCustomerUnitOfWork:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA journal_mode=WAL")
-            initialize_customer_schema(connection)
+            initialize_customer_schema(connection, force=self._force_schema)
             connection.execute("BEGIN IMMEDIATE")
         except Exception:
             connection.close()
@@ -41,6 +44,7 @@ class SqliteCustomerUnitOfWork:
         self._connection = connection
         self.projects = SqliteCustomerProjectRepository(connection)
         self.suggestions = SqliteCustomerSuggestionRepository(connection)
+        self.blocklist = SqliteRecognitionBlocklistRepository(connection)
         self.recognition = SqliteRecognitionRepository(connection)
         self.customers = SqliteCustomerRepository(
             connection, self.projects, self.suggestions
@@ -70,5 +74,5 @@ class SqliteCustomerUnitOfWorkFactory:
         return SqliteCustomerUnitOfWork(self.database_path)
 
     def initialize(self) -> None:
-        with self() as work:
+        with SqliteCustomerUnitOfWork(self.database_path, force_schema=True) as work:
             work.commit()

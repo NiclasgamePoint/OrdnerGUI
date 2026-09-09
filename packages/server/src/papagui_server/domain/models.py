@@ -25,7 +25,7 @@ class ServerSettings:
     max_file_size_mb: int = 100
     max_extracted_characters: int = 2_000_000
     content_extensions: str = (
-        "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini"
+        "pdf,doc,docx,xls,xlsx,txt,csv,md,log,json,xml,yaml,yml,ini,jpg,jpeg,png,tif,tiff,bmp,webp"
     )
     excluded_folders: str = ".git,.venv,venv,__pycache__,node_modules"
     ocr_enabled: bool = True
@@ -38,6 +38,17 @@ class ServerSettings:
     preferred_document_patterns: str = "anschreiben,angebot,auftrag,vertrag"
     priority_documents_per_project: int = 24
     newest_years_first: bool = True
+    extraction_timeout_seconds: int = 90
+    extraction_memory_mb: int = 768
+    pdf_max_pages: int = 200
+    image_max_pixels: int = 25000000
+    extraction_retry_attempts: int = 3
+    extraction_retry_delay_seconds: int = 300
+    extraction_store_max_mb: int = 1024
+    extraction_retention_days: int = 30
+    recognition_documents_per_project_max: int = 500
+    recognition_pipeline_enabled: bool = True
+    recognition_own_names: str = ''
 
     def __post_init__(self) -> None:
         # The shared contract is the canonical type/range validator. This prevents

@@ -8,6 +8,8 @@ implementation code immediately visible.
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
+from time import perf_counter
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -388,6 +390,10 @@ def window(application, tmp_path, monkeypatch):
     monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", lambda: False)
     value = _container(tmp_path)
     widget = ClientMainWindow(value, automatic_sync=False)
+    # Initial project summaries query the same fake search service as folder
+    # navigation. Finish them before assertions about the latest navigation call.
+    assert widget._pool.waitForDone(1_000)
+    application.processEvents()
     yield widget, value
     widget.close()
 
@@ -566,7 +572,44 @@ def test_main_navigation_system_tray_and_launcher_failure(window, monkeypatch):
     assert widget.isVisible()
 
 
-def test_project_details_journal_and_suggestion_paths(window, monkeypatch):
+def test_customer_page_does_not_wait_for_server_details(window, application):
+    widget, value = window
+    widget._pool.waitForDone(1_000)
+    application.processEvents()
+    widget.customer_list.setCurrentRow(-1)
+
+    entered = Event()
+    release = Event()
+    calls = []
+
+    class _SlowReview:
+        def customer_suggestions(self, customer_id, _state):
+            calls.append(customer_id)
+            entered.set()
+            release.wait(2)
+            return (), 2
+
+    value.review_gateway = _SlowReview()
+    started = perf_counter()
+    widget.open_customer_page("7")
+    elapsed = perf_counter() - started
+
+    try:
+        assert elapsed < 0.5
+        assert widget.page_stack.currentWidget() is widget.customer_page
+        assert widget.customer_detail.heading.text() == "Muster GmbH"
+        assert not widget.customer_detail.review_button.isEnabled()
+        assert entered.wait(1)
+    finally:
+        release.set()
+
+    assert widget._pool.waitForDone(2_000)
+    application.processEvents()
+    assert calls == [7]
+    assert widget.customer_detail.review_button.isEnabled()
+
+
+def test_project_details_journal_and_suggestion_paths(window, application, monkeypatch):
     widget, value = window
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
@@ -604,12 +647,16 @@ def test_project_details_journal_and_suggestion_paths(window, monkeypatch):
 
     suggestion = SimpleNamespace(customer_id=7, id=12)
     widget.decide_customer_suggestion(suggestion, "accept", 2)
+    assert widget._pool.waitForDone(1_000)
+    application.processEvents()
     assert value.review_gateway.decisions == [(7, 12, "accept", 2)]
 
     value.journals.save = Mock(side_effect=OSError("journal offline"))
     widget._create_journal_entry(entry)
     value.review_gateway.decide_suggestion = Mock(side_effect=OSError("review offline"))
     widget.decide_customer_suggestion(suggestion, "reject", 2)
+    assert widget._pool.waitForDone(1_000)
+    application.processEvents()
     assert len(warnings) == 2
 
 

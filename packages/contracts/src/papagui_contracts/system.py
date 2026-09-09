@@ -27,6 +27,12 @@ class Capability(str, Enum):
     CUSTOMER_REVISIONS = "customer_revisions"
     IDEMPOTENT_MUTATIONS = "idempotent_mutations"
     OFFLINE_CUSTOMER_SYNC = "offline_customer_sync"
+    CUSTOMER_SUGGESTION_GROUPS = "customer-suggestion-groups"
+    CUSTOMER_RECOGNITION_STATUS = "customer-recognition-status"
+    CUSTOMER_RECOGNITION_JOBS = "customer-recognition-jobs"
+    RECOGNITION_BLOCKLIST = "recognition-blocklist"
+    RECOGNITION_REBUILD = "recognition-rebuild"
+    STABLE_CONTACT_IDS = "stable-contact-ids"
 
 
 DEFAULT_CAPABILITIES = tuple(item.value for item in Capability)

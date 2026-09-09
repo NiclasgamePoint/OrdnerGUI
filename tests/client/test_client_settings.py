@@ -480,6 +480,16 @@ def _complete_server_settings() -> dict[str, object]:
         "priority_documents_per_project": 9,
         "newest_years_first": False,
         "minimum_customer_year": 1995,
+        "recognition_pipeline_enabled": False,
+        "recognition_own_names": "Synthetic Engineering, Synthetic Owner",
+        "recognition_documents_per_project_max": 120,
+        "extraction_timeout_seconds": 150,
+        "pdf_max_pages": 240,
+        "image_max_pixels": 12_000_000,
+        "extraction_retry_attempts": 2,
+        "extraction_retry_delay_seconds": 600,
+        "extraction_store_max_mb": 2048,
+        "extraction_retention_days": 14,
     }
 
 
@@ -495,6 +505,11 @@ def test_tray_complete_settings_roundtrip_dirty_guard_busy_and_validation(
     expected = ServerSettingsPresenter().validate(_complete_server_settings())
     window._apply_settings({"settings": _complete_server_settings()})
     assert window._collect_settings() == expected
+    assert window.recognition_own_names.text() == "Synthetic Engineering, Synthetic Owner"
+    assert not window.recognition_pipeline_enabled.isChecked()
+    assert window.extraction_timeout_seconds.maximum() == 900
+    assert window.image_max_pixels.minimum() == 1_000_000
+    assert window.recognition_documents_per_project_max.maximum() == 500
     assert not window._settings_dirty
     assert not window.settings_save_button.isEnabled()
 

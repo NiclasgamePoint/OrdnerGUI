@@ -10,6 +10,7 @@ from pathlib import Path
 import sqlite3
 
 from papagui_server.domain.folder_structure import FolderMetadata, FolderStructureParser
+from papagui_server.domain.document_extraction import ExtractionResult
 
 
 class CatalogSqliteWriter:
@@ -60,6 +61,12 @@ class CatalogSqliteWriter:
         )
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(files)")}
         for name, definition in {
+            "extraction_status": "TEXT NOT NULL DEFAULT 'unsupported'",
+            "extraction_reason": "TEXT NOT NULL DEFAULT 'not_processed'",
+            "extraction_version": "TEXT NOT NULL DEFAULT ''",
+            "extraction_pages_total": "INTEGER",
+            "extraction_pages_processed": "INTEGER NOT NULL DEFAULT 0",
+            "extraction_priority": "INTEGER NOT NULL DEFAULT 0",
             "domain_folder": "TEXT NOT NULL DEFAULT ''",
             "time_bucket": "TEXT NOT NULL DEFAULT ''",
             "project_name": "TEXT NOT NULL DEFAULT ''",
@@ -89,14 +96,19 @@ class CatalogSqliteWriter:
         content: str,
         eligible: bool,
         metadata: FolderMetadata,
+        extraction: ExtractionResult | None = None,
     ) -> None:
         uri = f"source://{source_id}/{relative_path}"
         root = metadata.project_root
-        folder_id, project_root_id = self.classification_ids(
-            connection, source_id, metadata
-        )
+        folder_id, project_root_id = self.classification_ids(connection, source_id, metadata)
         document_key = hashlib.sha256(f"{source_id}\0{relative_path}".encode()).hexdigest()
-        content_hash = hashlib.sha256(content.encode()).hexdigest() if content else ""
+        content_hash = (
+            extraction.content_hash
+            if extraction
+            else hashlib.sha256(content.encode()).hexdigest()
+            if content
+            else ""
+        )
         connection.execute(
             """
             INSERT INTO files(
@@ -120,19 +132,44 @@ class CatalogSqliteWriter:
                 content_hash=excluded.content_hash, document_key=excluded.document_key
             """,
             (
-                uri, source_id, relative_path, path.name, stat.st_size,
+                uri,
+                source_id,
+                relative_path,
+                path.name,
+                stat.st_size,
                 path.suffix.casefold().lstrip("."),
                 datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                stat.st_mtime_ns, str(root.year) if root else "",
+                stat.st_mtime_ns,
+                str(root.year) if root else "",
                 root.service_type if root else metadata.domain_folder,
                 root.customer_name if root else "",
                 Path(relative_path).parts[3] if len(Path(relative_path).parts) > 4 and root else "",
-                metadata.domain_folder, metadata.time_bucket, metadata.project_name,
+                metadata.domain_folder,
+                metadata.time_bucket,
+                metadata.project_name,
                 metadata.source.relative_path if metadata.source else "",
-                folder_id, project_root_id, int(bool(content)), int(eligible),
-                content_hash, document_key,
+                folder_id,
+                project_root_id,
+                int(bool(content)),
+                int(eligible),
+                content_hash,
+                document_key,
             ),
         )
+        if extraction is not None:
+            connection.execute(
+                "UPDATE files SET extraction_status=?, extraction_reason=?, extraction_version=?, "
+                "extraction_pages_total=?, extraction_pages_processed=?, extraction_priority=? WHERE path=?",
+                (
+                    extraction.status,
+                    extraction.reason,
+                    extraction.artifact_hash or extraction.version_hash,
+                    extraction.pages_total,
+                    extraction.pages_processed,
+                    document_priority(path.name, content),
+                    uri,
+                ),
+            )
         connection.execute("DELETE FROM file_content_fts WHERE path=?", (uri,))
         if content:
             connection.execute(
@@ -155,12 +192,17 @@ class CatalogSqliteWriter:
             WHERE source_id=? AND relative_path=?
             """,
             (
-                metadata.domain_folder, metadata.time_bucket, metadata.project_name,
+                metadata.domain_folder,
+                metadata.time_bucket,
+                metadata.project_name,
                 metadata.source.relative_path if metadata.source else "",
-                folder_id, project_root_id,
+                folder_id,
+                project_root_id,
                 root.service_type if root else metadata.domain_folder,
-                str(root.year) if root else "", root.customer_name if root else "",
-                source_id, relative_path,
+                str(root.year) if root else "",
+                root.customer_name if root else "",
+                source_id,
+                relative_path,
             ),
         )
 
@@ -204,7 +246,8 @@ class CatalogSqliteWriter:
         metadata = [parser.parse_directory(source_id, item) for item in directories]
         roots = {
             item.project_root.source.relative_path: item.project_root
-            for item in metadata if item.project_root is not None
+            for item in metadata
+            if item.project_root is not None
         }
         connection.execute(
             "CREATE TEMP TABLE IF NOT EXISTS seen_project_roots(relative_path TEXT PRIMARY KEY)"
@@ -222,13 +265,22 @@ class CatalogSqliteWriter:
                     customer_name=excluded.customer_name, city=excluded.city,
                     recognition_key=excluded.recognition_key
                 """,
-                (source_id, relative, root.service_type, root.year, root.customer_label,
-                 root.customer_name, root.city, root.recognition_key),
+                (
+                    source_id,
+                    relative,
+                    root.service_type,
+                    root.year,
+                    root.customer_label,
+                    root.customer_name,
+                    root.city,
+                    root.recognition_key,
+                ),
             )
             connection.execute("INSERT OR IGNORE INTO seen_project_roots VALUES (?)", (relative,))
         connection.execute(
             "DELETE FROM project_roots WHERE source_id=? AND relative_path NOT IN "
-            "(SELECT relative_path FROM seen_project_roots)", (source_id,),
+            "(SELECT relative_path FROM seen_project_roots)",
+            (source_id,),
         )
         connection.execute(
             "CREATE TEMP TABLE IF NOT EXISTS seen_folders(relative_path TEXT PRIMARY KEY)"
@@ -236,11 +288,21 @@ class CatalogSqliteWriter:
         connection.execute("DELETE FROM seen_folders")
         for item in metadata:
             assert item.source is not None
-            parent_id = self._related_id(connection, "folders", source_id, item.parent.relative_path) if item.parent else None
-            project_root_id = self._related_id(
-                connection, "project_roots", source_id,
-                item.project_root.source.relative_path,
-            ) if item.project_root else None
+            parent_id = (
+                self._related_id(connection, "folders", source_id, item.parent.relative_path)
+                if item.parent
+                else None
+            )
+            project_root_id = (
+                self._related_id(
+                    connection,
+                    "project_roots",
+                    source_id,
+                    item.project_root.source.relative_path,
+                )
+                if item.project_root
+                else None
+            )
             connection.execute(
                 """
                 INSERT INTO folders(source_id, relative_path, name, parent_id,
@@ -251,15 +313,24 @@ class CatalogSqliteWriter:
                     domain_folder=excluded.domain_folder, time_bucket=excluded.time_bucket,
                     project_name=excluded.project_name, project_root_id=excluded.project_root_id
                 """,
-                (source_id, item.source.relative_path, item.name, parent_id,
-                 item.domain_folder, item.time_bucket, item.project_name, project_root_id),
+                (
+                    source_id,
+                    item.source.relative_path,
+                    item.name,
+                    parent_id,
+                    item.domain_folder,
+                    item.time_bucket,
+                    item.project_name,
+                    project_root_id,
+                ),
             )
             connection.execute(
                 "INSERT OR IGNORE INTO seen_folders VALUES (?)", (item.source.relative_path,)
             )
         connection.execute(
             "DELETE FROM folders WHERE source_id=? AND relative_path NOT IN "
-            "(SELECT relative_path FROM seen_folders)", (source_id,),
+            "(SELECT relative_path FROM seen_folders)",
+            (source_id,),
         )
 
     @staticmethod
@@ -271,3 +342,28 @@ class CatalogSqliteWriter:
             (source_id, relative_path),
         ).fetchone()
         return int(row[0]) if row else None
+
+
+def document_priority(filename: str, content: str) -> int:
+    """Cheap triage combines document type, contact context and text quality."""
+    name = filename.casefold()
+    text = content[:12_000].casefold()
+    important = (
+        "anschreiben",
+        "angebot",
+        "auftrag",
+        "vertrag",
+        "kontakt",
+        "adress",
+        "bauherr",
+        "vollmacht",
+    )
+    technical = ("berechnung", "leistungsverzeichnis", "statik", "norm", "mengen", "aufmaß")
+    score = sum(15 for word in important if word in name)
+    score += sum(4 for word in important if word in text)
+    score += sum(
+        5 for word in ("telefon", "e-mail", "ansprechpartner", "auftraggeber") if word in text
+    )
+    score -= sum(10 for word in technical if word in name)
+    score -= sum(2 for word in technical if word in text)
+    return score + min(5, sum(character.isalpha() for character in text) // 100)
