@@ -6,17 +6,27 @@
   Mehrfachauswahl, Zurücknehmen und Verwerfen halten die Änderungen vor dem
   Speichern überprüfbar. Fehler, Aktualisieren und Tabwechsel erhalten die
   Vormerkungen; eine ausstehende Veröffentlichung kann separat wiederholt werden.
+  Der Server meldet sie auch beim Neustart des Clients. Unbestätigte Vormerkungen
+  selbst bleiben flüchtiger Zustand des Tray-Prozesses.
+- Die Bestätigung sendet eine einzige Batch-Anfrage mit einem HTTP-Zeitlimit
+  von mindestens 60 Sekunden für die Veröffentlichung. Statusabfragen bleiben unabhängig
+  davon; Server ohne Batch-Unterstützung melden einen Updatehinweis.
+- Bei gemischter Mehrfachauswahl werden bereits vorgemerkte Entfernungen
+  beibehalten; nur eine vollständig zur Entfernung markierte Auswahl wird
+  gemeinsam zurückgenommen.
 
 - Indexserver und Kundenerkennungsneuaufbau zeigen aktive Dokument-Worker,
   ermittelte Obergrenze, Warteschlange und verarbeitete, wiederverwendete,
   extrahierte sowie fehlerhafte Dokumente live an. Ältere Server bleiben
-  kompatibel; fehlende Workerstatistiken werden als nicht verfügbar angezeigt.
+  kompatibel; die Übersicht weist auf fehlende Workerstatistiken hin, der
+  Neuaufbau zeigt weiterhin seinen allgemeinen Jobstatus.
 - Der Ressourcenprofil-Tooltip erläutert die Berechnung aus CPU, RAM und
   Containergrenzen; die Dokumentkarte zeigt die tatsächlich verwendete Grenze.
 
 - Der Tab „Kundenerkennung“ auf der Indexserver-Seite enthält die serverweite
   Sperrliste und den vollständigen Neuaufbau mit Status und Abbruch. Eingaben
   bleiben beim Tabwechsel erhalten; ausgeblendete Tabs pausieren Statusabfragen.
+  Der Tab bleibt bei Verbindungsfehlern erreichbar und scrollt in kleinen Fenstern.
 
 - Dropdown „Art“ im Kundeneditor öffnet sich auch beim Klick auf die Textfläche;
   vorhandene Kundenarten außerhalb der Standardauswahl bleiben erhalten.
@@ -43,6 +53,15 @@
   dokumentiert.
 - Alte Statistikansicht mit lokalen Kunden- und Suchkennzahlen sowie die
   Weiterleitung **Indexserver öffnen** zum eigenständigen Tray wiederhergestellt.
+- Dokumentation an die kennwortfreie Client-Token-Steuerung, aktuelle
+  Kundenerkennungsbedienung und Plattformgrenzen angepasst; native
+  Plattformabnahme wird nicht aus synthetischen Tests abgeleitet.
+
+### Kundendatenprüfung
+
+- Gruppierte Vorschläge mit Quellen, Konflikten, Pagination und aktueller Revision nach jeder Entscheidung.
+- Kundenbezogene Aktionen **Neu bewerten** und **Neu auslesen**, nachvollziehbare Abdeckung, lesbarer Offline-Stand und stabile Kontakt-IDs.
+- Kundenprüfung visuell überarbeitet: kompakte Karten, aufklappbare Belege, erreichbare Entscheidungen, umbrechende Texte und gekürzte Quellnamen ohne horizontales Scrollen; Hell-/Dunkelmodus und kleine Dialoggrößen mit synthetischen Daten geprüft.
 
 ## 0.4.2
 
@@ -65,10 +84,3 @@
 
 Historische gemeinsame Änderungen bis einschließlich 0.4.1 stehen im
 [Repository-Changelog](../../CHANGELOG.md).
-
-### Kundendatenprüfung
-
-- Gruppierte Vorschläge mit Quellen, Konflikten, Pagination und aktueller Revision nach jeder Entscheidung.
-- Gezielte Neusuche, nachvollziehbare Abdeckung, lesbarer Offline-Stand und stabile Kontakt-IDs.
-
-- Kundenprüfung visuell überarbeitet: kompakte Karten, aufklappbare Belege, erreichbare Entscheidungen, umbrechende Texte und gekürzte Quellnamen ohne horizontales Scrollen; Hell-/Dunkelmodus und kleine Dialoggrößen mit synthetischen Daten geprüft.

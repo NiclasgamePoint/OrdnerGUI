@@ -6,6 +6,19 @@
 .venv/bin/python tools/recognition_benchmark.py --output /tmp/recognition-synthetic-report.json
 ```
 
+Unter Windows PowerShell, mit neu eingerichteter Windows-Umgebung:
+
+```powershell
+.\.venv\Scripts\python.exe tools/recognition_benchmark.py --output (Join-Path $env:TEMP 'recognition-synthetic-report.json')
+```
+
+Der Befehl ohne `--output` schreibt den Bericht ausschließlich auf stdout.
+Der separate `tools/recognition_parser_smoke.py` erzeugt temporäre DOCX-, XLSX-,
+Bild- und PDF-Dateien und prüft die tatsächliche Parser-/OCR-Ausführung. Dafür
+müssen die Serverabhängigkeiten und die benötigten OCR-Systemwerkzeuge verfügbar
+sein. Dieser Lauf ersetzt ebenfalls keine Messung auf unabhängig annotierten
+Kundendokumenten. Die synthetischen Fixtures sind kein Graphify-Eingabekorpus.
+
 Gemessen werden normalisierte fachliche Vorschläge in der Stufe `strong`: Telefon, E-Mail, Firma, atomare Anschrift und benannter Kontakt. Ein Kontaktvergleich enthält den Personennamen sowie die gemeinsam belegten Felder. Wiederholte Belege im selben Fall werden vor dem Vergleich zusammengefasst. `review`-Belege werden separat gezählt. Precision und Recall erscheinen insgesamt, je Feld, Eingabeformat, Fallgruppe und Kundengruppe; zusätzlich wird kundenweise gemittelt. Leere Nenner ergeben `null`, keine behauptete perfekte Qualität.
 
 Die 54 Fälle decken nationale und internationale Telefonnummern, Durchwahlen, Fax, Zahlen-/Datums-/IBAN-Kontexte, ungültige E-Mail-Werte, eigene und fremde Parteien, den Kunden als Absender und Empfänger, Anschriften, Kontakte, Firmenformen und strukturierte Office-/OCR-Eingaben ab. Die nachträglich geschriebenen Regressionfälle tragen getrennte synthetische Kundenidentitäten für `development` und `evaluation`. Diese Bezeichnungen machen sie nicht zu einem unabhängig annotierten Abnahmebestand. Formatlabels prüfen die fachliche Verarbeitung vorbereiteter Blöcke, nicht die tatsächliche Parser- oder OCR-Genauigkeit.

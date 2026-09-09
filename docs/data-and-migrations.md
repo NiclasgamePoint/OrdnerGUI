@@ -66,13 +66,51 @@ Tabellenanzahlen. Die vor der Migration erzeugte SQLite-Sicherung bleibt
 unverändert und kann atomar zurückgespielt werden.
 
 Ein Rollback verwendet das gesicherte Servervolume und den Tag `v0.4.1`.
-Die neuen 0.4.2-Komponententags sind kein veröffentlichtes Release.
+Ein Komponententag stellt für sich noch kein veröffentlichtes Release dar.
 
 ## Quellpfade
 
 Generationen speichern keine absoluten `/source`-Pfade. Jeder Treffer enthält
 eine validierte `source_id` und einen POSIX-relativen Pfad. Der Client löst
 diese Werte über sein lokales Mapping auf und verhindert Pfadtraversal.
+
+## Vorschläge, Entscheidungen und serverweite Sperrliste
+
+Die additive Erkennungsmigration erweitert `customer_document_suggestions` um
+normalisierte Werte, Partei, Qualitätsstufe, Lebenszyklus und Versionsangaben.
+`candidate_aliases` ordnet alte Fingerprints zu; `candidate_evidence` bewahrt die
+mehreren Fundstellen eines Vorschlags. `candidate_decisions` erhält frühere
+Entscheidungen. Kontakte besitzen eine stabile `uid`, und
+`customer_field_provenance` trennt manuelle, angenommene und unbekannte Herkunft.
+Bestehende Werte werden dadurch nicht nachträglich als bestätigt ausgegeben.
+
+`customer_recognition_status` hält den Abdeckungszustand je Kunde.
+`recognition_blocklist` speichert die globalen Ausschlüsse mit Typ, Rohwert,
+normalisiertem Wert, Grund und Erstellzeit. Ein bestätigter Batch validiert und
+speichert alle Ergänzungen und Löschungen in einer Transaktion und aktualisiert
+die Sichtbarkeit vorhandener Vorschläge. Manuell gepflegte Kundendaten und
+frühere Entscheidungen bleiben dabei erhalten.
+
+Speicherung und Veröffentlichung sind zwei Schritte. Ein dauerhafter Marker in
+`candidate_schema_metadata` kennzeichnet eine noch ausstehende
+Kundenveröffentlichung. Meldet die API `published=false`, sind die Änderungen
+bereits gespeichert; ein erneuter Batch, auch ohne weitere Änderungen, versucht
+die Veröffentlichung erneut. `publication_pending` macht diesen Zustand beim
+späteren Laden wieder sichtbar. Ein Versionsmarker verhindert, dass eine ältere
+Veröffentlichung eine inzwischen neuere Änderung versehentlich quittiert.
+
+Sperrlisten-IDs werden anhand einer dauerhaft gespeicherten Obergrenze vergeben
+und nach Löschung nicht wiederverwendet. Ein verspäteter Löschversuch kann damit
+keinen neu angelegten, anderen Eintrag treffen.
+
+## Wechsel des Entwicklungsrechners
+
+Git enthält Code, Contracts, Migrationslogik und synthetische Fixtures. Dokumente,
+Serverdatenbanken, Sperrliste, Tokens und lokale Clienteinstellungen werden nicht
+mitgeklont. Bei Weiterbetrieb desselben Servers genügt die neue
+Clientkonfiguration mit passender Plattform-Pfadzuordnung. Für einen Serverumzug
+müssen `/data` und `/config` gemeinsam konsistent gesichert und wiederhergestellt
+werden; siehe [Backup und Restore](server/operations.md#backup-und-restore).
 
 ## Quellidentität und Mountschutz
 

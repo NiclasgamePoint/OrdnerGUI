@@ -6,6 +6,8 @@
   bestehender Vorschläge und eine Veröffentlichung pro geändertem Stapel.
   Wiederholte unveränderte Anfragen vermeiden zusätzliche Veröffentlichungen;
   fehlgeschlagene Veröffentlichungen bleiben dauerhaft zur Wiederholung vorgemerkt.
+  Der Listenendpunkt meldet den offenen Veröffentlichungszustand auch nach
+  einem Neustart. Monotone IDs schützen neue Sperren vor veralteten Löschanfragen.
   Sperrlistenänderungen starten keine Dokumentauslesung und keinen Neuaufbau.
 
 - Gemeinsame parallele Dokumentauslesung für Indexierung und Kundenerkennung
@@ -16,6 +18,10 @@
   übersprungen. Täglicher Abgleich und ausdrücklicher Indexneuaufbau prüfen die
   Inhaltshashes; passende Extraktionsergebnisse bleiben wiederverwendbar.
   Der letzte erfolgreiche vollständige Prüftermin bleibt über Neustarts erhalten.
+- Der Scheduler beachtet den gespeicherten täglichen Prüftermin auch bei einem
+  längeren Indexintervall. `--no-run-on-start` unterdrückt einen sofortigen Lauf
+  auch bei fehlendem oder überfälligem Prüftermin; Fehler-/Abbruchwiederholungen
+  halten ein begrenztes Warteintervall ein.
 - Additive Workerstatistik im Serverstatus und während der Auslesung laufender
   Kunden-/Neuaufbauaufträge: aktive Worker, Limit, Warteschlange und Dokumentzähler.
 
@@ -31,6 +37,12 @@
 
 - Separate Adminpasswörter und flüchtige Adminsitzungen entfernt. Sämtliche
   Servereinstellungen und Wartungsaktionen verwenden nur noch den Client-Token.
+
+### Kundendatenerkennung
+
+- Strukturierte Office/PDF/OCR-Auslesung mit privatem Cache, getrennten Ressourcenbudgets und nachvollziehbarer Teilabdeckung.
+- Normalisierte Kandidaten, Parteien, Adress-/Kontaktgruppen, Entscheidungen und Herkunft; Kunden-Schema 3, additive Sperrliste in Schema 4.
+- Koordinierte dauerhafte Kundenjobs und additive Review-/Status-API.
 
 ## 0.4.2
 
@@ -52,9 +64,3 @@
 
 Historische gemeinsame Änderungen bis einschließlich 0.4.1 stehen im
 [Repository-Changelog](../../CHANGELOG.md).
-
-### Kundendatenerkennung
-
-- Strukturierte Office/PDF/OCR-Auslesung mit privatem Cache, getrennten Ressourcenbudgets und nachvollziehbarer Teilabdeckung.
-- Normalisierte Kandidaten, Parteien, Adress-/Kontaktgruppen, Entscheidungen und Herkunft; Kunden-Schema 3.
-- Koordinierte Kundenjobs und additive Review-/Status-API.

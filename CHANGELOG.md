@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- Strukturierte lokale Kundendatenerkennung für Telefon, E-Mail, Firma,
+  Anschrift und benannte Ansprechpartner ergänzt; Datumsfilter, Rollenprüfung,
+  mehrere Belege pro Vorschlag und dauerhafte Entscheidungen verbessern die
+  fachliche Prüfung. Manuell gepflegte Stammdaten bleiben geschützt.
+- Kundenprüfung mit gruppierten Vorschlägen, Abdeckungsstatus, Offline-Belegen
+  und gezielten Aktionen zum Neubewerten beziehungsweise Neulesen ergänzt.
+- Serverweite Sperrliste und vollständigen Neuaufbau der Kundenerkennung im
+  eigenen Tab der Indexserver-Seite zugänglich gemacht. Ergänzungen und
+  Löschungen werden gesammelt und erst nach Bestätigung gemeinsam gespeichert.
+  Eine Batch-Änderung veröffentlicht einmal die Kundenkomponente und löst keinen
+  Indexneuaufbau oder OCR-Lauf aus; fehlgeschlagene Veröffentlichungen bleiben
+  über Neustarts wiederholbar.
+- Inhaltsindexierung und Kundenerkennung nutzen dieselbe parallele
+  Dokumentauslesung mit gemeinsamem Cache, begrenzter Warteschlange und einem
+  Ressourcenbudget von 1–20 Workern. Die Oberfläche zeigt aktive Worker und
+  zusammengefasste Dokumentzähler.
+- Reguläre Folgeabgleiche überspringen unveränderte Dokumente anhand von
+  Metadaten und Auslesepolicy. Die tägliche Inhaltsprüfung verwendet Hashes,
+  erhält gültige Extraktionen und berücksichtigt dauerhaft den letzten
+  Prüfzeitpunkt. Explizite Dokumentneuauslesung erzwingt Parser und nötige OCR.
+- Windows-Erststart korrigiert: Token-Erzeugung mit Windows PowerShell 5.1
+  kompatibel gemacht, Generatorfehler abgefangen und die numerische SID beim
+  Setzen der Dateirechte richtig übergeben. Native Regressionstests und eine
+  Anleitung für den Wechsel des Entwicklungsrechners ergänzt; die native
+  Windows-Abnahme steht noch aus.
+- Dokumentation für Betrieb, API, Oberfläche, Entwicklung und Paketierung mit
+  dem aktuellen Code abgeglichen; historische Pläne und Prüfergebnisse als
+  solche gekennzeichnet.
+
 - Kundenart im Kundeneditor als normale Dropdown-Auswahl bedienbar gemacht:
   Klicks auf das Feld öffnen die Liste; importierte Sonderwerte bleiben erhalten.
 - Wechsel von der Suche zur Kundendetailseite blockiert die Qt-Oberfläche nicht
@@ -100,10 +129,3 @@
 
 - Aufteilung des Indexes in schnellen Katalog und fortsetzbare Inhalts-Shards.
 - Erweiterte Kundenverwaltung, Kundenerkennung, Viewer und Indexdiagnose.
-
-### Kundendatenerkennung
-
-- Lokale, strukturierte Dokumentauslesung und Rollenprüfung für Telefon, E-Mail, Firma, Anschrift und Ansprechpartner.
-- Stabile Entscheidungen mit mehreren Belegen, geschützte Stammdaten, Kontakt-IDs und additive Migration.
-- Gruppierte Kundenprüfung mit Abdeckungsstatus, Offline-Belegen und gezielten Serverjobs.
-- Betrieb und synthetische Qualitätsprüfung: [Dokumentation](docs/kundendatenerkennung.md).

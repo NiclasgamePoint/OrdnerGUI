@@ -7,4 +7,5 @@ reguläre Entwicklungsdokumentation übernommen:
 - [Entwicklungsumgebung](docs/development.md)
 
 Dadurch existiert nur noch eine gepflegte Quelle für Installation,
-Aktualisierung und lokale HTML-Ansicht.
+die ausdrücklich begrenzte Quellcodeauswahl, Aktualisierung und lokale
+Graphansicht. Dokumente und Kundendaten gehören nicht in den Architekturgraphen.

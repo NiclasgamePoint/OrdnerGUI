@@ -1,7 +1,9 @@
 # Produktideen nach der Client-/Server-Trennung
 
-Diese Liste enthält unverbindliche Ideen. Der verbindliche technische Stand
-steht in [Umsetzungsplanung.md](Umsetzungsplanung.md).
+Diese Liste enthält unverbindliche Ideen, Stand 9. September 2026. Implementierte
+Funktionen und offene Abnahmen stehen in
+[Umsetzungsplanung.md](Umsetzungsplanung.md); die aktuelle Bedienoberfläche ist
+in der [GUI-Migrationsmatrix](docs/gui-design-restoration.md) dokumentiert.
 
 ## Client
 
@@ -26,28 +28,19 @@ steht in [Umsetzungsplanung.md](Umsetzungsplanung.md).
 
 ---
 
-Noch neu einzubauende Features
-Technisch bereits vorhanden, aber noch ohne vollständige Bedienoberfläche:
-- Such-Pagination sowie Trefferart-, Kunden- und source_id-Filter
-- Erreichbarkeitstest für lokale Pfadzuordnungen
-- lokale Generations-, Alters-, Prüfsummen- und Backupansicht
-- sichtbarer manueller Sync und einzelnes Outbox-Replay
-- detaillierte Kunden-/Journal-Warteschlange
-- Drei-Wege-Feldvergleich bei Kundenkonflikten
-- vollständige Historie der Erkennungsläufe
-- sichtbarer Admin-Sitzungsstatus, Ablaufzeit und Sperren-Aktion
-- API-Versionen und Serverfähigkeiten als Diagnoseansicht
-- optionale Idempotenz-Diagnose
-Diese alten Funktionen brauchen zuerst neue Serververträge:
-- Projektordner manuell zuordnen, entfernen oder verschieben
-- noch nicht zugeordneten Ordner einem Kunden geben
-- Kontaktdaten für einen einzelnen Kunden neu suchen
-- abweichenden Vorschlagswert ausdrücklich übernehmen
-- Erkennungsfall „Getrennt anlegen“ und Kundentyp übertragen
-- Erkennungsschwelle, Blacklists und Blacklist-Vorschläge
-- Server-Logstream und Worker-Detailfortschritt
-- bestimmtes Serverbackup auswählen und wiederherstellen
-- Client-Token rotieren
-- Inhaltsjob pausieren, fortsetzen, Fehler wiederholen oder optimieren
-- Volltext-/Maximalergebnis-Konfiguration neu entwerfen
-Die dazugehörigen alten Bedienelemente sind teilweise sichtbar, aber eindeutig deaktiviert. Es wurde keine lokale Ersatzlogik eingebaut.
+## Abgrenzung zum bereits umgesetzten Stand
+
+Die serverweite Sperrliste, gesammelte Änderungen mit Bestätigung, die gezielte
+Neubewertung und Dokumentneuauslesung einzelner Kunden, der vollständige
+Erkennungsneuaufbau sowie die Anzeige von Worker-Summen sind bereits vorhanden.
+Sie werden deshalb nicht mehr als neue Funktionen geführt.
+
+Adminpasswort, Adminsitzungsstatus und Ablaufzeit sind keine offenen
+Oberflächenaufgaben: Das frühere Sitzungsmodell wurde entfernt. Ein künftig
+feineres Rollenmodell benötigt eine eigenständige Konzeption.
+
+Noch fehlende Bedienelemente und Serververträge werden ausschließlich in der
+[GUI-Migrationsmatrix](docs/gui-design-restoration.md) gepflegt. Dazu zählen je
+nach Funktionsbereich zusätzliche Konflikt-, Diagnose-, Projektzuordnungs- und
+Wiederherstellungsaktionen; sichtbare Platzhalter sind keine ausführbaren
+Funktionen.

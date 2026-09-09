@@ -1,5 +1,14 @@
 # Prüfbericht zur Kundendatenerkennung
 
+> Historischer Prüfbericht, Dokumentationsabgleich am 9. September 2026.
+> Testzahlen, Coverage und Messwerte beschreiben die jeweils unten genannte
+> Entwicklungsstufe. Spätere Änderungen an Batch-Sperrliste, Zeitplanung und
+> Windows-Start sind damit nicht automatisch erneut abgenommen. Den aktuellen
+> Funktionsstand und offene Abnahmen beschreibt die
+> [Umsetzungsübersicht](../Umsetzungsplanung.md); reproduzierbare Prüfwege stehen
+> in der [Entwicklungsdokumentation](development.md).
+
+
 Datum: 9. September 2026. Geprüft wurde der lokale Entwicklungsstand nach Umsetzung der neuen Pipeline. Alle fachlichen Eingaben waren ausdrücklich synthetisch. Bestehende Kundendatenbanken, Dokumentordner und der frühere Bestandsaudit wurden für die Implementierung nicht in den Assistenzkontext eingelesen. Es wurde kein Produktivbestand migriert oder veröffentlicht.
 
 | Prüfung | Ergebnis |

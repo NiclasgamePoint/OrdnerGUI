@@ -43,6 +43,10 @@ bleibt zusätzlich im Clientprozess erforderlich. Ein OS-Keyring-Adapter ist
 noch nicht Teil von 0.4.2. Eine Rotation ersetzt zuerst die Serverdatei und
 anschließend die Clientkonfigurationen kontrolliert.
 
+Der Windows-Starter prüft Exitcode und Rückgabewert der Token-Erzeugung, bevor
+er eine neue Secretdatei schreibt. Ein fehlgeschlagener Generator darf keinen
+leeren Token als erfolgreich eingerichtete Authentifizierung hinterlassen.
+
 ## Konflikte und Wiederholungen
 
 Kundenänderungen enthalten Basisrevision und Idempotency-Key. Eine veraltete
@@ -68,13 +72,27 @@ personenbezogene Daten enthalten. Fehlermeldungen nennen nur die für Diagnose
 erforderlichen Pfade und Metadaten. Zugriff auf Server- und Clientdatenordner
 ist auf die jeweiligen Betriebskonten zu beschränken.
 
+Für Entwicklung, Tests und Assistenzkontext werden ausschließlich synthetische
+Dokumente und erfundene Kontakte verwendet. Konkrete Kundendaten, Quelldokumente,
+Produktivdatenbanken, Belegauszüge und kundenbezogene Logpfade dürfen nicht in
+Assistenz- oder externe Modellkontexte übernommen werden. Notwendige
+Bestandsprüfungen bleiben lokal; für die technische Diagnose werden nur
+anonymisierte, aggregierte Ergebnisse verwendet.
+
+Auch der Architekturgraph wird ausschließlich aus den Python-Laufzeitquellen in
+`packages/{contracts,server,client}/src` erstellt. Ein Scan der Repositorywurzel
+oder alter Berichte und Graph-Memories ist kein freigegebener Ersatz dafür.
+Die automatische Dokumentauslesung und Kundenerkennung laufen lokal auf dem
+Server; eine externe Modellstufe ist nicht Bestandteil der Pipeline.
+
 ## Lieferkette
 
-CI prüft getrennte Dependency-Locks, Paketgrenzen und Artefaktinhalt. Der
-0.4.2-Stand ist nicht signiert und nicht
-veröffentlicht. Öffentliche Releases, Container-Push, Code Signing,
-Notarisierung und Auto-Updates bleiben bis zu einer gesonderten Freigabe
-deaktiviert.
+CI prüft getrennte Dependency-Locks, Paketgrenzen und Artefaktinhalt. Die
+enthaltenen Workflows erzeugen unsignierte Client-Testartefakte und bauen
+Serverimages mit `push: false`. Öffentliche Releases, Code Signing,
+Notarisierung und Auto-Updates sind darin nicht eingerichtet. Eine erfolgreiche
+lokale Prüfung bestätigt weder einen entfernten CI-Lauf noch die native Abnahme
+auf allen Plattformen.
 
 ## Offene Hardening-Punkte
 

@@ -26,7 +26,7 @@ function Protect-SecretFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        $aclOutput = & icacls.exe $Path '/inheritance:r' '/grant:r' "${identity}:(R,W)" 2>&1
+        $aclOutput = & icacls.exe $Path '/inheritance:r' '/grant:r' "*${identity}:(R,W)" 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw ($aclOutput -join [Environment]::NewLine)
         }
@@ -47,7 +47,10 @@ function Initialize-Secret([string]$Name, [string]$Filename) {
     Protect-SecretFile $path
     if (-not $current) {
         if (-not (Test-Path $path) -or -not (Get-Item $path).Length) {
-            $current = & $python -c 'import secrets; print(secrets.token_urlsafe(32), end="")'
+            $current = & $python -c 'import secrets; print(secrets.token_urlsafe(32))'
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($current)) {
+                throw 'Der API-Token konnte nicht erzeugt werden.'
+            }
             Write-SecretFile $path $current
         } else {
             $current = Get-Content -Raw $path

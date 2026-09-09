@@ -58,7 +58,7 @@ Die `gui`-Schicht verwendet wieder die sichtbaren v0.4.1-Komponenten
 Indexserver-Tray). Diese Komponenten sind ausschließlich Views und lokale
 Presentermodelle. Datenzugriff und Änderungen laufen weiter über
 `SearchCoordinator`, `CustomerCoordinator`, `JournalCoordinator`,
-`SyncCoordinator` und den `ServerControlGateway`; der Design-Rückbau erzeugt
+`SyncCoordinator` und den `HttpServerControlGateway`; der Design-Rückbau erzeugt
 keine Kompatibilitätsverbindung zum alten Monolithen.
 
 ## OOP-Leitlinien
@@ -69,19 +69,51 @@ keine Kompatibilitätsverbindung zum alten Monolithen.
   Datenbank-, HTTP- oder Qt-Klassen.
 - SQLite-Transaktionen werden über Unit-of-Work-Grenzen abgeschlossen.
 - Generations- und Customer-Snapshots sind immutable. Pending-Änderungen liegen
-  ausschließlich in der Outbox.
+  für Kundendaten in der Outbox. Noch unbestätigte Änderungen der serverweiten
+  Sperrliste hält das Tray dagegen nur im Arbeitsspeicher; sie gehören nicht zur
+  Kunden-Outbox.
 - Composition Roots sind die einzigen Stellen, die konkrete Adapter erzeugen.
 - Vererbung dient nicht zur Wiederverwendung konkreter Repositories;
   Offlineverhalten wird durch Komposition aufgebaut.
 
 ## Prozesse
 
-- Der Servercontainer besitzt API, Scheduler und Indexworker.
-- Hauptfenster und Admin-Tray sind getrennte Clientprozesse.
-- Das Tray kann ohne Hauptfenster laufen und speichert den Adminsitzungstoken
-  nur im Prozessspeicher.
-- `start.sh` ist ausschließlich ein Entwicklungs-Orchestrator und keine
-  Produktkopplung.
+- Der Servercontainer besitzt API, Scheduler und Indexverarbeitung. Die
+  Dokumentauslesung für Inhaltsindex und Kundenerkennung nutzt denselben
+  begrenzten Threadpool und Extraktionscache. Fachliche Kundenzuordnung und
+  SQLite-Schreibvorgänge laufen anschließend seriell.
+- Indexläufe und erzwungene Dokumentneuauslesung teilen eine Operationssperre.
+  Sperrlistenänderungen benötigen diese lang gehaltene Sperre nicht: Ihre kurze
+  SQLite-Transaktion wird mit den übrigen Schreibern serialisiert.
+- Hauptfenster und Indexserver-Tray sind getrennte Clientprozesse. Das Tray
+  funktioniert ohne Hauptfenster und verwendet denselben Client-Bearer-Token;
+  Adminpasswort und gesonderte Adminsitzungen gibt es nicht mehr.
+- `start.sh`, `start.command` und `start.bat`/`start.ps1` koordinieren den lokalen
+  Entwicklungsstart. Ein Client kann auch einen bereits laufenden entfernten
+  Server verwenden und benötigt dann kein Docker.
+
+## Dokumentauslesung und Veröffentlichung
+
+Ein regulärer Folgeabgleich prüft Änderungszeit, Dateigröße und Auslesepolicy.
+Unveränderte Dokumente werden dabei nicht erneut geöffnet. Ein fälliger täglicher
+Inhaltsabgleich beziehungsweise ein ausdrücklicher Indexneuaufbau prüft zusätzlich
+Inhaltshashes, kann aber einen weiterhin gültigen Extraktionscache verwenden.
+**Neu auslesen** und der vollständige Neuaufbau der Kundenerkennung
+erzwingen dagegen die Auslesung einschließlich erforderlicher OCR.
+
+Neue Textartefakte versorgen sowohl den Inhaltsindex als auch die fachliche
+Erkennung. Dokumentbelege werden zu stabilen Vorschlägen zusammengefasst und mit
+Stammdaten, Entscheidungen und serverweiten Ausschlüssen abgeglichen. Erst eine
+angenommene Kundenentscheidung schreibt den vorgeschlagenen Wert in die
+Stammdaten.
+
+Eine bestätigte Sperrlistenänderung gleicht vorhandene Vorschläge ab und
+veröffentlicht die Kundenkomponente einmal pro Batch; sie startet keinen
+Indexneuaufbau und keine OCR. Schlägt die Veröffentlichung nach dem Datenbank-
+Commit fehl, bleibt ein dauerhafter Marker für eine spätere Wiederholung erhalten.
+Die Clients verwenden bis dahin ihren letzten gültigen Snapshot. Details stehen
+in [API](api.md), [Datenmodell](data-and-migrations.md) und
+[Kundenerkennung](kundendatenerkennung.md).
 
 ## Entscheidungen
 

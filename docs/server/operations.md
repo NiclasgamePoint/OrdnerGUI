@@ -7,7 +7,7 @@ Der Container verwendet drei klar getrennte Pfade:
 | Containerpfad | Rechte | Inhalt |
 | --- | --- | --- |
 | `/source` | read-only | Gemountete Bauvorhaben/Dokumente |
-| `/data` | read-write | Index, `customers.db`, Generationen, Backups und Jobstatus |
+| `/data` | read-write | Index, `customers.db`, privater Extraktionscache, Generationen, Backups und Jobstatus |
 | `/config` | read-write | Servereinstellungen, Quellidentität und API-Token |
 
 Nur eine Serverinstanz darf dasselbe `/data`-Volume verwenden. Die konfigurierte
@@ -56,8 +56,10 @@ docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml ps
 docker compose --env-file deploy/server/.env -f deploy/server/compose.yaml logs -f papagui-server
 ```
 
-Der Healthcheck prüft `GET /health`. Fachlicher Indexfortschritt und letzte
-Fehler stehen unter `/v2/server/status` und im Client-Tray.
+Der Healthcheck prüft `GET /health`. HTTP 200 bestätigt die Erreichbarkeit;
+auch bei nicht verfügbarer Quelle kann der Inhalt `degraded` melden.
+Fachlicher Indexfortschritt, Workerzahlen und letzte Fehler stehen unter
+`/v2/server/status` und im Client-Tray.
 
 ## Beenden und Neustarten
 
@@ -98,6 +100,96 @@ als Löschung aller Dokumente veröffentlicht. Bei einem absichtlichen Wechsel
 zuerst Backup anlegen, den neuen Mount manuell prüfen und die bestehende
 Identitätsdatei in eine `.previous`-Datei umbenennen; erst dann darf sie durch
 einen beaufsichtigten Lauf neu angelegt werden.
+
+## Zeitplanung und Ressourcen
+
+Die dauerhaften Servereinstellungen werden über den Client oder
+`GET/PUT /v2/admin/settings` verwaltet. Standardmäßig sind automatische
+Läufe und der tägliche Inhaltsabgleich aktiv, das Intervall beträgt
+86.400 Sekunden. `PAPAGUI_INDEX_INTERVAL_SECONDS` liefert lediglich den
+Startstandard; eine gespeicherte Einstellung hat Vorrang.
+
+Ein regulärer Lauf gleicht alle Dateipfade ab, übernimmt aber unveränderte
+erfolgreich verarbeitete Dokumente ohne erneutes Lesen. Der tägliche
+Inhaltsabgleich prüft zusätzlich Inhaltshashes. Sein letzter erfolgreicher
+vollständiger Katalogtermin wird dauerhaft gespeichert: Bei einem normalen
+Intervall von 48 Stunden und einer vor 23 Stunden erfolgten Inhaltsprüfung
+bleibt die nächste Prüfung in einer Stunde fällig. Kundenaufträge für
+einzelne Projekte verschieben diesen Termin nicht.
+
+`serve` startet normalerweise direkt einen Indexlauf. Bei einem gezielten
+CLI-Start mit `--no-run-on-start` wird dieser ausgelassen. Fehlt der tägliche
+Prüftermin oder ist er bereits überschritten, wartet der Scheduler dann bis
+zum kleineren Wert aus normalem Intervall und 24 Stunden. Ein bevorstehender
+gespeicherter Prüftermin bleibt erhalten. `automatic_runs_enabled=false`
+unterdrückt automatische Termine; ausdrücklich angeforderte Läufe sind
+weiter möglich. `daily_reconciliation_enabled=false` deaktiviert die
+zusätzliche Inhaltsprüfung.
+
+Indexierung und auslesende Erkennungsaufträge nutzen dieselbe begrenzte
+Dokumentpipeline. Das Profil `gentle`, `balanced` oder `fast` verwendet
+15 %, 25 % beziehungsweise 60 % der effektiven CPU-Kapazität für die
+Berechnung der Workerzahl. CPU-Affinität, cgroup-Grenzen, verfügbarer RAM,
+Speicherreserve und Dokumentbudget begrenzen diese weiter auf 1–20 Worker;
+bei unbekanntem oder knappem RAM bleibt ein Worker. Die Profile begrenzen
+die Anzahl paralleler Aufgaben, garantieren aber keine feste
+CPU-Auslastung. Die mitgelieferte Compose-Datei setzt selbst keine
+CPU-/RAM-Limits; konfigurierte Containergrenzen werden berücksichtigt.
+
+Die Warteschlange enthält höchstens doppelt so viele ausstehende Dokumente
+wie Worker. Office-/PDF-Parser laufen isoliert mit Zeit- und unter Linux
+Speichergrenzen. OCR verwendet einen OpenMP-Thread und die eingestellten
+Seiten-/Bildbudgets. Ein Abbruch stoppt weitere Aufgaben und überwachte
+Parser-/OCR-Prozesse; die letzten veröffentlichten Generationen bleiben
+verfügbar. Workerstatistiken enthalten nur Summen und Laufzeiten.
+
+`/data/extraction/artifacts.db` enthält private Layout-/OCR-Ergebnisse.
+Der Cache verwendet Inhaltshash und relevante Parser-/Werkzeug- sowie
+Einstellungsversionen. Er gehört zum Serverbackup, wird aber nicht als
+großes Layoutarchiv an Clients verteilt. Dateigröße, Extraktionsbudget,
+Cachebudget und Aufbewahrung werden in den Servereinstellungen verwaltet.
+Eine angezeigte Teilabdeckung kann bedeuten, dass eine dieser Grenzen
+erreicht wurde; sie ist kein Beweis für fehlende Kundenangaben.
+
+## Administration und Veröffentlichungswiederholung
+
+Alle folgenden Aktionen verwenden denselben Client-Token. Es gibt kein
+zusätzliches Adminpasswort.
+
+| Aktion | Wirkung |
+| --- | --- |
+| Regulärer Indexlauf | Dateiabgleich und fällige Dokument-/Kundenverarbeitung; unveränderte Ergebnisse werden übernommen. |
+| Indexneuaufbau (`full_rebuild`) | Katalog neu erstellen und Inhaltshashes prüfen; passende Parser-/OCR-Cacheergebnisse bleiben verwendbar. |
+| Texte erneut bewerten (`reassess`) | Vorhandene Extraktionstexte eines Kunden neu bewerten. |
+| Dokumente neu lesen (`extract`) | Dokumente der zugeordneten Kundenprojekte erneut auslesen und bewerten. |
+| Kundenerkennung vollständig neu aufbauen (`rebuild`) | Katalog und Dokumentauslesung einschließlich aktivierter OCR erneuern, alle Kunden ohne normales Projektsuchbudget bewerten. |
+| Sperrlistenänderungen bestätigen | Gesammelte Sperren atomar speichern, bestehende Vorschläge einmal abgleichen und Kundenstand veröffentlichen. |
+
+Dateitypen, Ordnerausschlüsse und Schutzgrenzen je Dokument gelten auch
+beim vollständigen Erkennungsneuaufbau. Dieser erfordert eine aktivierte
+`recognition_pipeline_enabled`-Einstellung und ein positives
+`priority_documents_per_project`; der Wert 0 deaktiviert die Dokumentprüfung.
+Kunden-/Neuaufbauaufträge sind
+dauerhaft, werden beim Schließen des Clientfensters fortgesetzt und nach
+einem Serverneustart erneut eingereiht, wenn sie unterbrochen wurden.
+Ausdrücklich abgebrochene Aufträge bleiben abgebrochen.
+
+Die Sperrliste darf während laufender Indexierung bearbeitet werden.
+Vormerkungen im Client werden erst mit **Änderungen bestätigen** wirksam.
+Der Stapelendpunkt verändert ausschließlich die Kundendatenbank und
+veröffentlicht anschließend eine Kundenkomponente; er startet keine
+OCR, Dokumentauslesung oder Neuaufbereitung des Index.
+
+Meldet der Server nach dem Speichern `published: false`, gelten die
+Sperren bereits auf dem Server, während Offline-Clients noch einen älteren
+Snapshot besitzen können. Die offene Veröffentlichung überlebt
+Server-/Clientneustarts und erscheint beim Laden als
+`publication_pending: true`. Nach Beheben des Veröffentlichungsfehlers
+im Client **Veröffentlichung wiederholen** wählen oder einen leeren
+Stapel an `POST /v2/admin/recognition/blocklist/batch` senden. Es ist kein
+Erkennungsneuaufbau erforderlich. Ein unveränderter Stapel ohne offenen
+Veröffentlichungsschritt erzeugt keine weitere Generation. Details und
+Fehlerantworten stehen in [der API-Referenz](../api.md).
 
 ## Backup und Restore
 
@@ -217,7 +309,10 @@ das Fehlen nicht als Massendeletion interpretieren.
 
 - `GET /health`: Prozess erreichbar
 - `GET /v2/system/info`: Versionen und Fähigkeiten
-- `GET /v2/server/status`: Laufphase, Fortschritt und Fehler
+- `GET /v2/server/status`: Laufphase, Fortschritt, Fehler und `document_workers`
+- `GET /v2/admin/recognition/blocklist`: Sperren und offene Veröffentlichung
+- `GET /v2/admin/recognition/rebuild`: letzter vollständiger Erkennungsauftrag
+- `GET /v2/customers/{id}/recognition-status`: Kundenabdeckung und letzter Kundenauftrag
 - Containerlogs: technische Start- und Laufzeitfehler
 - Generationsmanifeste: Komponentenversionen und Prüfsummen
 
@@ -237,3 +332,11 @@ prüfen und nötigenfalls schwärzen.
 
 Tokens, Passwörter und vollständige Dokumentinhalte dürfen nicht in Logs
 geschrieben werden.
+
+`document_workers` unterscheidet entdeckte, verarbeitete, wiederverwendete,
+gelesene, neu extrahierte und fehlgeschlagene beziehungsweise teilweise
+verarbeitete Dokumente. Ein Hashabgleich kann Dokumente lesen und trotzdem
+Cacheergebnisse verwenden. Aus den Zählern allein folgt deshalb keine
+bestimmte Parser-/OCR-Laufzeit. Vergleichsmessungen für die Entwicklung
+verwenden synthetische Dateien; die Laufzeit auf dem eigenen NAS muss
+separat beobachtet werden.

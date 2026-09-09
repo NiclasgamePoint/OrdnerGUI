@@ -13,8 +13,9 @@ Der Desktop-Client zeigt und bearbeitet Kunden, durchsucht Kunden und Ordner im
 lokalen Katalog und synchronisiert Snapshots mit dem Server. Er baut selbst
 keinen Index auf und schreibt niemals in eine heruntergeladene Generation.
 
-Die sichtbare Oberfläche verwendet wieder vollständig das Karten- und
-Navigationsdesign von v0.4.1. Diese Präsentationsschicht ist über die
+Die sichtbare Oberfläche verwendet das Karten- und Navigationsdesign von
+v0.4.1 mit ergänzten Bedienflächen für die aktuellen Funktionen. Diese
+Präsentationsschicht ist über die
 Client-Application-Ports mit der getrennten 0.4.2-Architektur verbunden. Eine
 detaillierte Zuordnung der wiederhergestellten Ansichten und der noch
 ausstehenden neuen Bedienoberflächen steht unter
@@ -79,7 +80,8 @@ Revisionskonflikt unterschieden und nicht als vermeintlich zusammenführbarer
 Kundenkonflikt angezeigt.
 
 Journaleinträge verwenden dieselbe Offline-Strategie in einer getrennten
-Outbox-/Overlay-Komponente: Anlegen, Bearbeiten und Löschen sind offline
+Outbox-/Overlay-Komponente innerhalb derselben `customer-outbox.db`:
+Anlegen, Bearbeiten und Löschen sind offline
 sichtbar, werden pro Kunde in Revisionsreihenfolge wiederholt und verändern den
 unveränderlichen Kundensnapshot nicht. Ein Konflikt stoppt alle davon
 abhängigen Journaländerungen bis zur bewussten Auflösung.
@@ -133,16 +135,24 @@ Dokumentvorschläge getrennt sichtbar.
 Das eigenständige Admin-Tray öffnet einen Review-Dialog für persistente
 Erkennungsfälle. Fälle zeigen Projektquellen und Evidenz/Provenienz und können
 als neuer Kunde angenommen, einem bestehenden Kunden zugeordnet oder abgelehnt
-werden. Ein Erkennungslauf sowie schreibende Entscheidungen benötigen die nur
-im Tray-Prozessspeicher gehaltene Adminsitzung. Der normale Hauptclient besitzt
-keinen Admin-Control-Adapter und kann daher keinen Adminsitzungstoken erzeugen
-oder halten. Annahme und Zuweisung senden
+werden. Erkennungsläufe und Entscheidungen verwenden den konfigurierten
+Client-API-Token; eine zusätzliche Adminanmeldung oder Adminsitzung gibt es
+nicht. Der normale Hauptclient besitzt keinen Server-Control-Adapter und öffnet
+für die serverweite Verwaltung den unabhängigen Tray-Prozess. Annahme und
+Zuweisung senden
 Basisrevision und Idempotency-Key; es gibt kein stilles Überschreiben.
 
 Dokumentbasierte Vorschläge erscheinen am betroffenen Kunden mit Quelldokument,
 Regel, Auszug und Konfidenz. Annehmen oder Ablehnen erfolgt explizit über die
 revisionierte Client-API mit normalem Clienttoken und eigenem Idempotency-Key;
 die heruntergeladene Kundengeneration bleibt unverändert.
+
+Die Kundenprüfung gruppiert gleiche Informationen und ihre Belege, zeigt
+Konflikte und Abdeckung und lädt weitere Vorschläge seitenweise. **Neu bewerten**
+prüft bereits ausgelesene Texte für diesen Kunden erneut; **Neu auslesen**
+fordert zusätzlich die erneute Dokumentauslesung einschließlich OCR auf dem
+Server an. Offline bleibt der vorhandene Vorschlagsstand lesbar; Entscheidungen
+und neue Erkennungsaufträge benötigen die Serververbindung.
 
 ## Clientkonfiguration und Onboarding
 
@@ -159,7 +169,28 @@ Speichern standardmäßig möglich, erzeugt aber eine sichtbare
 `strict_permissions=True` das Speichern stattdessen abbrechen lassen. Als
 Alternative kann der Token ausschließlich über `PAPAGUI_API_TOKEN` kommen.
 
-## Native macOS-Prozesse
+## Plattformen und Start
+
+Client und Tray verwenden Qt/PySide6 und portable Quellzuordnungen für Windows,
+macOS und Linux. Die installierten Einstiegspunkte heißen `papagui-client` und
+`papagui-tray`; der Server ist ein getrenntes Paket beziehungsweise ein
+Docker-Dienst. Das Öffnen des Indexserver-Fensters startet ausschließlich den
+Tray-Prozess.
+
+Der Entwicklungsstarter [`start.ps1`](../start.ps1) verwendet unter Windows
+Python aus `.venv` oder `venv`, setzt die Clientverbindung und startet Tray und
+Hauptclient. Er kann zusätzlich den getrennten Docker-Server starten;
+`PAPAGUI_SKIP_DOCKER=1` unterbindet diesen Schritt. Bei fehlendem Server bleibt
+der zuletzt synchronisierte lokale Stand nutzbar. Token werden per Python
+erzeugt, Secretdateien per numerischer Windows-Benutzer-SID abgesichert;
+ACL-Fehler erzeugen einen Warnhinweis.
+
+Die Startskripte und die Qt-Oberfläche sind mit synthetischen Tests abgesichert.
+Das ersetzt keine native End-to-End-Abnahme auf Windows, macOS und Linux;
+insbesondere wurde der korrigierte Windows-Start hier nicht auf einem nativen
+Windows-System abgenommen.
+
+### Native macOS-Prozesse
 
 Das unsigned macOS-Artefakt enthält zwei unabhängige, benachbarte Bundles:
 `PapaGUI Client.app` und `PapaGUI Tray.app`. Der Client startet den Tray über
@@ -167,6 +198,8 @@ Das unsigned macOS-Artefakt enthält zwei unabhängige, benachbarte Bundles:
 Beide Apps müssen deshalb gemeinsam installiert oder verschoben werden. Es gibt
 keine eingebettete zweite Tray-Kopie; Server und Docker sind in keinem Bundle
 enthalten.
+
+## Einstellungen im Hauptclient
 
 Die Einstellungen sind über die Zahnrad-Schaltfläche der alten Kopfzeile
 erreichbar. Das wiederhergestellte Popup verwendet die Bereiche **Allgemein**,
@@ -197,6 +230,11 @@ Variable wird das Hauptfenster normal angezeigt.
 
 ## Admin-Tray
 
+Das Fenster enthält die Tabs **Übersicht**, **Indexeinstellungen**,
+**Kundenerkennung** und **Aktivität**. Der Tab **Kundenerkennung** bleibt auch bei
+einem Verbindungsfehler erreichbar. **Aktualisieren** lädt seinen Serverstand
+erneut; schreibende Aktionen sind bei fehlender Verbindung gesperrt.
+
 Im Tab **Kundenerkennung** sammelt **Sperre vormerken** mehrere Ausschlüsse
 zunächst lokal. Neue Sperren und vorgemerkte Entfernungen sind in der Tabelle
 als unbestätigt markiert. Mehrere Zeilen lassen sich gemeinsam auswählen;
@@ -204,12 +242,17 @@ als unbestätigt markiert. Mehrere Zeilen lassen sich gemeinsam auswählen;
 neue Vormerkungen zurück. Eine vorgemerkte Entfernung lässt sich zurücknehmen.
 
 **Änderungen bestätigen** übermittelt alle Vormerkungen gemeinsam. Der Server
-prüft die vorhandenen Vorschläge einmal und veröffentlicht einen Kundenstand;
+prüft bei einer tatsächlichen Änderung die vorhandenen Vorschläge einmal und
+veröffentlicht einen Kundenstand;
 eine erneute Dokumentauslesung wird dadurch nicht gestartet. **Vormerkungen
 verwerfen** nimmt die lokalen Änderungen zurück. Laden, Tabwechsel und das
 Ausblenden des Fensters erhalten Vormerkungen. Bei einem Speicherfehler bleiben
 sie für die Korrektur oder einen erneuten Versuch stehen. Der vollständige
 Neuaufbau ist eine separate Aktion und wartet auf Bestätigen oder Verwerfen.
+Es lassen sich höchstens 500 neue Sperren und 500 Entfernungen pro Bestätigung
+sammeln. Die Vormerkungen liegen im Speicher des Tray-Prozesses; nach dessen
+Beendigung oder Neustart sind unbestätigte Änderungen nicht erhalten.
+Sie gehören nicht zur dauerhaften Offline-Outbox für Kunden und Journal.
 
 Falls die Sperrliste gespeichert wurde, ihre Veröffentlichung aber scheitert,
 zeigt die Oberfläche diesen Zustand ausdrücklich an. **Veröffentlichung
@@ -217,12 +260,16 @@ wiederholen** wiederholt nur den noch ausstehenden Schritt. Ältere Server ohne
 die neue Stapelschnittstelle benötigen ein Update; der Client weicht nicht auf
 viele einzelne Schreibanfragen aus.
 Der Server meldet eine ausstehende Veröffentlichung auch nach einem Neustart
-des Clients, damit die Wiederholung weiterhin erreichbar bleibt.
+des Clients, damit die Wiederholung weiterhin erreichbar bleibt. Bis zur
+erfolgreichen Veröffentlichung bleibt der vollständige Neuaufbau gesperrt.
+Die Bestätigung verwendet genau eine Batch-Anfrage; für die anschließende
+Veröffentlichung gilt ein HTTP-Zeitlimit von mindestens 60 Sekunden, ohne die
+Oberfläche zu blockieren. Statusabfragen behalten ihre normale Wartezeit.
 
 Das Tray ist ein eigenständiger Clientprozess. Status und Fortschritt sind mit
-dem normalen Clienttoken sichtbar. Änderungen an Servereinstellungen,
-Indexaktionen und Neustart verlangen eine Adminanmeldung. Der Sitzungstoken
-wird nur im Speicher gehalten und beim kontrollierten Beenden widerrufen.
+dem konfigurierten Clienttoken sichtbar. Derselbe Token autorisiert Änderungen
+an Servereinstellungen, Sperrliste, Indexaktionen und Neustart; es gibt keinen
+zusätzlichen Passwortdialog oder separaten Adminsitzungstoken.
 
 Die Seite **Indexeinstellungen** bildet alle serverseitigen Felder ab:
 automatische Läufe samt Intervall, täglicher Abgleich,
@@ -243,8 +290,9 @@ die Warteschlange sowie gefundene, verarbeitete, wiederverwendete, extrahierte
 und fehlerhafte Dokumente. Diese Werte werden bereits während der Katalogphase
 aktualisiert. Beim vollständigen Neuaufbau erscheinen sie auch im Tab
 **Kundenerkennung**, solange die Dokumentauslesung läuft. Ältere Server bleiben
-bedienbar; fehlende Workerstatistiken werden ausdrücklich als nicht verfügbar
-angezeigt. Die neuen Zähler enthalten ausschließlich Summen.
+bedienbar; die Übersicht weist auf fehlende Workerstatistiken hin, während der
+Neuaufbau weiterhin seinen allgemeinen Jobstatus zeigt. Die Workeranzeige
+enthält ausschließlich Summen und keine Dokument- oder Kundenzuordnung.
 
 Das Ressourcenprofil berechnet die Parallelität aus den verfügbaren CPU- und
 RAM-Ressourcen des Servers einschließlich Containergrenzen: **Schonend** nutzt
@@ -261,9 +309,10 @@ Vorhandene passende Extraktionsergebnisse können dabei wiederverwendet werden.
 **Kundenerkennung vollständig neu aufbauen** erzwingt zusätzlich die erneute
 Dokumentauslesung.
 
-## Funktionsumfang des 0.4.2-Checkpoints
+## Aktueller Funktionsumfang
 
-Die paketnative Oberfläche enthält Dokument-/Globalsuche, portable
+Die paketnative Oberfläche enthält Kunden-/Ordnersuche und Dokumentvorschauen,
+portable
 Ordner-/Projekt-Navigation, Kundenstammdaten und -details, explizite
 Konfliktentscheidungen, Offline-Kunden- und Journal-Outboxes,
 Recognition-/Vorschlags-Review, das eigenständige Server-Tray sowie die

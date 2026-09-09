@@ -2,7 +2,7 @@
 
 This file records data and native-tool notices that are not fully represented by
 Python package metadata. PapaGUI itself has no final distribution license yet;
-0.4.2 is an unpublished development checkpoint.
+the repository's 0.4.2 workflows produce unsigned development artifacts.
 
 ## First-name data
 
@@ -19,8 +19,8 @@ The Docker server installs `poppler-utils`, `antiword` and `catdoc` from its bas
 distribution. Native client packaging may later bundle Poppler for document
 previews as described in
 [`packaging/client/vendor/poppler/README.md`](packaging/client/vendor/poppler/README.md).
-Those binaries are not committed or published at this checkpoint. A future
-packaging run must include the exact upstream licenses and linked-library
+Native Poppler binaries are not committed to this repository. A packaging run
+that supplies them must include the exact upstream licenses and linked-library
 notices belonging to the selected native builds.
 
 Python dependencies retain their respective upstream licenses. A complete,

@@ -16,8 +16,10 @@ Buildmatrix werden durch Versionstests gegen diese Quellen geprüft.
 - Client: `client-v<version>`
 - Server: `server-v<version>`
 
-Für den ersten getrennten Entwicklungsstand zeigen `client-v0.4.2` und
-`server-v0.4.2` auf denselben Commit. Spätere Versionen dürfen auseinanderlaufen.
+Bei einem gemeinsamen Entwicklungsstand können Client- und Servertag auf
+denselben Commit zeigen. Spätere Versionen dürfen auseinanderlaufen. Vor einem
+Tag vorhandene lokale und Remote-Referenzen ausdrücklich prüfen; diese Anleitung
+ist kein Nachweis des aktuellen GitHub- oder Veröffentlichungsstands.
 
 ## Prüfungen vor einem Tag
 
@@ -25,22 +27,31 @@ Für den ersten getrennten Entwicklungsstand zeigen `client-v0.4.2` und
 2. Lint, vollständige Tests und Coverage-Gate ausführen.
 3. Clientartefakte und Serverimage bauen und per Smoke-Test starten.
 4. OpenAPI-, Dependency- und Architekturdrift prüfen.
-5. Graphify vollständig aktualisieren und Commitbezug kontrollieren.
+5. Den ausschließlich aus Paketquellen erzeugten Graphify-Graphen und seinen
+   Commitbezug gemäß [Runbook](development/graphify.md) kontrollieren.
 6. Annotierten Tag lokal erstellen und dessen Commit prüfen.
 
 Python-Distributionen werden aus dem vollständigen
 `packaging/requirements-build-lock.txt` mit `python -m build --no-isolation`
-gebaut. Der Artefaktjob wartet auf Server-, Client-, Wire- und vollständiges
-Repository-/Coverage-Gate. Native Clientartefakte werden auf dem jeweiligen
-Zielrunner gebaut, auf verbotene Module geprüft und minimal gestartet.
+gebaut. Der Job `python-distributions` in `quality.yml` wartet auf Server-,
+Client-, Wire- und Repository-/Coverage-Jobs. Native Clientartefakte haben einen
+separaten manuell auslösbaren Workflow mit eigenen Quelltests; sie werden auf
+dem jeweiligen Zielrunner gebaut, auf verbotene Module geprüft und minimal
+gestartet. Der Serverimage-Workflow definiert Linux-amd64/arm64-Builds ohne Push
+sowie einen separaten Docker-Smoke. Workflowdefinitionen ersetzen keine Prüfung
+der tatsächlichen Ergebnisse für den freizugebenden Commit.
 
-## Noch nicht freigegeben
+## Veröffentlichungsschritte
 
-Der Stand 0.4.2 erzeugt nur nicht signierte lokale oder CI-Artefakte. Folgende
-Aktionen erfolgen erst nach einer eigenen Freigabeentscheidung:
+Die vorhandenen Builddefinitionen erzeugen nicht signierte Artefakte und
+enthalten keine Releaseveröffentlichung; `server-image.yml` setzt `push: false`.
+Folgende Schritte gehören zu einer gesonderten Veröffentlichung:
 
 - Push der Komponententags
 - GitHub Release
 - Push in eine Containerregistry
 - Veröffentlichung von Installer, DMG oder AppImage
 - Code Signing, macOS Notarisierung und automatisches Update
+
+Ob bereits externe Releases, Tags oder Registry-Images existieren, muss am
+jeweiligen Dienst geprüft werden und lässt sich aus diesen Dateien nicht ableiten.

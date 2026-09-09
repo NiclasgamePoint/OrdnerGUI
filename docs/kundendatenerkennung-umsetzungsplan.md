@@ -1,5 +1,43 @@
 # Kundendatenerkennung: Analyse und vollständiger Umsetzungsplan
 
+## Aktueller Umsetzungsstand – 9. September 2026
+
+Die serverseitige Kernpipeline, additive Migration, gruppierte Kundenprüfung und
+gezielte Neusuche sind implementiert. Seit dem ursprünglichen Entwurf wurden
+Datumsfilter und Kontaktnamen verbessert, die serverweite Sperrliste und der
+vollständige Erkennungsneuaufbau ergänzt sowie die Verwaltung in einen eigenen
+Indexserver-Tab verschoben. Sperrlistenänderungen werden gesammelt bestätigt;
+ein Batch veröffentlicht einmal die Kundenkomponente und startet keine OCR.
+Eine ausstehende Veröffentlichung bleibt nach einem Neustart wiederholbar.
+
+Inhaltsindex und Kundenerkennung verwenden dieselbe parallele Auslesung mit
+Cache und begrenztem Workerbudget. Regulärer Metadatenabgleich, tägliche
+Hashprüfung und ausdrücklich erzwungene Neuauslesung sind getrennte Abläufe.
+Eine externe oder zusätzliche lokale Modellstufe ist nicht aktiviert.
+
+Maßgeblich für den aktuellen Betrieb sind:
+
+- [Bedienung und Grenzen der Kundenerkennung](kundendatenerkennung.md)
+- [API und Batch-Verhalten](api.md)
+- [Datenmodell und Migration](data-and-migrations.md)
+- [Umsetzungsstand und offene Abnahmen](../Umsetzungsplanung.md)
+- [Historische fachliche Prüfung](kundendatenerkennung-pruefbericht-2026-09-09.md)
+- [Historische Prüfung der Dokumentverarbeitung](dokumentverarbeitung-pruefbericht-2026-09-09.md)
+
+Unabhängige fachliche Abnahme, tatsächliche Laufzeit auf der Zielhardware und
+native Plattformabnahme bleiben gesonderte Prüfaufgaben. Die Prozentziele und
+Aufwandsschätzungen im ursprünglichen Plan sind keine gemessenen Ergebnisse und
+keine verbleibende Aufwandszusage.
+
+## Ursprünglicher Analyse- und Planungsstand
+
+Der folgende Entwurf bleibt als historische Entscheidungsgrundlage erhalten.
+Formulierungen wie „heute“, „geplant“ und „noch fehlend“ beziehen sich auf den
+Zeitpunkt vor der Umsetzung, nicht auf den aktuellen Code. Bestandsbezogene
+Abschnitte dürfen nicht in Assistenz- oder externe Modellkontexte übernommen
+werden; für die Weiterentwicklung gelten synthetische Daten und Quellcode.
+
+
 Stand: 9. September 2026. Grundlage: aktueller Arbeitsstand auf Commit `a29d366`, einschließlich der bereits vorhandenen lokalen Clientänderungen; lesende Analyse der lokalen Datenbanken und Recherche in Primärquellen. **Status: Planung, noch keine Änderung der Erkennungslogik oder Kundendaten.**
 
 ## 1. Ergebnis und Empfehlung

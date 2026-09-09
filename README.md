@@ -6,8 +6,10 @@ schreibende Instanz für Index, Kundenerkennung und `customers.db`. Clients
 halten ausschließlich geprüfte lokale Kopien und bleiben mit dem letzten
 gültigen Stand offline benutzbar.
 
-Der Stand 0.4.2 ist ein Entwicklungs-Checkpoint. Es wurden noch keine
-Installationspakete, Containerimages oder GitHub Releases veröffentlicht.
+Der Stand 0.4.2 ist ein Entwicklungs-Checkpoint. Die enthaltenen Workflows bauen
+Testartefakte ohne Signierung und ohne Registry-Push; sie veröffentlichen keine
+GitHub Releases. Der tatsächliche Status eines Builds ist im jeweiligen
+Workflow-Lauf zu prüfen.
 
 ## Komponenten
 
@@ -44,19 +46,62 @@ funktionierende Sicherung.
 
 ## Entwicklung starten
 
-Python 3.11 oder neuer wird benötigt. Die drei Pakete werden getrennt, aber
-editierbar installiert:
+Python 3.11 oder neuer wird benötigt; die CI verwendet Python 3.11. Zuerst die
+festgelegten Abhängigkeiten, anschließend die drei Pakete editierbar installieren:
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e packages/contracts
-.venv/bin/pip install -e packages/server
-.venv/bin/pip install -e 'packages/client[gui]'
-.venv/bin/pip install -r requirements-test.txt
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-test.txt
+.venv/bin/python -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
 ```
 
 Unter Windows befindet sich Python unter `.venv\Scripts\python.exe`; unter
 macOS und Linux unter `.venv/bin/python`.
+
+### Wechsel auf einen Windows-Entwicklungsrechner
+
+Nach dem Klonen beziehungsweise Aktualisieren des Repositorys eine **neue**
+virtuelle Umgebung anlegen; eine Linux- oder macOS-Umgebung lässt sich nicht
+übernehmen. Python 3.11 wird auch in den Plattformtests verwendet. Im
+Projektverzeichnis in PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r packages\server\requirements-lock.txt -r packages\client\requirements-lock.txt -r requirements-test.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps -e packages\contracts -e packages\server -e packages\client
+```
+
+Für **Client und Server auf dem Windows-PC** Docker Desktop mit Linux-Containern
+starten. Vor dem Komplettstart einen vorhandenen, absoluten Quellordner angeben:
+
+```powershell
+$env:PAPAGUI_SOURCE_PATH = 'D:\Projektdaten' # Beispiel: durch den eigenen Ordner ersetzen
+.\start.bat
+```
+
+Ohne diese Angabe erwartet das Startskript einen Ordner `Bauvorhaben` im
+Repository. Fehlt der Quellordner, wird kein Server gestartet; der Client kann
+trotzdem im Offlinebetrieb öffnen.
+
+Wenn **der bisherige Indexserver weiterläuft**, nur den Client starten:
+
+```powershell
+.\.venv\Scripts\python.exe -m papagui_client
+```
+
+In den Clienteinstellungen die vom Windows-PC erreichbare Server-URL, den
+bestehenden Client-API-Token und die Windows-Pfadzuordnung zur Datenquelle
+eintragen. `127.0.0.1` verweist auf den Windows-PC selbst. Docker ist für diesen
+Clientbetrieb nicht erforderlich.
+
+Git überträgt den Programmcode, aber keine Dokumente, lokalen Einstellungen,
+Tokens oder Datenbanken. Insbesondere bleiben Sperrliste und bisherige
+Kundenentscheidungen im Datenvolume des bisherigen Servers. Soll auch der Server
+umziehen, dessen Daten- und Konfigurationsverzeichnisse separat gemäß
+[Betriebsanleitung](docs/server/operations.md) sichern und übernehmen. Einen
+bestehenden Server nur wegen des Clientwechsels neu aufzubauen ist nicht nötig.
+
+### Lokaler Komplettstart
 
 Der lokale Komplettstart ist auf allen drei Entwicklungsplattformen vorbereitet.
 Docker Engine samt Compose-Plugin muss laufen; unter Windows und macOS genügt
@@ -93,13 +138,14 @@ Einzelne Komponenten:
 ## Tests
 
 ```bash
-.venv/bin/ruff check packages tests tools
+.venv/bin/python -m ruff check packages tests tools main.py
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/run_ci.py --coverage
 ```
 
 Die Workflows sind für Linux, Windows und macOS vorbereitet. Server- und
-Dockertests besitzen zusätzlich einen Qt-freien Job. Ohne Push wurden diese
-Plattformjobs noch nicht ausgeführt oder als zertifiziert dokumentiert.
+Dockertests besitzen zusätzlich einen Qt-freien Job. Ob der jeweilige Commit die
+Plattformtests bestanden hat, ist in den zugehörigen GitHub-Actions-Läufen zu
+prüfen. Ein lokaler Linux-Testlauf bestätigt keinen nativen Windows-Start.
 Buildartefakte bleiben nicht signierte CI-Artefakte und werden nicht
 veröffentlicht.
 
@@ -107,6 +153,7 @@ veröffentlicht.
 
 - [Architektur](docs/architecture.md)
 - [Client und Offlinebetrieb](docs/client.md)
+- [Kundendatenerkennung, Sperrliste und Neuaufbau](docs/kundendatenerkennung.md)
 - [Wiederhergestelltes v0.4.1-GUI-Design und Feature-Migration](docs/gui-design-restoration.md)
 - [Serverbetrieb, Docker und Synology](docs/server/operations.md)
 - [API v2](docs/api.md)
@@ -115,6 +162,15 @@ veröffentlicht.
 - [Versionierung und spätere Releases](docs/releasing.md)
 - [Sicherheitskonzept](SECURITY.md)
 - [Graphify für die Architekturkarte](docs/development/graphify.md)
+- [Umsetzungsstand und offene Arbeiten](Umsetzungsplanung.md)
+- [Produktideen](Vorschlaege.md)
+
+Historische Prüfungen und Entwurfsentscheidungen stehen getrennt von den
+laufend gepflegten Anleitungen:
+
+- [Prüfung der Kundendatenerkennung](docs/kundendatenerkennung-pruefbericht-2026-09-09.md)
+- [Prüfung der parallelen Dokumentverarbeitung](docs/dokumentverarbeitung-pruefbericht-2026-09-09.md)
+- [Ursprünglicher Umsetzungsplan mit aktuellem Status](docs/kundendatenerkennung-umsetzungsplan.md)
 
 Die bisherige Docker-Einstiegsseite bleibt unter [DOCKER.md](DOCKER.md)
 erreichbar.

@@ -2,14 +2,16 @@
 
 ## Ziel und feste Grenze
 
-Die sichtbare Desktop-Oberfläche orientiert sich wieder vollständig am Stand
+Die sichtbare Desktop-Oberfläche orientiert sich am Stand
 `v0.4.1`: Kartenlayout, Farben, Abstände, Typografie, Kopfzeile, Suchfilter,
 gestapelte Detailseiten, Viewer, Kundenmasken, Einstellungs-Popup und
-Indexserver-Tray. Die Paket- und Prozessgrenzen von 0.4.2 bleiben davon
-unberührt.
+Indexserver-Tray. Neue Funktionen ergänzen dieses Raster, darunter der Tab
+„Kundenerkennung“ und die gemeinsame Bestätigung der Sperrliste. Die Paket- und
+Prozessgrenzen von 0.4.2 bleiben davon unberührt.
 
-- Der Client liest ausschließlich lokale, geprüfte Generationen.
-- Der Client enthält keinen Index-Writer und keine Kundenerkennung.
+- Der Client durchsucht lokale, geprüfte Generationen und öffnet ihre
+  Datenbanken ausschließlich lesend.
+- Der Client enthält keinen Index-Writer und keine Erkennungsengine.
 - Index-, Erkennungs- und administrative Aktionen laufen ausschließlich über
   die authentifizierte Server-API.
 - Offline-Änderungen bleiben im Client-Overlay und in den Outboxes; ein
@@ -59,15 +61,31 @@ den neuen Client-Ports. Es ist keine Rückkehr zur monolithischen Architektur.
 
 - ursprüngliche Kopfzeile mit farbigem und bei einem Lauf animiertem
   Serverstatus
-- Tabs `Übersicht`, `Indexeinstellungen` und `Aktivität`
+- Tabs `Übersicht`, `Indexeinstellungen`, `Kundenerkennung` und `Aktivität`
 - getrennte Karten für Server, Indexjob, Dokumentinhalte und veröffentlichte
   Generation
 - vollständige serverseitige Indexkonfiguration und Wartungsaktionen
 - Wartungsaktionen sind nach erfolgreicher Client-Token-Verbindung direkt bedienbar
+- eingebettete Sperrliste mit Mehrfachauswahl, Vormerken, gemeinsamem Bestätigen,
+  Zurücknehmen von Entfernungen und Verwerfen; ein Bestätigen sendet eine
+  Batch-Anfrage, ohne einen vollständigen Dokumentneuaufbau zu starten
+- Vormerkungen bleiben bei Fehlern, Aktualisieren und Ausblenden erhalten;
+  der Server meldet ausstehende Veröffentlichungen auch nach einem Clientneustart
+- vollständiger Kundenerkennungsneuaufbau mit Status und Abbruch im selben Tab;
+  Statusabfragen dieses Tabs pausieren, solange er ausgeblendet ist
+- Live-Summen für aktive Dokument-Worker, Obergrenze, Warteschlange, gefundene,
+  verarbeitete, wiederverwendete, extrahierte und fehlerhafte Dokumente
+- erreichbar bleibender Kundenerkennungstab bei Serverfehlern und vertikales
+  Scrollen seiner Bedienflächen in kleinen Fenstern
+
+Die Sperrlisten-Vormerkungen sind flüchtiger Zustand des Tray-Prozesses und
+werden nicht in der Offline-Outbox gespeichert. Beim regulären Fensterschließen
+wird das Tray-Fenster ausgeblendet; das Beenden des Prozesses verwirft noch nicht
+bestätigte Vormerkungen. Ein bereits gestarteter Serverauftrag läuft weiter.
 
 ## 0.4.2-Funktionen und erforderliche GUI-Einbindung
 
-Die folgende Liste ist zugleich die Abnahmeliste für den Design-Rückbau. Sie
+Die folgende Liste beschreibt die Integration im aktuellen Quellstand. Sie
 trennt Funktionen, die im wiederhergestellten Design bereits bedienbar sind,
 von Funktionen, für die das alte 0.4.1-Layout keine vollständige Darstellung
 besaß und deshalb noch eine eigene UX benötigt.
@@ -76,6 +94,11 @@ besaß und deshalb noch eine eigene UX benötigt.
 neue sichtbare Bedienung benötigt. `Application/API + UI` kennzeichnet Punkte,
 die nicht durch bloßes Reaktivieren einer alten Schaltfläche sicher umgesetzt
 werden können, weil zuerst ein passender revisionierter Vertrag fehlt.
+
+Die Zuordnung ist keine native Plattformabnahme. Synthetische Qt- und
+Startskripttests belegen ausgewählte Bedienabläufe; native Darstellung,
+Installationspakete und Betriebssystemintegration müssen auf der jeweiligen
+Zielplattform geprüft werden.
 
 | Funktion aus 0.4.2 | Stand im wiederhergestellten Design | Noch erforderlich |
 |---|---|---|
@@ -90,13 +113,13 @@ werden können, weil zuerst ein passender revisionierter Vertrag fehlt.
 | Offline-Journal-Outbox | alte Journalansicht und Konfliktauflösung sind angebunden | **UI:** Reihenfolge und Abhängigkeiten blockierter Folgeänderungen sichtbar machen |
 | optimistische Revisionen und HTTP 409 | Neuladen, Zusammenführen, Wiederholen und Verwerfen bleiben erhalten | **UI:** Feld-für-Feld-/Drei-Wege-Vergleich Server/Lokal im Merge-Dialog ergänzen |
 | Idempotency-Keys | vollständig im Application-Layer, ohne Bedienbedarf | optional technische Diagnoseansicht ergänzen |
-| serverseitige Kundenerkennung | Review und globaler Start bleiben im Server-Tray; die letzten Läufe werden bereits geladen | **UI:** vollständige Historie der Erkennungsläufe statt nur des jüngsten Zeitpunkts ergänzen |
-| Erkennungsregeln und Dokumentmuster | Mindestjahr und bevorzugte Dokumentmuster sind im Tray editierbar | **API + UI:** alte Aktivierung, Häufigkeitsschwelle, Blacklists und Blacklist-Vorschläge ergänzen |
-| dokumentbasierte Kundenvorschläge | alte Vorschlagskarten nutzen die v2-API; Kontaktvorschläge zeigen Name, Rolle, E-Mail und Telefon sowie Abweichungen von manuell gepflegten Kontakten | **API + UI:** kundenbezogenen „neu suchen“-Endpunkt und frei bestätigbaren Wert, etwa für den Kundentyp, ergänzen |
+| serverseitige Kundenerkennung | Review im Server-Tray; vollständiger Neuaufbau mit Status und Abbruch im Tab `Kundenerkennung`; die letzten Läufe werden geladen | **UI:** vollständige Historie der Erkennungsläufe statt nur des jüngsten Zeitpunkts ergänzen |
+| Erkennungsregeln und Dokumentmuster | Mindestjahr und bevorzugte Dokumentmuster sind im Tray editierbar; serverweite Sperrliste für E-Mail, Telefon, Domain, Kontakt- und Firmenname mit gemeinsamem Speichern und Veröffentlichungswiederholung | **API + UI:** weitere alte Regelparameter und automatisch erzeugte Sperrlistenvorschläge ergänzen, sofern weiterhin gewünscht |
+| dokumentbasierte Kundenvorschläge | gruppierte Vorschläge mit Belegen, Konflikten, Abdeckung und Pagination; kundenbezogene Aktionen `Neu bewerten` und `Neu auslesen` verwenden die Server-API; Offline-Stand bleibt lesbar | **API + UI:** frei bestätigbaren Wert, etwa für den Kundentyp, ergänzen |
 | serververwaltete Projektzuordnung | Projekte sind im alten Dienstleistungsbereich und im Dateien-Tab des Kundeneditors in den beiden Listen `Gefundene mögliche Ordner`/`Ausgewählte Ordner` lesbar; die alte Zuordnungsbedienung ist sichtbar und eindeutig deaktiviert | **API + UI:** revisionierte manuelle Zuordnung, Umordnung, Entfernung und Zuordnung eines noch freien Ordners ergänzen |
 | Erkennungsfall gemeinsam/getrennt anlegen und Kundentyp bestätigen | gemeinsam anlegen, zuordnen und ablehnen sind angebunden; alte Zusatzfelder bleiben sichtbar | **API + UI:** transaktionalen Split-Endpunkt und Kundentyp im Entscheidungsvertrag ergänzen |
 | kennwortfreie Serversteuerung | alle Aktionen verwenden ausschließlich den Client-Token | keine |
-| Serverstatus, Jobfortschritt und Generation | alte Übersichtskarten sind angebunden | **API + UI:** Server-Logstream und Worker-Zuordnungen/-Fortschritt statt nur lokal beobachteter Statusereignisse ergänzen |
+| Serverstatus, Jobfortschritt und Generation | Übersichtskarten mit Live-Summen zu Dokument-Workern und Verarbeitung; dieselben Summen im Kundenerkennungsneuaufbau; Aktivität zeigt lokal beobachtete Statusereignisse | **API + UI:** falls benötigt, gesonderten Server-Logstream oder weitergehende Diagnose ergänzen; die aktuelle Workeranzeige ist aggregiert |
 | Indexlauf, Vollaufbau, Abbruch, Löschen, Neustart | alte Wartungsaktionen rufen ausschließlich v2-Admin-API auf | keine |
 | vollständige OCR-/Inhalts-/Ressourceneinstellungen | altes Einstellungsraster im Tray ist angebunden | keine |
 | zusätzliche alte Inhaltsjob-Wartung | grundlegender Inhaltsaufbau gehört zum normalen Server-Indexlauf | **API + UI:** Pause/Fortsetzen, nur fehlgeschlagene Inhalte wiederholen und Optimieren ergänzen, falls diese getrennte Bedienung weiterhin gewünscht ist |
