@@ -11,80 +11,67 @@ Das Paket heißt `graphifyy`, der Befehl `graphify`. Der Versionsprüfungsworkfl
 verwendet derzeit 0.9.53; die folgende Anleitung verwendet dieselbe Version:
 
 ```bash
-uv tool install graphifyy==0.9.53
+uv tool install 'graphifyy[gemini]==0.9.53'
 ```
 
 Graphify ist keine Client- oder Serverabhängigkeit. Die strukturelle
 AST-Extraktion benötigt weder API-Key noch Modellanbieter. Eine semantische
 Dokumentextraktion ist für dieses Projekt nicht Teil des Ablaufs.
 
-## Graph ausschließlich aus Paketquellen
+## Codex-Skill und Gemini unter Windows
 
-Den folgenden Block nach Anlegen von `graphify-out/` als
-`graphify-out/build_source_graph.py` speichern. Er verwendet eine explizite
-Dateiliste und einen neuen temporären AST-Cache, damit vorhandene Graph-Caches
-oder Memories nicht als Eingang dienen. Vom Repositoryverzeichnis aus ausführen.
-
-```python
-from pathlib import Path
-import subprocess
-from tempfile import TemporaryDirectory
-
-from graphify.extract import extract
-from graphify.build import build_from_json
-from graphify.cluster import cluster, score_all
-from graphify.analyze import god_nodes, surprising_connections, suggest_questions
-from graphify.report import generate
-from graphify.export import to_json, to_html
-
-root = Path.cwd()
-files = sorted(
-    path
-    for package in ("contracts", "server", "client")
-    for path in (root / "packages" / package / "src").rglob("*.py")
-    if "__pycache__" not in path.parts
-)
-if not files:
-    raise SystemExit("Run this script from the PapaGUI repository root.")
-with TemporaryDirectory(prefix="papagui-code-ast-") as cache:
-    extraction = extract(files, root=root, cache_root=Path(cache), parallel=False)
-graph = build_from_json(extraction, root=root, directed=True)
-communities = cluster(graph)
-labels = {key: f"Code community {key}" for key in communities}
-head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-output = root / "graphify-out"
-output.mkdir(parents=True, exist_ok=True)
-detection = {
-    "total_files": len(files),
-    "total_words": sum(len(path.read_text(encoding="utf-8").split()) for path in files),
-    "files": {"code": [str(path.relative_to(root)) for path in files]},
-}
-report = generate(
-    graph, communities, score_all(graph, communities), labels,
-    god_nodes(graph), surprising_connections(graph, communities),
-    detection, {"input": 0, "output": 0}, str(root),
-    suggested_questions=suggest_questions(graph, communities, labels),
-    built_at_commit=head, learning={},
-)
-scope = "Source scope: packages/{contracts,server,client}/src/**/*.py only. "
-scope += "No customer data, documents, memories or semantic extraction.\n\n"
-# Stage all exports; neither JSON nor HTML should inspect previous sidecars.
-with TemporaryDirectory(prefix="papagui-code-export-") as temporary:
-    staged = Path(temporary)
-    if not to_json(graph, communities, str(staged / "graph.json"),
-                   force=True, built_at_commit=head, community_labels=labels):
-        raise SystemExit("Graphify did not produce a JSON graph.")
-    (staged / "GRAPH_REPORT.md").write_text(scope + report, encoding="utf-8")
-    html = staged / "graph.html"
-    if not to_html(graph, communities, str(html), community_labels=labels,
-                   node_limit=5000, learning_overlay={}):
-        raise SystemExit("Graphify did not produce an HTML view.")
-    for name in ("graph.json", "graph.html", "GRAPH_REPORT.md"):
-        (output / name).write_bytes((staged / name).read_bytes())
-```
+Der Codex-Skill wird mit derselben Graphify-Version ausgeliefert und liegt nach
+Installation unter `~/.codex/skills/graphify/SKILL.md`, einschließlich seiner
+Referenzdateien. Der Herstellerbefehl `graphify codex install` legt in Version
+0.9.53 Projektregeln und einen Hook an; die Skilldateien selbst lassen sich mit
+dem Paketinstaller ergänzen:
 
 ```bash
-uv tool run --from graphifyy==0.9.53 python graphify-out/build_source_graph.py
+uv tool run --from 'graphifyy[gemini]==0.9.53' python -c "from graphify.install import install; install(platform='codex')"
+```
+
+Der Skill steht in Codex ab dem nächsten Turn als `$graphify` bereit.
+Für PapaGUI gilt die hier dokumentierte Paketquellenauswahl auch bei Skillaufrufen.
+Die lokalen Projektregeln verweisen deshalb auf den eingeschränkten Builder.
+
+`tools/graphify.ps1` findet Graphify über `uv tool dir`, unabhängig vom aktuellen
+PATH. Für `-CheckGemini` und `extract` lädt es den Gemini-Key aus
+`%LOCALAPPDATA%/PapaGUI/dev-secrets/gemini-key.dpapi`. Dieser Speicher ist durch
+Windows DPAPI an das Windows-Benutzerkonto gebunden. Der Klartext wird nur als
+`GEMINI_API_KEY` an den Kindprozess übergeben und danach aus der Launcher-Umgebung
+entfernt beziehungsweise durch den vorherigen Wert ersetzt. Eine bereits gesetzte
+`GEMINI_API_KEY` hat Vorrang. Schlüsselwerte gehören nicht in Git oder Berichte.
+Lokale Graphabfragen und der Quellgraph-Builder entschlüsseln den Key nicht.
+
+```powershell
+# Synthetischer Verbindungstest am offiziellen Google-Endpunkt:
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/graphify.ps1 -CheckGemini
+
+# Lokale Graphabfrage:
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/graphify.ps1 query SourcePathResolver --graph graphify-out/graph.json --budget 1200
+```
+
+Die Ausführungsoption gilt nur für diesen PowerShell-Prozess und ändert keine
+systemweite Skriptrichtlinie. Der Verbindungstest verwendet Graphifys konfiguriertes
+Gemini-Modell (`GRAPHIFY_GEMINI_MODEL`, ansonsten der Paketstandard) und ausschließlich
+einen kurzen synthetischen Prompt. Er verbraucht eine kleine API-Anfrage.
+Der Architekturgraph und seine Abfragen benötigen keinen API-Aufruf.
+
+## Graph ausschließlich aus Paketquellen
+
+Der gepflegte Builder liegt in `tools/build_source_graph.py`. Er verwendet eine
+explizite Python-Dateiliste aus den drei Paketen sowie temporäre AST- und
+Exportverzeichnisse. Unter Windows startet ihn der Launcher im isolierten
+Graphify-Interpreter:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/graphify.ps1 -Build
+```
+
+Unter Linux/macOS:
+
+```bash
+uv tool run --from 'graphifyy[gemini]==0.9.53' python tools/build_source_graph.py
 ```
 
 Dieser Ablauf erzeugt beziehungsweise ersetzt `graphify-out/graph.json`,

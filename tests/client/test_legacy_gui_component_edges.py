@@ -102,7 +102,7 @@ def test_legacy_models_preferences_validate_and_persist(monkeypatch):
         SearchPreferences.SORT_KEY: SearchSort.DATE.value,
         SearchPreferences.SUBFOLDERS_KEY: True,
     }
-    monkeypatch.setattr(legacy_models, "QSettings", MemorySettings)
+    monkeypatch.setattr(legacy_models, "ui_settings", MemorySettings)
     preferences = SearchPreferences()
     assert preferences.load() == (SearchSort.DATE, True)
 
@@ -148,7 +148,7 @@ def test_theme_helpers_manager_and_both_palettes(application, monkeypatch):
         "contrast": "broken",
         "font_size": 50,
     }
-    monkeypatch.setattr("papagui_client.gui.theme.QSettings", MemorySettings)
+    monkeypatch.setattr("papagui_client.gui.theme.ui_settings", MemorySettings)
     manager = ThemeManager()
     assert (manager.mode, manager.accent) == ("light", "#2db89d")
     assert manager.contrast == 100
@@ -800,7 +800,7 @@ def test_folder_page_details_filters_tree_actions_and_layout(
     application, tmp_path, monkeypatch
 ):
     settings = FakeFolderSettings([300, 600])
-    monkeypatch.setattr("papagui_client.gui.pages.folder_page.QSettings", lambda *_args: settings)
+    monkeypatch.setattr("papagui_client.gui.pages.folder_page.ui_settings", lambda *_args: settings)
     page = FolderPage()
     page.file_viewer.open_file = Mock()
     page.file_viewer.shutdown = Mock()
@@ -886,7 +886,7 @@ def test_folder_page_details_filters_tree_actions_and_layout(
 
 def test_folder_page_defaults_and_service_free_metadata(application, monkeypatch):
     settings = FakeFolderSettings("not-a-list")
-    monkeypatch.setattr("papagui_client.gui.pages.folder_page.QSettings", lambda *_args: settings)
+    monkeypatch.setattr("papagui_client.gui.pages.folder_page.ui_settings", lambda *_args: settings)
     page = FolderPage()
     page.set_folder({"folder_name": "", "files": [], "subfolders": []})
     assert page.folder_title.text() == "Ordner"
@@ -899,7 +899,7 @@ def test_folder_page_loads_indexed_subfolders_when_expanded(
 ):
     settings = FakeFolderSettings()
     monkeypatch.setattr(
-        "papagui_client.gui.pages.folder_page.QSettings", lambda *_args: settings
+        "papagui_client.gui.pages.folder_page.ui_settings", lambda *_args: settings
     )
     child_path = tmp_path / "Honorar"
     document_path = child_path / "Rechnung.xlsx"

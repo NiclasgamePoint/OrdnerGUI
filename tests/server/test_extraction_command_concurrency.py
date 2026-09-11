@@ -28,7 +28,8 @@ def test_shared_runner_failure_status_is_thread_local():
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         good, bad = pool.submit(run, False), pool.submit(run, True)
-        assert good.result(timeout=10) == (b"okay\n", "ok")
+        data, status = good.result(timeout=10)
+        assert (data.splitlines(), status) == ([b"okay"], "ok")
         assert bad.result(timeout=10) == (b"", "error")
     assert runner.last_status == "ok"
 
@@ -85,7 +86,7 @@ def test_cancellation_scope_does_not_leak_into_next_document(tmp_path: Path):
     assert extractor.extract_document(path, ServerSettings()).text == "synthetic text"
     with extractor._runner.cancellation_scope(lambda: False):
         assert (
-            extractor._runner.run([sys.executable, "-c", "print('next')"], timeout=5) == b"next\n"
+            extractor._runner.run([sys.executable, "-c", "print('next')"], timeout=5).splitlines() == [b"next"]
         )
 
 
@@ -121,7 +122,7 @@ def test_cancelling_one_document_does_not_cancel_another(tmp_path: Path, monkeyp
         assert cancelled_result.result(timeout=5).reason == "cancelled"
         successful = successful_result.result(timeout=5)
         assert successful.status == "ok"
-        assert successful.text == "okay\n"
+        assert successful.text.splitlines() == ["okay"]
 
 
 def test_cancellable_runner_timeout_reaps_process():

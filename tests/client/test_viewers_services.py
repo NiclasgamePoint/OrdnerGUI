@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import subprocess
+import sys
 from unittest.mock import patch
 
 import openpyxl
@@ -86,7 +87,8 @@ def test_document_tool_resolver_maps_release_platforms_and_prefers_bundle(tmp_pa
     for operating_system, machine, expected in cases:
         assert DocumentToolResolver.platform_tag(operating_system, machine) == expected
 
-    binary = tmp_path / DocumentToolResolver.platform_tag() / "bin" / "pdftotext"
+    name = "pdftotext.exe" if sys.platform == "win32" else "pdftotext"
+    binary = tmp_path / DocumentToolResolver.platform_tag() / "bin" / name
     binary.parent.mkdir(parents=True)
     binary.touch()
     resolver = DocumentToolResolver(tmp_path, path_lookup=lambda _name: "/fallback/tool")
@@ -182,7 +184,7 @@ def test_conversion_outcomes_are_unambiguous_and_cancel_is_honoured(tmp_path):
 def test_polling_command_runner_returns_output_and_supports_cancel():
     runner = PollingCommandRunner()
     result = runner.run(
-        ["/bin/sh", "-c", "printf viewer"],
+        [sys.executable, "-c", "import sys; sys.stdout.write('viewer')"],
         timeout=2,
     )
     assert result.returncode == 0
@@ -190,7 +192,7 @@ def test_polling_command_runner_returns_output_and_supports_cancel():
 
     with pytest.raises(InterruptedError):
         runner.run(
-            ["/bin/sh", "-c", "sleep 5"],
+            [sys.executable, "-c", "import time; time.sleep(5)"],
             timeout=2,
             should_cancel=lambda: True,
         )

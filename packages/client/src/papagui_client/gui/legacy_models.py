@@ -17,6 +17,15 @@ SETTINGS_ORG = "PapaGUI"
 SETTINGS_APP = "UI"
 
 
+def ui_settings() -> QSettings:
+    """Honor the configured backend, including isolated INI stores in tests.
+
+    The two-string QSettings constructor always selects NativeFormat and ignores
+    setDefaultFormat(), which otherwise sends Windows tests to the user registry.
+    """
+    return QSettings(QSettings.defaultFormat(), QSettings.Scope.UserScope, SETTINGS_ORG, SETTINGS_APP)
+
+
 class SearchSort(str, Enum):
     RELEVANCE = "relevance"
     DATE = "date"
@@ -43,7 +52,7 @@ class SearchPreferences:
     SUBFOLDERS_KEY = "search/include_subfolders"
 
     def __init__(self) -> None:
-        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        self.settings = ui_settings()
 
     def load(self) -> tuple[SearchSort, bool]:
         raw_sort = str(self.settings.value(self.SORT_KEY, SearchSort.RELEVANCE.value))

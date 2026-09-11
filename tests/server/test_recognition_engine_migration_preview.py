@@ -160,7 +160,7 @@ def test_output_cannot_overwrite_source_or_sidecars(legacy_database,tmp_path,mon
         output.hardlink_to(legacy_database)
     elif alias=="symlink":
         output=tmp_path/"report-symlink.json"
-        output.symlink_to(legacy_database)
+        _symlink_or_skip(output, legacy_database)
     else:
         output=Path(str(legacy_database)+"-wal")
     original=legacy_database.read_bytes()
@@ -197,7 +197,7 @@ def test_missing_database_does_not_create_a_new_file(tmp_path):
 
 def test_output_cannot_overwrite_resolved_symlink_database_sidecar(legacy_database,tmp_path,monkeypatch,capsys):
     alias=tmp_path/"database-alias.sqlite"
-    alias.symlink_to(legacy_database)
+    _symlink_or_skip(alias, legacy_database)
     output=Path(str(legacy_database)+"-wal")
     monkeypatch.setattr(sys,"argv",["recognition_migration_preview.py","--database",str(alias),"--output",str(output)])
     assert preview.main()==2
@@ -241,3 +241,12 @@ def test_wal_commits_are_included_without_changing_original_database(tmp_path):
         assert path.read_bytes()==before and wal.read_bytes()==wal_before
     finally:
         writer.close()
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows account lacks permission to create symlinks")
+        raise

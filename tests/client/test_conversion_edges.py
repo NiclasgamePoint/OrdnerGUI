@@ -184,7 +184,9 @@ def test_libreoffice_conversion_is_isolated_and_cleans_failures(tmp_path):
     assert "--headless" in command
     assert options["environment"]["SAL_USE_VCLPLUGIN"] == "svp"
     runtime = Path(options["environment"]["XDG_RUNTIME_DIR"])
-    assert runtime.stat().st_mode & 0o777 == 0o700
+    assert runtime.is_dir()
+    if sys.platform != "win32":
+        assert runtime.stat().st_mode & 0o777 == 0o700
     converter.cleanup()
 
     failed = Commands(subprocess.CompletedProcess([], 1, "", "bad"))

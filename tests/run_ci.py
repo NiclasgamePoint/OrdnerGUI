@@ -64,10 +64,13 @@ def run_module(
     project_root: Path,
     coverage: bool,
     timeout_seconds: float = DEFAULT_MODULE_TIMEOUT_SECONDS,
+    coverage_directory: Path | None = None,
 ) -> int:
     command = [sys.executable]
     if coverage:
         command += ["-m", "coverage", "run", "--parallel-mode"]
+        if coverage_directory is not None:
+            command += ["--data-file", str(coverage_directory / ".coverage")]
     module_path = Path(*module.split(".")).with_suffix(".py")
     command += ["-m", "pytest", str(module_path), "-q"]
 
@@ -140,22 +143,33 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    for module in test_modules(test_root):
-        print(f"\n=== {module} ===", flush=True)
-        if run_module(
-            module,
-            project_root,
-            args.coverage,
-            args.module_timeout,
-        ):
-            failures.append(module)
+    combine_result = 0
+    with TemporaryDirectory(prefix="papagui-coverage-") as directory:
+        coverage_directory = Path(directory)
+        try:
+            for module in test_modules(test_root):
+                print(f"\n=== {module} ===", flush=True)
+                if run_module(
+                    module,
+                    project_root,
+                    args.coverage,
+                    args.module_timeout,
+                    coverage_directory=coverage_directory if args.coverage else None,
+                ):
+                    failures.append(module)
+        finally:
+            # Preserve partial measurements even after failures or Ctrl+C. Only
+            # this run's fragments are combined; TemporaryDirectory also cleans
+            # up on combine errors, without littering the repository root.
+            if args.coverage and any(coverage_directory.glob(".coverage.*")):
+                combine_result = coverage_command(project_root, "combine", str(coverage_directory))
 
     if failures:
         print(f"\nFailed test modules: {', '.join(failures)}", file=sys.stderr)
         return 1
 
     if args.coverage:
-        if coverage_command(project_root, "combine"):
+        if combine_result:
             return 1
         return coverage_command(project_root, "report", "-m")
     return 0

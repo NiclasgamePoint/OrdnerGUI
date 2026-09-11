@@ -1,0 +1,2 @@
+-r requirements-client-test.txt
+pyinstrument==5.1.3

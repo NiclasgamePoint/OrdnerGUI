@@ -7,7 +7,7 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import openpyxl
-from pypdf import PdfWriter
+from reportlab.pdfgen.canvas import Canvas
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
@@ -44,10 +44,9 @@ def _process_until(application, predicate, timeout: float = 3) -> None:
 
 
 def _pdf(path: Path) -> None:
-    writer = PdfWriter()
-    writer.add_blank_page(width=300, height=400)
-    with path.open("wb") as handle:
-        writer.write(handle)
+    writer = Canvas(str(path), pagesize=(300, 400))
+    writer.showPage()
+    writer.save()
 
 
 def test_file_viewer_routes_pdf_text_spreadsheet_image_and_unknown(application, tmp_path):

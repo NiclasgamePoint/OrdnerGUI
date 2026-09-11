@@ -446,11 +446,11 @@ def test_targeted_force_retains_other_project_cache_and_pins_snapshot(tmp_path: 
 def test_worker_error_categories_without_leaking_exception_messages(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    import resource
     import sys
+    from types import SimpleNamespace
     from papagui_server.adapters import extraction_pdf_worker, extraction_office_worker
 
-    monkeypatch.setattr(resource, "setrlimit", lambda *_: None)
+    monkeypatch.setitem(sys.modules, "resource", SimpleNamespace(RLIMIT_AS=9, setrlimit=lambda *_: None))
     monkeypatch.setattr(sys, "argv", ["worker", str(tmp_path / "synthetic.docx"), "100", "2"])
     for exception, status in (
         (ModuleNotFoundError("synthetic-private"), "tool_missing"),
@@ -521,7 +521,7 @@ def test_isolated_runner_has_real_timeout_and_bounded_output(tmp_path: Path) -> 
     import sys
 
     runner = ExternalCommandRunner()
-    assert runner.run([sys.executable, "-c", "print('synthetic')"], timeout=2) == b"synthetic\n"
+    assert runner.run([sys.executable, "-c", "print('synthetic')"], timeout=2).splitlines() == [b"synthetic"]
     assert runner.run([sys.executable, "-c", "import time; time.sleep(3)"], timeout=1) == b""
     assert runner.last_status == "timeout"
     assert (

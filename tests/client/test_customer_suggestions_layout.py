@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from PySide6.QtCore import QPoint, QRect, QSize
-from PySide6.QtWidgets import QApplication, QFrame, QWidget
+from PySide6.QtWidgets import QFrame, QWidget
 
 from papagui_contracts import Customer, SourcePath
 from papagui_contracts.recognition import CustomerSuggestion
@@ -14,8 +14,8 @@ from papagui_client.gui.widgets.buttons import AppButton
 
 
 @pytest.fixture(scope="module")
-def application():
-    return QApplication.instance() or QApplication([])
+def application(qapp):
+    return qapp
 
 
 @pytest.fixture(params=("light", "dark"))
@@ -77,8 +77,7 @@ def _synthetic_suggestions():
 
 
 @pytest.fixture
-def open_dialog(themed_application) -> Callable:
-    dialogs = []
+def open_dialog(themed_application, qtbot) -> Callable:
 
     def create(size):
         dialog = CustomerSuggestionsDialog(
@@ -86,7 +85,7 @@ def open_dialog(themed_application) -> Callable:
             4,
             customer=Customer(id=101, display_name="Synthetic layout customer"),
         )
-        dialogs.append(dialog)
+        qtbot.addWidget(dialog)
         dialog.show()
         _settle(themed_application)
         # Test explicit window sizes independently of the offscreen desktop size.
@@ -95,11 +94,7 @@ def open_dialog(themed_application) -> Callable:
         assert dialog.size() == QSize(*size)
         return dialog
 
-    yield create
-    for dialog in dialogs:
-        dialog.close()
-        dialog.deleteLater()
-    _settle(themed_application)
+    return create
 
 
 def _cards(dialog):
@@ -154,7 +149,9 @@ def test_compact_cards_keep_first_decision_visible(open_dialog, size):
 
 
 @pytest.mark.parametrize("size", ((760, 560), (1050, 760)))
-def test_expanded_long_evidence_fits_and_retains_source(open_dialog, themed_application, size):
+def test_expanded_long_evidence_fits_and_retains_source(
+    open_dialog, themed_application, qtbot, size
+):
     dialog = open_dialog(size)
     card = _cards(dialog)[0]
     toggle = card.findChild(AppButton, "ReviewEvidenceToggle")
@@ -169,10 +166,9 @@ def test_expanded_long_evidence_fits_and_retains_source(open_dialog, themed_appl
     assert sources and sources[0].isVisibleTo(panel)
     expected_source = _synthetic_suggestions()[0].source
     assert expected_source.relative_path in sources[0].toolTip()
-    opened = []
-    dialog.sourceRequested.connect(opened.append)
-    sources[0].click()
-    assert opened == [expected_source]
+    with qtbot.waitSignal(dialog.sourceRequested, timeout=1000) as emitted:
+        sources[0].click()
+    assert emitted.args == [expected_source]
     toggle.click()
     _settle(themed_application)
     assert panel.isHidden()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import json
-from pathlib import Path, PosixPath
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 import urllib.error
 from unittest.mock import Mock, patch
@@ -304,7 +304,9 @@ def test_server_control_uses_client_token_and_validates_actions():
 def test_client_settings_platform_defaults_environment_and_validation(monkeypatch, tmp_path):
     import papagui_client.config as config
 
-    monkeypatch.setattr(config, "Path", PosixPath)
+    monkeypatch.setattr(config, "Path", type(tmp_path))
+    monkeypatch.setattr(config, "os", SimpleNamespace(**vars(config.os)))
+    monkeypatch.setattr(config, "sys", SimpleNamespace(**vars(config.sys)))
     monkeypatch.setattr(config.os, "name", "nt")
     assert default_data_root().name == "PapaGUI"
     monkeypatch.setattr(config.sys, "platform", "darwin")
@@ -459,7 +461,10 @@ def test_entrypoint_import_errors_tray_forwarding_and_launch_commands(monkeypatc
     monkeypatch.setattr(gui_main, "run_main_gui", lambda *_a, **_k: 0)
 
     launcher = TrayProcessLauncher()
-    monkeypatch.setattr("papagui_client.gui.launcher.Path", PosixPath)
+    import papagui_client.gui.launcher as launcher_module
+    monkeypatch.setattr(launcher_module, "os", SimpleNamespace(**vars(launcher_module.os)))
+    monkeypatch.setattr(launcher_module, "sys", SimpleNamespace(**vars(launcher_module.sys)))
+    monkeypatch.setattr(launcher_module, "Path", PurePosixPath)
     monkeypatch.setattr("papagui_client.gui.launcher.sys.frozen", False, raising=False)
     assert launcher.command()[1:] == ["-m", "papagui_client.entrypoints.tray", "--background"]
     monkeypatch.setattr("papagui_client.gui.launcher.sys.frozen", True, raising=False)

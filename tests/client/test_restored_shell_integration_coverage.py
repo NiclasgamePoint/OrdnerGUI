@@ -7,7 +7,7 @@ implementation code immediately visible.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event
 from time import perf_counter
 from types import SimpleNamespace
@@ -688,7 +688,7 @@ def test_remaining_main_shell_branches(window, application, monkeypatch):
         folder_paths=("source://archive/ignored", "/legacy/customer"),
         projects=projects,
     )
-    assert widget._customer_local_path(customer).endswith("2026/Muster")
+    assert Path(widget._customer_local_path(customer)).parts[-2:] == ("2026", "Muster")
     assert widget._customer_local_path(
         Customer(display_name="Alt", folder_path="/legacy/customer")
     ) == "/legacy/customer"
@@ -857,6 +857,9 @@ def test_launcher_visible_commands_and_platform_edges(monkeypatch):
 
     popen = Mock()
     monkeypatch.setattr(launcher_module.subprocess, "Popen", popen)
+    monkeypatch.setattr(launcher_module, "os", SimpleNamespace(**vars(launcher_module.os)))
+    monkeypatch.setattr(launcher_module, "sys", SimpleNamespace(**vars(launcher_module.sys)))
+    monkeypatch.setattr(launcher_module, "Path", PurePosixPath)
     monkeypatch.setattr(launcher_module.os, "name", "posix")
     launcher_module.TrayProcessLauncher._start(["tray", "--visible"])
     assert popen.call_args.kwargs["start_new_session"] is True

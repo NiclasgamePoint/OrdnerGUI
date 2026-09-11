@@ -131,7 +131,8 @@ def main() -> None:
             "status": "encrypted" if encrypted else "error",
             "reason": "encrypted_document" if encrypted else "invalid_pdf",
         }
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    # ASCII JSON escapes preserve all Unicode through Windows legacy code pages.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True))
 
 
 if __name__ == "__main__":

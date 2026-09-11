@@ -155,16 +155,21 @@ if ($env:PAPAGUI_API_TOKEN) { throw 'Failed generation set the client token.' }
     )
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
-def test_posix_launchers_have_valid_bash_syntax() -> None:
+@pytest.mark.parametrize("script", ["start.sh", "start.command", "index-tray.sh", "tools/docker_smoke.sh"])
+def test_posix_launchers_have_valid_bash_syntax(script: str) -> None:
+    bash = shutil.which("bash")
+    if sys.platform == "win32":
+        # The Windows system32 bash.exe is a WSL launcher, not a native shell.
+        git = shutil.which("git")
+        bundled = Path(git).parent.parent / "bin/bash.exe" if git else None
+        bash = str(bundled) if bundled is not None and bundled.is_file() else None
+    if bash is None:
+        pytest.skip("native bash is unavailable")
     subprocess.run(
         [
-            shutil.which("bash") or "bash",
+            bash,
             "-n",
-            "start.sh",
-            "start.command",
-            "index-tray.sh",
-            "tools/docker_smoke.sh",
+            script,
         ],
         cwd=ROOT,
         check=True,

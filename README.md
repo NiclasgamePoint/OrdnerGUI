@@ -51,7 +51,7 @@ festgelegten Abhängigkeiten, anschließend die drei Pakete editierbar installie
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-test.txt
+.venv/bin/python -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-dev.txt
 .venv/bin/python -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
 ```
 
@@ -67,7 +67,7 @@ Projektverzeichnis in PowerShell:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r packages\server\requirements-lock.txt -r packages\client\requirements-lock.txt -r requirements-test.txt
+.\.venv\Scripts\python.exe -m pip install -r packages\server\requirements-lock.txt -r packages\client\requirements-lock.txt -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pip install --no-deps -e packages\contracts -e packages\server -e packages\client
 ```
 

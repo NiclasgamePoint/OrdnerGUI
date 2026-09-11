@@ -10,7 +10,7 @@ Linux/macOS:
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-test.txt
+.venv/bin/python -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-dev.txt
 .venv/bin/python -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
 ```
 
@@ -18,7 +18,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-test.txt
+.\.venv\Scripts\python.exe -m pip install -r packages/server/requirements-lock.txt -r packages/client/requirements-lock.txt -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
 ```
 
@@ -29,6 +29,9 @@ oder Server-Runtime-Abhängigkeiten; sein erlaubter Quellumfang und die Grenzen
 des Fingerprint-Helfers stehen im [Graphify-Runbook](development/graphify.md).
 
 ## Tests und Qualität
+
+Der [lokale Windows-Teststand vom 11. September 2026](development/windows-baseline-2026-09-11.md)
+dokumentiert die Werkzeugprüfung und offene Fehler des Gesamtlaufs.
 
 ```bash
 .venv/bin/python -m ruff check packages tests tools main.py
@@ -58,6 +61,18 @@ Datenverzeichnissen; das Standardzeitlimit beträgt 300 Sekunden je Modul
 Einbeziehung von Branch Coverage. Docker-Smokes benötigen Bash und eine
 laufende Docker-Engine; ihr CI-Job läuft unter Linux.
 
+Coverage-Zwischenstände mit Rechnername und Prozess-ID (`.coverage.<Rechner>.<PID>.*`)
+entstehen während der einzelnen Testprozesse. Der Treiber sammelt sie in einem
+temporären Verzeichnis und führt sie auch bei Testfehlern oder Strg+C in die
+einzelne Datei `.coverage` zusammen. Das temporäre Verzeichnis wird anschließend
+entfernt, auch wenn das Zusammenführen fehlschlägt. Ein fehlgeschlagener Lauf
+bleibt fehlgeschlagen; seine Teilmessung gilt nicht als bestandene Coverage-Prüfung.
+Ein hartes Beenden des Betriebssystemprozesses kann temporäre Dateien im
+System-Tempverzeichnis hinterlassen, aber keine Zwischenstände im Projektordner.
+Alte Zwischenstände im Projektordner können einmalig mit
+`python -m coverage combine` zusammengeführt werden. `.coveragerc` ist die
+Konfiguration und bleibt erhalten.
+
 Architekturtests prüfen verbotene Imports und den Inhalt gebauter Artefakte.
 Der Wire-Interop-Test startet einen echten Serverprozess auf einem freien
 Localhost-Port und verwendet ausschließlich die produktiven HTTP-, Sync- und
@@ -72,6 +87,51 @@ definiert native Builds für Linux x64, Windows x64 sowie macOS x64/ARM64.
 Diese Definitionen belegen keine erfolgreiche Ausführung auf einem Zielsystem;
 dafür sind die Ergebnisse des jeweiligen CI-Laufs beziehungsweise lokale
 Prüfungen auf dieser Plattform maßgeblich.
+
+## GUI-Tests mit pytest-qt
+
+`requirements-test.txt` enthält die Qt-freien Testwerkzeuge für Server und
+Contracts. `requirements-client-test.txt` ergänzt pytest-qt 4.5.0 für Clienttests;
+`requirements-dev.txt` ergänzt Pyinstrument 5.1.3 für die lokale Entwicklung.
+Die Client- und Gesamtprüfungen in CI installieren die Client-Testabhängigkeiten,
+die Server- und Wire-Jobs bleiben ohne pytest-qt und ohne Qt.
+
+Die Layoutregressionen in `tests/client/test_customer_suggestions_layout.py`
+verwenden `qapp` für die Anwendung, `qtbot.addWidget` für das Aufräumen der Dialoge
+und `qtbot.waitSignal` für die Prüfung des Signals beim Öffnen einer Quelle.
+Neue GUI-Regressionen können dieselben Fixtures verwenden. Testdaten bleiben
+synthetisch; für vollständige Prüfungen isoliert `tests/run_ci.py` jedes Modul.
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/client/test_customer_suggestions_layout.py -q
+```
+
+## Laufzeiten mit Pyinstrument untersuchen
+
+Ein reproduzierbarer Einstieg ist der vorhandene synthetische
+Kundenerkennungsbenchmark. Der Profiling-Aufruf führt ihn standardmäßig dreimal
+aus und schreibt einen lokalen interaktiven HTML-Bericht:
+
+```powershell
+.\.venv\Scripts\python.exe tools/profile_recognition.py --repeat 3
+```
+
+Unter Linux/macOS denselben Aufruf mit `.venv/bin/python` verwenden.
+Die Ausgabe liegt unter `profiles/recognition.html`; `--output` erlaubt einen
+anderen Pfad. `profiles/` ist Git-ignoriert. Der Benchmark liest ausschließlich
+die synthetische Fixture und öffnet weder Kundendokumente noch produktive
+Einstellungen. Er misst die fachliche Erkennung, nicht OCR oder GUI-Latenzen.
+Pyinstrument ist eine Entwicklungsabhängigkeit und gehört nicht in Produktartefakte.
+
+Für einen einzelnen GUI-Test lässt sich die CLI direkt nutzen, nachdem `profiles/`
+angelegt wurde:
+
+```powershell
+.\.venv\Scripts\python.exe -m pyinstrument -r html -o profiles/gui-test.html -m pytest tests/client/test_customer_suggestions_layout.py -q
+```
+
+Der Profiler misst hier den gestarteten Testprozess; Arbeit in separaten
+Serverprozessen oder Workerthreads muss gesondert profiliert werden.
 
 ## Lokale Prozesse
 

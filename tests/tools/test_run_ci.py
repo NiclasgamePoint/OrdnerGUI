@@ -10,6 +10,7 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from tests import TEST_DIRECTORIES, TEST_ROOT, run_ci
+from papagui_client.gui.legacy_models import ui_settings
 
 
 def test_process_paths_and_qsettings_are_isolated() -> None:
@@ -21,8 +22,11 @@ def test_process_paths_and_qsettings_are_isolated() -> None:
     assert Path(os.environ["PAPAGUI_SETTINGS_DIR"]) == TEST_DIRECTORIES["config"]
     assert QSettings.defaultFormat() == QSettings.Format.IniFormat
 
-    settings = QSettings("PapaGUIHarness", "BootstrapTest")
+    settings = QSettings(
+        QSettings.Format.IniFormat, QSettings.Scope.UserScope, "PapaGUIHarness", "BootstrapTest"
+    )
     assert Path(settings.fileName()).resolve().is_relative_to(TEST_DIRECTORIES["config"])
+    assert Path(ui_settings().fileName()).resolve().is_relative_to(TEST_DIRECTORIES["config"])
     for directory in TEST_DIRECTORIES.values():
         assert directory.is_relative_to(TEST_ROOT)
         assert directory.is_dir()
@@ -101,3 +105,55 @@ def test_main_rejects_non_positive_module_timeout(capsys) -> None:
 
     assert raised.value.code == 2
     assert "must be greater than zero" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_failed_run_combines_measurements_and_removes_fragments(tmp_path, monkeypatch, interrupted):
+    from coverage import CoverageData
+
+    test_root = tmp_path / "tests"
+    test_root.mkdir()
+    monkeypatch.setattr(run_ci, "__file__", str(test_root / "run_ci.py"))
+    monkeypatch.setattr(run_ci, "test_modules", lambda _: ["tests.first", "tests.second"])
+    source = str(tmp_path / "synthetic.py")
+    directories = []
+
+    def measured_module(module, _root, _coverage, _timeout, *, coverage_directory):
+        directories.append(coverage_directory)
+        assert not coverage_directory.is_relative_to(tmp_path)
+        data = CoverageData(basename=str(coverage_directory / ".coverage"), suffix=module)
+        data.add_lines({source: [1 if module.endswith("first") else 2]})
+        data.write()
+        if module.endswith("second"):
+            if interrupted:
+                raise KeyboardInterrupt
+            return 1
+        return 0
+
+    monkeypatch.setattr(run_ci, "run_module", measured_module)
+    if interrupted:
+        with pytest.raises(KeyboardInterrupt):
+            run_ci.main(["--coverage"])
+    else:
+        assert run_ci.main(["--coverage"]) == 1
+    combined = CoverageData(basename=str(tmp_path / ".coverage"))
+    combined.read()
+    assert sorted(combined.lines(source)) == [1, 2]
+    assert not list(tmp_path.glob(".coverage.*"))
+    assert directories and all(not directory.exists() for directory in directories)
+
+
+def test_coverage_fragments_are_cleaned_when_combine_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_ci, "__file__", str(tmp_path / "tests/run_ci.py"))
+    monkeypatch.setattr(run_ci, "test_modules", lambda _: ["tests.first"])
+    directories = []
+
+    def measured_module(_module, _root, _coverage, _timeout, *, coverage_directory):
+        directories.append(coverage_directory)
+        (coverage_directory / ".coverage.synthetic").write_bytes(b"broken measurement")
+        return 0
+
+    monkeypatch.setattr(run_ci, "run_module", measured_module)
+    monkeypatch.setattr(run_ci, "coverage_command", lambda _root, *args: int(args[0] == "combine"))
+    assert run_ci.main(["--coverage"]) == 1
+    assert all(not directory.exists() for directory in directories)

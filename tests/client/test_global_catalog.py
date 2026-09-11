@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import PurePosixPath
+from pathlib import Path
 import sqlite3
 
 import pytest
@@ -123,7 +123,7 @@ def _service(tmp_path):
     return (
         CatalogSearchService(
             SQLiteCatalogReader(catalog, customers),
-            SourcePathResolver([SourceMapping("archive", linux="/mnt/archive")]),
+            SourcePathResolver([SourceMapping("archive", **dict.fromkeys(("windows", "macos", "linux"), str(tmp_path / "archive")))]),
             history,
         ),
         catalog,
@@ -143,7 +143,7 @@ def test_portable_folders_projects_facets_and_folder_details_are_read_only(tmp_p
 
     roots = service.project_roots("archive")
     assert [item.project.customer_name for item in roots] == ["Andere AG", "Muster GmbH"]
-    assert roots[1].local_path == PurePosixPath("/mnt/archive/Heizung/2026/Muster")
+    assert roots[1].local_path == Path(tmp_path / "archive/Heizung/2026/Muster")
     folders = service.folders("archive", project_only=True)
     assert {item.folder.name for item in folders} == {"Muster", "Angebote", "Andere"}
     details = service.folder("archive", "Heizung/2026/Muster")

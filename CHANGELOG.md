@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Windows-Testfälle für native Pfade, Toolnamen, Prozesszeilenenden und simulierte
+  Plattformen korrigiert; Linux-Ressourcenprüfungen verwenden isolierte Testwerte.
+  Bash-Syntaxprüfungen testen jedes Startskript und verwenden unter Windows Git Bash.
+- JSON-Ausgaben der isolierten Office-/PDF-Parser gegen Windows-Codepages abgesichert,
+  damit Texte mit Umlauten und anderen Unicode-Zeichen vollständig ankommen.
+- GUI-Einstellungen berücksichtigen das konfigurierte Qt-Speicherformat auch unter
+  Windows; Testläufe verwenden dadurch den isolierten INI-Speicher.
+- Neuaufbau-Schaltfläche in kleinen Verwaltungsfenstern verkürzt, damit sie vollständig
+  erreichbar bleibt.
+- Coverage-Zwischenstände in ein temporäres Verzeichnis verlegt und das Zusammenführen
+  bei Testfehlern und Abbruch abgesichert; im Projekt bleibt nur die Gesamtdatei.
+
+- pytest-qt für Clientprüfungen integriert, erste Dialogregressionen auf verwaltete
+  Widgets und Signalprüfungen umgestellt; Qt-freie Serverjobs bleiben getrennt.
+- Pyinstrument mit einem reproduzierbaren Profiling-Aufruf für die synthetische
+  Kundenerkennung ergänzt; HTML-Berichte bleiben lokal unter `profiles/`.
+- Graphify-Quellgraph-Builder und Windows-Launcher ergänzt, einschließlich
+  benutzergebunden verschlüsseltem Gemini-Key und synthetischem Verbindungstest.
+
 - Strukturierte lokale Kundendatenerkennung für Telefon, E-Mail, Firma,
   Anschrift und benannte Ansprechpartner ergänzt; Datumsfilter, Rollenprüfung,
   mehrere Belege pro Vorschlag und dauerhafte Entscheidungen verbessern die

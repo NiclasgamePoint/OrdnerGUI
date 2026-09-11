@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -11,9 +11,10 @@ from papagui_server.domain.models import ServerSettings
 @pytest.fixture
 def system(monkeypatch):
     files = {"/proc/meminfo": f"MemAvailable: {128 * 1024 * 1024} kB\n"}
+    monkeypatch.setattr(resources, "Path", PurePosixPath)
     monkeypatch.setattr(resources, "_read", lambda path: files.get(str(path)))
     monkeypatch.setattr(resources.os, "cpu_count", lambda: 32)
-    monkeypatch.setattr(resources.os, "sched_getaffinity", lambda _pid: set(range(32)))
+    monkeypatch.setattr(resources.os, "sched_getaffinity", lambda _pid: set(range(32)), raising=False)
     return files
 
 

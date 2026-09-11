@@ -104,7 +104,12 @@ def test_legacy_symlink_rejection_and_catalog_shape(tmp_path):
     store.root.mkdir(parents=True)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (store.root / "current").symlink_to(outside, target_is_directory=True)
+    try:
+        (store.root / "current").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows account lacks permission to create symlinks")
+        raise
     assert not store.import_legacy_symlink()
     (store.root / "current").unlink()
     empty = store.root / "empty"

@@ -192,7 +192,7 @@ class RecognitionAdminWidget(QWidget):
         self.job_progress.hide()
         rebuild_layout.addWidget(self.job_progress)
         rebuild_actions = QVBoxLayout()
-        self.rebuild_button = AppButton("Kundenerkennung vollständig neu aufbauen")
+        self.rebuild_button = AppButton("Neuaufbau starten")
         self.rebuild_button.clicked.connect(self.start_rebuild)
         self.cancel_button = AppButton("Neuaufbau abbrechen", AppButton.SECONDARY)
         self.cancel_button.clicked.connect(self.cancel_rebuild)

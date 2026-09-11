@@ -241,8 +241,8 @@ def test_client_and_server_interoperate_over_real_http(tmp_path: Path) -> None:
                 [
                     SourceMapping(
                         SOURCE_ID,
-                        windows=r"Z:\PapaGUI-Wire",
-                        macos="/Volumes/PapaGUI-Wire",
+                        windows=str(source),
+                        macos=str(source),
                         linux=str(source),
                     )
                 ]

@@ -93,11 +93,11 @@ def test_catalog_reader_searches_read_only_portable_records(tmp_path):
 
     reader = SQLiteCatalogReader(database)
     service = CatalogSearchService(
-        reader, SourcePathResolver([SourceMapping("archive", linux="/srv/archive")])
+        reader, SourcePathResolver([SourceMapping("archive", **dict.fromkeys(("windows", "macos", "linux"), str(tmp_path / "archive")))])
     )
     results = service.search(CatalogQuery(text="Muster", year="2026"))
 
     assert [result.record.document_key for result in results] == ["one"]
-    assert results[0].local_path == PurePosixPath("/srv/archive/2026/Muster/Angebot.pdf")
+    assert results[0].local_path == tmp_path / "archive/2026/Muster/Angebot.pdf"
     assert reader.get("two").filename == "Rechnung.pdf"
     assert digest(database) == before

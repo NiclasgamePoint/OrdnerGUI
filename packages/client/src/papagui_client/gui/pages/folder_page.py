@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-from PySide6.QtCore import QFileInfo, QSettings, Qt, Signal
+from PySide6.QtCore import QFileInfo, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from papagui_client.gui.legacy_models import SETTINGS_APP, SETTINGS_ORG
+from papagui_client.gui.legacy_models import ui_settings
 from papagui_client.gui.panels import MailPanel
 from papagui_client.gui.viewers.file import FileViewerWidget as FileViewer
 from papagui_client.gui.widgets.buttons import AppButton
@@ -54,7 +54,7 @@ class FolderPage(QWidget):
         self._all_files: list[dict] = []
         self._subfolders: list[dict] = []
         self._expanded_folders: set[object] = set()
-        self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        self._settings = ui_settings()
         self._icon_provider = QFileIconProvider()
 
         layout = QVBoxLayout(self)

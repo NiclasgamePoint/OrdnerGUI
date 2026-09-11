@@ -1,7 +1,6 @@
-from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QPalette
 
-from papagui_client.gui.legacy_models import SETTINGS_APP, SETTINGS_ORG
+from papagui_client.gui.legacy_models import ui_settings
 
 FONT_FAMILY_FALLBACKS = (
     "'Segoe UI', 'SF Pro Text', 'Noto Sans', 'Ubuntu', sans-serif"
@@ -37,7 +36,7 @@ class ThemeManager:
     MAX_FONT_SIZE = 20
 
     def __init__(self):
-        self.settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        self.settings = ui_settings()
         self.mode = self.DEFAULT_MODE
         self.accent = self.DEFAULT_ACCENT
         self.contrast = self.DEFAULT_CONTRAST
