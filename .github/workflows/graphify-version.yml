@@ -17,4 +17,6 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install graphifyy==0.9.53
-      - run: python tools/graphify_refresh.py --check-latest
+      # An upstream tool release does not invalidate the tested application.
+      # Network/install errors still fail; version drift is an explicit warning.
+      - run: python tools/graphify_refresh.py --check-latest --warn-outdated

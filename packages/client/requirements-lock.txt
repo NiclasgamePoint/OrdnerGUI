@@ -1,4 +1,4 @@
-# Runtime lock for the full GUI extra of papagui-client 0.4.2.
+# Runtime lock for the full GUI extra of papagui-client 0.4.3.
 et_xmlfile==2.0.0
 lxml==6.1.1
 olefile==0.47

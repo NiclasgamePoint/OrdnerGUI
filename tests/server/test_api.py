@@ -98,7 +98,9 @@ def test_health_system_info_and_client_authentication(tmp_path: Path) -> None:
                 headers={"Authorization": "Bearer client-token-123"},
             )
             assert response.status_code == 200
-            assert response.json()["server_version"] == "0.4.2"
+            from papagui_server import __version__
+
+            assert response.json()["server_version"] == __version__
             assert "component_generations" in response.json()["capabilities"]["features"]
 
     _run(scenario())

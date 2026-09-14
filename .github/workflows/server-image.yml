@@ -1,6 +1,8 @@
 name: Server image
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -21,7 +23,7 @@ jobs:
           file: deploy/server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: false
-          tags: papagui-server:0.4.2-ci
+          tags: papagui-server:0.4.3-ci
 
   smoke:
     runs-on: ubuntu-latest

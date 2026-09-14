@@ -266,9 +266,10 @@ Inhaltsprüfung, Abbruch und Workeranzeige werden mit künstlich erzeugten
 Dokumenten und temporären Datenbanken geprüft. Laufzeitvergleiche der
 Dokumentauslesung verwenden ebenfalls ausschließlich synthetische Dateien;
 sie messen keine Laufzeit oder Erkennungsqualität des produktiven Bestands.
-Messwerte und Abbruch-/Wiederaufnahmeprüfungen stehen im
-[Prüfbericht zur parallelen Dokumentverarbeitung](dokumentverarbeitung-pruefbericht-2026-09-09.md).
+Für eine Freigabe müssen diese Prüfungen am Releasecommit erneut ausgeführt
+werden; siehe [Releasecheckliste](releasing.md).
 
 Die optionale Docling-/Modellstufe bleibt deaktiviert: Ein zusätzlicher Nutzen auf einem unabhängigen realen Abnahmebestand und innerhalb des Zielhardwarebudgets wurde nicht nachgewiesen. Das Benchmarkwerkzeug enthält eine ausdrückliche Prüfung dieser Voraussetzungen; es lädt oder ruft kein Modell auf.
 
-Die konkret ausgeführten Prüfungen und ihre Grenzen stehen im [Prüfbericht vom 9. September 2026](kundendatenerkennung-pruefbericht-2026-09-09.md).
+Historische Prüfberichte vom 9. September 2026 sind in der Git-Historie erhalten.
+Sie sind kein Nachweis für die aktuelle Releasequalität.

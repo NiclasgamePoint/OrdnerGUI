@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 - PreRelease Testing (2026-09-14)
+
+- Releasevorbereitung: GPL-3.0-or-later samt Paketlizenzdateien, Fremdsoftware-
+  Hinweisen und plattformspezifischem Abhängigkeitsinventar ergänzen.
+- Native Installer für Windows x64, macOS Intel/ARM64 und Ubuntu 24.04 x64
+  vorbereiten; CI installiert und startet die Artefakte vor dem Upload.
+- Release-/Installationsdokumentation zusammenführen, alte Pläne und Prüfberichte
+  aus dem aktuellen Baum entfernen und lokale Windows-Releasechecks ergänzen.
+- Python-3.11-Paketgrenzentest, Qt-Testbereinigung und plattformübergreifende
+  Graphify-Fingerprints korrigieren; POSIX-Skripte mit LF auschecken.
 
 - Telefonnummernerkennung um eine konservative Formatprüfung ergänzen: keine
   Messwertreihen mit Punkten oder Dezimalkommas, keine Teiltreffer aus solchen

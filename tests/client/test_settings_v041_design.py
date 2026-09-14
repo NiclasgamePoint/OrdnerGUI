@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QTabWidget
-import pytest
+from PySide6.QtWidgets import QLabel, QTabWidget
 
 from papagui_client.application.paths import SourceMapping
 from papagui_client.config import ClientSettings, ClientTheme
 from papagui_client.gui.settings import ClientSettingsDialog
 
 
-@pytest.fixture(scope="module")
-def application():
-    return QApplication.instance() or QApplication([])
-
-
 def test_client_settings_restore_legacy_navigation_without_mixing_server_code(
-    application, tmp_path
+    qtbot, tmp_path
 ):
     settings = ClientSettings(
         server_url="https://server.test",
@@ -26,6 +20,7 @@ def test_client_settings_restore_legacy_navigation_without_mixing_server_code(
         theme=ClientTheme.DARK,
     )
     dialog = ClientSettingsDialog(settings)
+    qtbot.addWidget(dialog)
 
     assert dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
     assert [dialog.nav_list.item(row).text() for row in range(dialog.nav_list.count())] == [

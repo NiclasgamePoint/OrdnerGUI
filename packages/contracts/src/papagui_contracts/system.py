@@ -18,7 +18,7 @@ from ._base import (
 )
 
 
-CONTRACT_VERSION = "0.4.2"
+CONTRACT_VERSION = "0.4.3"
 
 
 class Capability(str, Enum):

@@ -1,0 +1,3 @@
+# POSIX launchers must also work from Windows checkouts mounted into Linux.
+*.sh text eol=lf
+*.command text eol=lf

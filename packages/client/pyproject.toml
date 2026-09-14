@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,9 @@ dynamic = ["version"]
 description = "Offline-capable PapaGUI desktop client"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["papagui-contracts==0.4.2"]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+dependencies = ["papagui-contracts==0.4.3"]
 
 [project.optional-dependencies]
 gui = [

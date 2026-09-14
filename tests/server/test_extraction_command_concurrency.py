@@ -176,7 +176,7 @@ def test_cancellation_kills_parser_helper_children(tmp_path: Path, monkeypatch):
             def helper_running():
                 try:
                     return stat.read_text().split()[2] not in {"Z", "X"}
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     return False
 
             deadline = time.monotonic() + 2

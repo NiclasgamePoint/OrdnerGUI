@@ -106,6 +106,15 @@ def source_fingerprint(root: Path) -> tuple[str, int]:
     for relative in files:
         encoded_name = relative.as_posix().encode("utf-8", errors="surrogateescape")
         content = (root / relative).read_bytes()
+        # Git text checkouts may use CRLF on Windows and LF in Linux CI.
+        # Normalize UTF-8 text only; preserve binary artifacts byte for byte.
+        if b"\0" not in content:
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+            else:
+                content = content.replace(b"\r\n", b"\n")
         digest.update(len(encoded_name).to_bytes(8, "big"))
         digest.update(encoded_name)
         digest.update(len(content).to_bytes(8, "big"))
@@ -249,6 +258,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="installierte Graphify-Version mit PyPI vergleichen",
     )
+    parser.add_argument(
+        "--warn-outdated",
+        action="store_true",
+        help="neue Upstream-Version als Wartungshinweis statt Buildfehler melden",
+    )
     return parser
 
 
@@ -266,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.check_latest:
             latest = latest_version()
             if version != latest:
+                if arguments.warn_outdated:
+                    print(f"::warning::Graphify {version}: Upstream {latest} ist verfügbar; Upgrade prüfen.")
+                    return 0
                 raise GraphifyToolError(
                     f"Graphify {version} ist veraltet; auf PyPI ist {latest} verfügbar."
                 )

@@ -59,13 +59,17 @@ class ContractPackageBoundaryTests(unittest.TestCase):
 import sys
 sys.path.insert(0, {str(CONTRACTS_SOURCE)!r})
 import papagui_contracts
-forbidden = ('PySide6', 'sqlite3', 'urllib', 'requests', 'httpx', 'fastapi')
-loaded = sorted(name for name in sys.modules if name.split('.')[0] in forbidden)
+forbidden = ('PySide6', 'sqlite3', 'requests', 'httpx', 'fastapi')
+# Python 3.11 pathlib imports urllib.parse, a pure string parser. Reject the
+# network client rather than misclassifying that stdlib dependency as I/O.
+loaded = sorted(name for name in sys.modules if name.split('.')[0] in forbidden
+                or name == 'urllib.request' or name.startswith('urllib.request.'))
 if loaded:
     raise SystemExit(','.join(loaded))
 """
         result = subprocess.run(
-            [sys.executable, "-I", "-c", script],
+            # -S excludes editable-install .pth hooks from this dependency check.
+            [sys.executable, "-I", "-S", "-c", script],
             check=False,
             capture_output=True,
             text=True,

@@ -5,4 +5,4 @@ Its application core can be imported without Qt so synchronization and offline
 behaviour remain independently testable.
 """
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"

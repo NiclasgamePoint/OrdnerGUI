@@ -6,7 +6,7 @@ schreibende Instanz für Index, Kundenerkennung und `customers.db`. Clients
 halten ausschließlich geprüfte lokale Kopien und bleiben mit dem letzten
 gültigen Stand offline benutzbar.
 
-Der Stand 0.4.2 ist ein Entwicklungs-Checkpoint. Die enthaltenen Workflows bauen
+Der Stand 0.4.3 ist der Checkpoint **PreRelease Testing**. Die enthaltenen Workflows bauen
 Testartefakte ohne Signierung und ohne Registry-Push; sie veröffentlichen keine
 GitHub Releases. Der tatsächliche Status eines Builds ist im jeweiligen
 Workflow-Lauf zu prüfen.
@@ -20,7 +20,7 @@ packages/
 └── client/       Desktop-GUI, Tray, Synchronisation und Offline-Outbox
 
 deploy/server/    Docker Compose und Synology-Betrieb
-packaging/client/ Vorbereitete native Client-Builds
+packaging/client/ Native Client-Builds und Installer
 ```
 
 Die Importgrenzen werden automatisch geprüft: Contracts kennen keine
@@ -43,6 +43,16 @@ keinen Index-Writer oder Servercode.
 Server und Client behalten jeweils den aktiven Stand plus drei vorherige
 gültige Generationen. Ein fehlgeschlagener Build oder Download verdrängt keine
 funktionierende Sicherung.
+
+## Installation und Lizenz
+
+Die [Installationsanleitung](docs/installation.md) beschreibt die vorbereiteten
+Windows-, macOS- und Linux-Installer. Der Desktopclient enthält Python und Qt;
+der Indexserver wird separat eingerichtet. Der aktuelle Stand ist noch nicht
+als öffentlicher Release freigegeben.
+
+PapaGUI ist freie Software unter [GPL-3.0-or-later](LICENSE).
+[Fremdsoftware und Quellen](THIRD_PARTY_NOTICES.md) behalten ihre eigenen Lizenzen.
 
 ## Entwicklung starten
 
@@ -162,15 +172,11 @@ veröffentlicht.
 - [Versionierung und spätere Releases](docs/releasing.md)
 - [Sicherheitskonzept](SECURITY.md)
 - [Graphify für die Architekturkarte](docs/development/graphify.md)
-- [Umsetzungsstand und offene Arbeiten](Umsetzungsplanung.md)
-- [Produktideen](Vorschlaege.md)
+- [Releasecheckliste](docs/releasing.md)
+- [Spätere Produktarbeit](docs/roadmap.md)
 
-Historische Prüfungen und Entwurfsentscheidungen stehen getrennt von den
-laufend gepflegten Anleitungen:
-
-- [Prüfung der Kundendatenerkennung](docs/kundendatenerkennung-pruefbericht-2026-09-09.md)
-- [Prüfung der parallelen Dokumentverarbeitung](docs/dokumentverarbeitung-pruefbericht-2026-09-09.md)
-- [Ursprünglicher Umsetzungsplan mit aktuellem Status](docs/kundendatenerkennung-umsetzungsplan.md)
+Aktuelle Releaseprüfungen stehen in [Releasevorbereitung](docs/releasing.md).
+Überholte Pläne und Prüfberichte sind über die Git-Historie nachvollziehbar.
 
 Die bisherige Docker-Einstiegsseite bleibt unter [DOCKER.md](DOCKER.md)
 erreichbar.

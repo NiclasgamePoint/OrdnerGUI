@@ -157,3 +157,17 @@ def test_coverage_fragments_are_cleaned_when_combine_fails(tmp_path, monkeypatch
     monkeypatch.setattr(run_ci, "coverage_command", lambda _root, *args: int(args[0] == "combine"))
     assert run_ci.main(["--coverage"]) == 1
     assert all(not directory.exists() for directory in directories)
+
+
+def test_path_selection_runs_each_selected_module_once(tmp_path, monkeypatch):
+    root = tmp_path / "tests"
+    (root / "client").mkdir(parents=True)
+    (root / "client/test_gui.py").touch()
+    monkeypatch.setattr(run_ci, "__file__", str(root / "run_ci.py"))
+    monkeypatch.setattr(run_ci, "test_modules", lambda _: ["tests.client.test_gui", "tests.server.test_api"])
+    called = []
+    monkeypatch.setattr(run_ci, "run_module", lambda module, *a, **kw: called.append(module))
+    assert run_ci.main(["--paths", "tests/client", "tests/client/test_gui.py"]) == 0
+    assert called == ["tests.client.test_gui"]
+    with pytest.raises(SystemExit):
+        run_ci.main(["--paths", "../outside"])

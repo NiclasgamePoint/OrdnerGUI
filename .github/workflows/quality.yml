@@ -49,13 +49,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r packages/client/requirements-lock.txt -r requirements-client-test.txt
           python -m pip install --no-deps -e packages/contracts -e packages/client
+      - name: Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libdbus-1-3
       - name: Test client
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests/contracts tests/client tests/architecture tests/tools/test_check_frozen_client.py tests/tools/test_client_packaging.py tests/tools/test_start_scripts.py tests/tools/test_prepare_client_start.py -q
+        run: python tests/run_ci.py --paths tests/contracts tests/client tests/architecture tests/tools/test_check_frozen_client.py tests/tools/test_client_packaging.py tests/tools/test_start_scripts.py tests/tools/test_prepare_client_start.py
       - name: Parse POSIX launchers
         if: runner.os != 'Windows'
-        run: bash -n start.sh start.command index-tray.sh tools/docker_smoke.sh
+        run: |
+          for script in start.sh start.command index-tray.sh tools/docker_smoke.sh; do
+            bash -n "$script"
+          done
       - name: Parse PowerShell launcher
         if: runner.os == 'Windows'
         shell: pwsh
@@ -102,6 +108,10 @@ jobs:
           python -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
       - name: Lint
         run: ruff check packages tests tools main.py
+      - name: Linux desktop libraries
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libdbus-1-3
+      - name: Verify release licenses and metadata
+        run: python tools/release_metadata.py
       - name: Test with branch coverage
         env:
           QT_QPA_PLATFORM: offscreen

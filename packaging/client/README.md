@@ -16,7 +16,7 @@ operating system. Do not copy a Linux virtual environment to Windows. The
 path; `python` below means that environment's interpreter.
 
 ```text
-python -m pip install -r packages/client/requirements-lock.txt -r packaging/client/requirements-build-lock.txt -r requirements-test.txt
+python -m pip install -r packages/client/requirements-lock.txt -r packaging/client/requirements-build-lock.txt -r requirements-client-test.txt
 python -m pip install --no-deps -e packages/contracts -e packages/client
 python -m PyInstaller --clean --noconfirm packaging/client/pyinstaller/papagui-client.spec
 python -m PyInstaller --clean --noconfirm packaging/client/pyinstaller/papagui-tray.spec
@@ -52,7 +52,7 @@ The four prepared, unsigned targets are recorded in `build-matrix.json` and are
 validated by `tests/tools/test_client_packaging.py`. Building on one operating
 system does not certify another target; PyInstaller builds run natively on the
 corresponding CI runner. `.github/workflows/client-artifacts.yml` is triggered
-manually and runs its own source tests before building. It is separate from
+manually or for pull requests touching packaging inputs, and runs its own source tests before building. It is separate from
 the Python wheel jobs in `quality.yml`; inspect the actual run results when
 assessing a build. After each build, `tools/check_frozen_client.py`
 recursively inspects the embedded PyInstaller module archive, rejects
@@ -63,5 +63,33 @@ exercise an interactive Windows desktop, document converters or a live server.
 
 The current specs do not bundle Poppler. See [the optional tool layout](vendor/poppler/README.md)
 for the distinction between the prepared directory structure and implemented
-binary packaging. Signing, installers, registry publishing and application
-updates are not implemented by these build definitions.
+binary packaging. Signing, registry publishing and application updates are
+not implemented by these build definitions.
+
+## Native installers
+
+After building and checking the frozen products, run:
+
+```text
+python tools/release_metadata.py
+python tools/build_installers.py
+```
+
+On Windows, install Inno Setup 6 and pass `--iscc <path-to-ISCC.exe>` if needed.
+Linux uses `dpkg-deb` on Ubuntu 24.04, macOS uses Apple's `pkgbuild`. The builder
+reads versions from the package sources and produces `.exe`, `.pkg` or `.deb`
+under `dist/installers/`, each with a SHA-256 sidecar. Existing output files are
+not overwritten; choose a new `--output` directory for a repeat build.
+
+Installers contain client and tray, project licenses, available dependency
+notices and a platform-specific Python dependency inventory. This inventory is
+not a complete native SBOM; see `THIRD_PARTY_NOTICES.md` for remaining release
+obligations. The Windows installer includes the Inno Setup compiler's notice.
+
+CI installs the package and launches the installed programs. Windows additionally
+tests reinstall and uninstall with `tools/check_installer.py`; that script refuses
+to run over a registered existing PapaGUI installation. Mac/Linux end-user upgrade,
+uninstall and interactive GUI acceptance still need native manual verification.
+
+See [installation](../../docs/installation.md) for target limitations and
+[release checklist](../../docs/releasing.md) for public distribution gates.

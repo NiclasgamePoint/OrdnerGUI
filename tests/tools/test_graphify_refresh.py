@@ -56,6 +56,19 @@ def test_check_state_detects_source_drift(repository: Path) -> None:
         graphify_refresh.check_state(repository, require_local_graph=False)
 
 
+def test_fingerprint_ignores_checkout_line_endings_but_keeps_binary_bytes(repository: Path) -> None:
+    source = repository / "tracked.py"
+    source.write_bytes(b"VALUE = 1\r\n")
+    windows = graphify_refresh.source_fingerprint(repository)
+    source.write_bytes(b"VALUE = 1\n")
+    assert graphify_refresh.source_fingerprint(repository) == windows
+    binary = repository / "asset.bin"
+    binary.write_bytes(b"\0\r\n")
+    original = graphify_refresh.source_fingerprint(repository)
+    binary.write_bytes(b"\0\n")
+    assert graphify_refresh.source_fingerprint(repository) != original
+
+
 def test_graphify_executable_prefers_explicit_configuration(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -76,6 +89,15 @@ def test_graph_commit_returns_none_for_invalid_output(repository: Path) -> None:
         json.dumps({"built_at_commit": "abc123"}), encoding="utf-8"
     )
     assert graphify_refresh.graph_commit(repository) == "abc123"
+
+
+def test_upstream_version_notice_preserves_strict_check(monkeypatch, capsys):
+    monkeypatch.setattr(graphify_refresh, "graphify_executable", lambda _: "graphify")
+    monkeypatch.setattr(graphify_refresh, "graphify_version", lambda *_: "0.9.53")
+    monkeypatch.setattr(graphify_refresh, "latest_version", lambda: "0.9.61")
+    assert graphify_refresh.main(["--check-latest"]) == 1
+    assert graphify_refresh.main(["--check-latest", "--warn-outdated"]) == 0
+    assert "::warning::" in capsys.readouterr().out
 
 
 def test_local_graph_gate_requires_outputs_direction_packages_and_head(

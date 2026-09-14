@@ -62,7 +62,7 @@ def test_build_matrix_and_workflow_cover_exactly_four_release_targets() -> None:
     matrix = json.loads((PACKAGING / "build-matrix.json").read_text(encoding="utf-8"))
     targets = {(item["os"], item["arch"], item["runner"]) for item in matrix["targets"]}
     assert targets == {
-        ("linux", "x86_64", "ubuntu-latest"),
+        ("linux", "x86_64", "ubuntu-24.04"),
         ("windows", "x86_64", "windows-latest"),
         ("macos", "x86_64", "macos-15-intel"),
         ("macos", "arm64", "macos-14"),
@@ -76,7 +76,7 @@ def test_build_matrix_and_workflow_cover_exactly_four_release_targets() -> None:
     )
     workflow_targets = workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
     assert {(item["os"], item["artifact"]) for item in workflow_targets} == {
-        ("ubuntu-latest", "linux-x64"),
+        ("ubuntu-24.04", "linux-x64"),
         ("windows-latest", "windows-x64"),
         ("macos-15-intel", "macos-x64"),
         ("macos-14", "macos-arm64"),
@@ -133,8 +133,8 @@ def test_specs_select_native_shape_for_every_release_target(
         assert bundle.options["name"] == expected_name
         assert bundle.options["icon"] == str(icons / f"papagui-{icon_role}.icns")
         assert bundle.options["bundle_identifier"].startswith("de.papagui.")
-        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.2"
-        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.2"
+        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.3"
+        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.3"
         assert namespace["application"] == bundle
     else:
         assert "application" not in namespace

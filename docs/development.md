@@ -240,6 +240,11 @@ verwenden. Native Artefakte werden separat gemäß
 
 ## Änderungsreihenfolge
 
+Der vollständige Windows-Releasecheck ist mit
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools/run_release_checks.ps1`
+ausführbar. Er benötigt eine Python-3.11-Umgebung; weitere Details und die Grenzen
+lokaler CI-Ausführung stehen in [Releasevorbereitung](releasing.md).
+
 Vertragsänderungen beginnen in `contracts`, erhalten Tests und werden danach in
 Server und Client implementiert. Wireformat- oder Datenbankschemaänderungen
 benötigen Kompatibilitätsfixtures und einen dokumentierten Migrationspfad.

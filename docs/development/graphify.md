@@ -131,6 +131,9 @@ python tools/graphify_refresh.py --check --require-local-graph
 installiert auffindbar sein. Der Quality-Workflow verwendet `--check` ohne lokale
 Graphartefakte. Der Hashschritt verarbeitet Dateiinhalte ausschließlich lokal;
 er erweitert weder den AST-Korpus noch führt er eine semantische Analyse aus.
+UTF-8-Textdateien ohne Nullbytes werden beim Hashen von CRLF auf LF normalisiert,
+damit derselbe Quellstand unter Windows und Linux denselben Fingerprint erhält.
+Binärdateien werden unverändert gehasht.
 
 Die zusätzliche Option `--require-local-graph` erwartet `graph.html`, `graph.json`
 und `GRAPH_REPORT.md` direkt unter `graphify-out/`, einen gerichteten Graphen mit
@@ -139,3 +142,8 @@ Layout. Nach einem neuen Commit den Codegraph erneut für den neuen `HEAD` bauen
 bevor dieser Commitbezug geprüft wird. Ein bestandener Fingerprint- oder
 Layout-Check ist keine Datenschutzprüfung und kein Beleg für semantisch
 vollständige oder fachlich richtige Beziehungen.
+
+Der geplante Versionscheck meldet neuere Upstream-Versionen als sichtbare
+Actions-Warnung (`--warn-outdated`). Der getestete Pin bleibt reproduzierbar;
+Installations- und Netzwerkfehler schlagen weiterhin fehl. Der lokale Aufruf
+`--check-latest` bleibt ohne diese Option streng.

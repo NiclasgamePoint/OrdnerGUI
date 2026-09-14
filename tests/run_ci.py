@@ -131,12 +131,29 @@ def main(argv: list[str] | None = None) -> int:
             f"(default: {DEFAULT_MODULE_TIMEOUT_SECONDS:g} seconds)"
         ),
     )
+    parser.add_argument(
+        "--paths", nargs="+", metavar="TEST_PATH",
+        help="run only these test files/directories, still in isolated processes",
+    )
     args = parser.parse_args(argv)
     if args.module_timeout <= 0:
         parser.error("--module-timeout must be greater than zero")
 
     project_root = Path(__file__).resolve().parent.parent
     test_root = Path(__file__).parent
+    modules = test_modules(test_root)
+    if args.paths:
+        selected = set()
+        for value in args.paths:
+            path = (project_root / value).resolve()
+            if not path.is_relative_to(test_root.resolve()) or not path.exists():
+                parser.error(f"Not an existing test path: {value}")
+            prefix = ".".join(path.relative_to(project_root).with_suffix("").parts)
+            matching = {m for m in modules if m == prefix or m.startswith(prefix + ".")}
+            if not matching:
+                parser.error(f"No test modules under: {value}")
+            selected.update(matching)
+        modules = [m for m in modules if m in selected]
     failures: list[str] = []
 
     if args.coverage and coverage_command(project_root, "erase"):
@@ -147,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     with TemporaryDirectory(prefix="papagui-coverage-") as directory:
         coverage_directory = Path(directory)
         try:
-            for module in test_modules(test_root):
+            for module in modules:
                 print(f"\n=== {module} ===", flush=True)
                 if run_module(
                     module,

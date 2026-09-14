@@ -1,5 +1,9 @@
 # Lokaler Windows-Teststand vom 11. September 2026
 
+> Historischer Stand. Die damaligen vier ACL-Fehler wurden am 14. September als
+> Sandbox-Effekt bestätigt: außerhalb der Sandbox bestehen alle 17 Tests des
+> betroffenen Moduls. Aktuelle Releaseprüfungen: [Releasevorbereitung](../releasing.md).
+
 Ausgangscommit: `e3193d3`, zusätzlich die lokale Integration von Graphify,
 pytest-qt und Pyinstrument. Windows, Python 3.14.2 in `.venv`, PySide6 6.11.1
 aus dem Client-Lock. Die CI verwendet weiterhin Python 3.11; dieser lokale Lauf
