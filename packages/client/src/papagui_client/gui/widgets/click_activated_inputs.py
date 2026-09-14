@@ -26,6 +26,9 @@ class _ClickActivatedWheel:
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._wheel_adjustment_enabled = True
+            # macOS does not always focus a combo on mouse selection. Focus it
+            # before opening the popup so Qt can return focus after selection.
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(event)
 
     def focusOutEvent(self, event):

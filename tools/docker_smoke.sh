@@ -66,8 +66,8 @@ start_container() {
 }
 
 wait_until_ready() {
-    local attempt
-    for attempt in $(seq 1 60); do
+    local _attempt
+    for _attempt in $(seq 1 60); do
         if docker exec "${CONTAINER}" python -c \
             "import json,urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=2))" \
             >/dev/null 2>&1; then
@@ -112,7 +112,7 @@ fi
 docker exec "${CONTAINER}" python -c \
     "import importlib.util; assert importlib.util.find_spec('PySide6') is None; assert importlib.util.find_spec('papagui_client') is None; assert importlib.util.find_spec('app') is None"
 
-for attempt in $(seq 1 60); do
+for _attempt in $(seq 1 60); do
     if GENERATION_BEFORE="$(generation_id 2>/dev/null)"; then
         break
     fi
@@ -164,7 +164,7 @@ test "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "${CONTAINE
 RESTART_COUNT_BEFORE="$(docker inspect --format '{{.RestartCount}}' "${CONTAINER}")"
 # Docker arms restart policies only after a container has stayed up successfully.
 RESTART_POLICY_ARMED=""
-for attempt in $(seq 1 20); do
+for _attempt in $(seq 1 20); do
     if docker exec "${CONTAINER}" python -c \
         "import json,urllib.request; request=urllib.request.Request('http://127.0.0.1:8765/v2/server/status', headers={'Authorization':'Bearer ${TOKEN}'}); assert json.load(urllib.request.urlopen(request, timeout=3))['uptime_seconds'] >= 10" \
         >/dev/null 2>&1; then
@@ -185,7 +185,7 @@ sleep 1
 docker exec "${CONTAINER}" python -c \
     "import json,urllib.request; base='http://127.0.0.1:8765'; common={'Authorization':'Bearer ${TOKEN}','Content-Type':'application/json'}; payload=json.dumps({'settings':{'interval_seconds':900}}).encode(); request=urllib.request.Request(base+'/v2/admin/settings', data=payload, headers=common, method='PUT'); assert json.load(urllib.request.urlopen(request, timeout=3))['settings']['interval_seconds']==900; request=urllib.request.Request(base+'/v2/admin/server/restart', data=b'{}', headers=common, method='POST'); assert json.load(urllib.request.urlopen(request, timeout=3))['restart'] is True"
 
-for attempt in $(seq 1 60); do
+for _attempt in $(seq 1 60); do
     RESTART_COUNT_AFTER="$(docker inspect --format '{{.RestartCount}}' "${CONTAINER}" 2>/dev/null || true)"
     RUNNING_AFTER="$(docker inspect --format '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || true)"
     if [[ "${RESTART_COUNT_AFTER:-0}" -gt "${RESTART_COUNT_BEFORE}" && "${RUNNING_AFTER}" == "true" ]]; then
@@ -196,7 +196,7 @@ done
 test "${RESTART_COUNT_AFTER:-0}" -gt "${RESTART_COUNT_BEFORE}"
 wait_until_ready
 
-for attempt in $(seq 1 20); do
+for _attempt in $(seq 1 20); do
     if grep -Eq '"exitCode"[[:space:]]*:[[:space:]]*"75"' "${EVENT_LOG}"; then
         break
     fi

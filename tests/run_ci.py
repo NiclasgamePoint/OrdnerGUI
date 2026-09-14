@@ -80,13 +80,16 @@ def run_module(
             test_root = Path(directory).resolve()
             environment = _module_environment(test_root, project_root)
             try:
-                return subprocess.run(
+                result = subprocess.run(
                     command,
                     cwd=project_root,
                     check=False,
                     env=environment,
                     timeout=timeout_seconds,
                 ).returncode
+                if result:
+                    print(f"FAILED PROCESS: {module} exited with {result}", file=sys.stderr, flush=True)
+                return result
             except subprocess.TimeoutExpired:
                 print(
                     f"TIMEOUT: Test module '{module}' exceeded "

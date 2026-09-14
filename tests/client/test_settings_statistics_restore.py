@@ -3,8 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import pytest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QLabel
 
 from papagui_client.application.paths import SourceMapping
 from papagui_client.config import ClientSettings
@@ -12,11 +11,6 @@ from papagui_client.gui import main as main_module
 from papagui_client.gui.legacy_models import ApplicationStatistics
 from papagui_client.gui.main import ClientMainWindow
 from papagui_client.gui.settings import ClientSettingsDialog
-
-
-@pytest.fixture(scope="module")
-def application():
-    return QApplication.instance() or QApplication([])
 
 
 def _settings(tmp_path) -> ClientSettings:
@@ -28,7 +22,7 @@ def _settings(tmp_path) -> ClientSettings:
 
 
 def test_statistics_page_restores_live_values_and_keeps_config_card(
-    application,
+    qtbot,
     tmp_path,
 ):
     statistics = ApplicationStatistics(
@@ -40,6 +34,7 @@ def test_statistics_page_restores_live_values_and_keeps_config_card(
         total_file_size=2_048,
     )
     dialog = ClientSettingsDialog(_settings(tmp_path), statistics=statistics)
+    qtbot.addWidget(dialog)
 
     values = dialog.statistics_page.statistics_widget._value_labels
     assert values["customer_count"].text() == "12"
@@ -58,8 +53,9 @@ def test_statistics_page_restores_live_values_and_keeps_config_card(
     dialog.close()
 
 
-def test_index_server_button_emits_navigation_only(application, tmp_path):
+def test_index_server_button_emits_navigation_only(qtbot, tmp_path):
     dialog = ClientSettingsDialog(_settings(tmp_path))
+    qtbot.addWidget(dialog)
     requested = []
     dialog.indexServerRequested.connect(lambda: requested.append(True))
 
