@@ -18,20 +18,24 @@ Status der Downloads für 0.5.0 vor Absenden unter GitHub Releases prüfen.
 | Projektlizenz | GPL-3.0-or-later; Paketversionen 0.5.0 konsistent |
 | Windows-Metadaten | Client, Tray und Setup lokal mit Produktname PapaGUI und Version 0.5.0 gebaut/geprüft |
 | Paket-Lizenzsammlung | 12 erfasste Python-/Buildpakete, 17 Lizenzdateien; LICENCE-Schreibweise korrigiert |
-| Lokale Prüfungen | 32 Packaging-/Release-Tests; beide nativen Programme bestehen isolierte Startprüfungen |
-| Letzter erfolgreicher GitHub-Windowsbuild | https://github.com/NiclasgamePoint/OrdnerGUI/actions/runs/34851855818 |
+| Lokale Prüfungen | 1.244 Tests, 94 % Coverage; Installation, Upgrade und Deinstallation unter Windows geprüft |
+| Geprüfter Anwendungsstand | Tag `0.5.0`, Commit `4df73ba`; Quality, native Installer und Serverbuild erfolgreich |
+| GitHub-Installerbuild für 0.5.0 | https://github.com/NiclasgamePoint/OrdnerGUI/actions/runs/34865795525 |
+| Veröffentlichung und aktuelle Downloadprüfung | https://github.com/NiclasgamePoint/OrdnerGUI/actions/runs/34867004631 |
 
-Der GitHub-Lauf gehört zum früheren `c7b5b8d` (nach Historienbereinigung
-inhaltsgleich `6dd44af`), nicht zu den neuen lokalen Änderungen.
-Die neuen Metadaten, Lizenzkorrektur und Beta-Pipeline brauchen vor Verteilung
-einen vollständigen Lauf ihres eigenen Commits auf GitHub. Der lokale
-Testinstaller ist bewusst unsigniert und kein freigegebener Download.
+Die Nachweise beziehen sich auf den tatsächlich getaggten Anwendungsstand 0.5.0.
+Windows- und Linux-Installer bestehen auch im Releaseworkflow; Windows benötigte
+wegen eines PowerShell-Timeouts einen gezielten Wiederholungslauf. Das veröffentlichte
+Serverimage ist für AMD64 und ARM64 anonym abrufbar. Beide Debian-Quellenexporte
+erfassen jeweils 183 installierte Pakete. Vor dem Absenden im oben verlinkten
+Releaseworkflow und auf der Downloadseite prüfen, dass die Veröffentlichung
+vollständig abgeschlossen ist. Die Installer sind ausdrücklich unsigniert.
 
-Nach der Historienbereinigung sind Quality und Serverimage für `6dd44af` grün.
-Im Clientlauf `34859714410` waren Linux und beide macOS-Ziele erfolgreich;
-Windows scheiterte beim ACL-Test an einem 15-Sekunden-PowerShell-Timeout.
-Die 45 Update-Tests bestehen lokal. Der fehlgeschlagene Windowsjob wurde
-erneut gestartet und besteht in Versuch 2. Für 0.5.0 ist ein eigener Lauf erforderlich.
+Die Veröffentlichungskorrektur auf `main` schließt zusätzliche `.dockerbuild`-
+Diagnoseartefakte aus dem normalen ZIP-Download aus. Der bereits veröffentlichte
+Tag und seine Programmdateien bleiben diesem ursprünglichen Anwendungsstand
+zugeordnet. Frühere Prüfschritte sind im
+[Vorbereitungsprotokoll](development/signpath-preparation.md) dokumentiert.
 
 ## Vor dem Absenden noch klären
 

@@ -68,6 +68,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+          pattern: '!*.dockerbuild'
       - name: Upload installers, packages and final update manifest
         if: github.event.release.prerelease == false
         env:
