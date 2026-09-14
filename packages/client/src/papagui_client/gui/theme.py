@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QPalette
 
 from papagui_client.gui.legacy_models import ui_settings
+from papagui_client.gui.icons import ICON_DIRECTORY
 
 FONT_FAMILY_FALLBACKS = (
     "'Segoe UI', 'SF Pro Text', 'Noto Sans', 'Ubuntu', sans-serif"
@@ -117,6 +119,41 @@ class ThemeManager:
             app.setStyleSheet(stylesheet)
 
 
+class ThemeSynchronizer:
+    """Follow saved appearance across processes on the application's GUI thread.
+
+    Poll QSettings because its native backend can be the Windows registry, not
+    a watchable file. Only changed appearance values trigger widget restyling.
+    """
+
+    def __init__(self, application):
+        self._application = application
+        self._manager = ThemeManager()
+        self._applied: AppearanceSettings | None = None
+        self._timer = QTimer(application)
+        self._timer.setInterval(250)
+        self._timer.timeout.connect(self.refresh)
+
+    def start(self) -> None:
+        self.refresh()
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def refresh(self) -> None:
+        # Import writes from other processes before reading cached Qt settings.
+        self._manager.settings.sync()
+        self._manager.load()
+        appearance = AppearanceSettings(
+            self._manager.mode, self._manager.accent,
+            self._manager.contrast, self._manager.font_size,
+        )
+        if appearance != self._applied:
+            self._manager.apply(self._application)
+            self._applied = appearance
+
+
 def _bounded_int(value, fallback: int, minimum: int, maximum: int) -> int:
     try:
         number = int(value)
@@ -222,6 +259,18 @@ def build_stylesheet(
         _apply_contrast(color, contrast)
         for color in (bg, surface, card, text, muted, border, item_hover, item_selected, line, chip)
     )
+    arrow = (
+        ICON_DIRECTORY / f"chevron-down-{'dark' if mode == 'dark' else 'light'}.svg"
+    ).as_posix()
+    channels = QColor(accent).getRgbF()[:3]
+    linear = [
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    ]
+    luminance = sum(
+        value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722))
+    )
+    popup_selected_text = "#000000" if luminance > 0.179 else "#ffffff"
     def scaled(size: int) -> int:
         return max(ThemeManager.MIN_FONT_SIZE, round(
             size * font_size / ThemeManager.DEFAULT_FONT_SIZE
@@ -511,34 +560,50 @@ def build_stylesheet(
         color: {text};
     }}
 
+    QComboBox {{
+        padding-right: 32px;
+    }}
+
     QComboBox::drop-down {{
         border: none;
-        width: 20px;
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+        width: 28px;
     }}
 
     QComboBox::down-arrow {{
-        image: none;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-top: 6px solid {muted};
-        margin-right: 6px;
+        image: url("{arrow}");
+        width: 16px;
+        height: 16px;
+        border: none;
     }}
 
     QComboBox QAbstractItemView {{
-        background-color: {surface};
+        background-color: {card};
         color: {text};
         border: 1px solid {border};
         border-radius: 8px;
-        selection-background-color: {item_selected};
-        selection-color: #ffffff;
+        selection-background-color: {accent};
+        selection-color: {popup_selected_text};
+        show-decoration-selected: 1;
         outline: 0;
         padding: 5px;
     }}
 
     QComboBox QAbstractItemView::item {{
         min-height: 28px;
-        padding: 3px 8px;
+        padding: 5px 10px;
         border-radius: 6px;
+    }}
+
+    QComboBox QAbstractItemView::item:hover {{
+        background-color: {item_hover};
+        color: {text};
+    }}
+
+    QComboBox QAbstractItemView::item:selected {{
+        background-color: {accent};
+        color: {popup_selected_text};
     }}
 
     QComboBox:disabled {{

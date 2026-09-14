@@ -1,7 +1,7 @@
 """Settings controls whose values can only be wheeled after a deliberate click."""
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtWidgets import QApplication, QComboBox, QSlider, QSpinBox
+from PySide6.QtWidgets import QApplication, QComboBox, QListView, QSlider, QSpinBox, QStyledItemDelegate
 
 
 class _ClickActivatedWheel:
@@ -59,6 +59,14 @@ class ClickActivatedSpinBox(_ClickActivatedWheel, QSpinBox):
 
 class ClickActivatedComboBox(_ClickActivatedWheel, QComboBox):
     """A selection input protected against accidental changes while scrolling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Native menu delegates can draw white selected text without the QSS
+        # background. Use the same styled rows on every desktop platform.
+        view = QListView(self)
+        view.setItemDelegate(QStyledItemDelegate(view))
+        self.setView(view)
 
     def hidePopup(self):
         restore_focus = self._wheel_adjustment_enabled and self.view().isVisible()

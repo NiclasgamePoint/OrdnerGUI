@@ -719,6 +719,9 @@ def test_run_tray_gui_second_instance_and_primary(application, monkeypatch):
     monkeypatch.setattr(tray, "QApplication", Application)
     create_controller = Mock(return_value=controller)
     monkeypatch.setattr(tray, "TrayController", create_controller)
+    theme_sync = Mock()
+    create_theme_sync = Mock(return_value=theme_sync)
+    monkeypatch.setattr(tray, "ThemeSynchronizer", create_theme_sync)
 
     requests = []
     instance = SimpleNamespace(
@@ -729,6 +732,7 @@ def test_run_tray_gui_second_instance_and_primary(application, monkeypatch):
     assert tray.run_tray_gui(object(), ["--background"]) == 0
     assert requests == [False]
     create_controller.assert_not_called()
+    create_theme_sync.assert_not_called()
     instance.claim = (
         lambda _show, *, request_show=True: requests.append(request_show) or True
     )
@@ -736,4 +740,7 @@ def test_run_tray_gui_second_instance_and_primary(application, monkeypatch):
     assert requests[-1] is True
     assert app._papagui_tray[0] is controller
     create_controller.assert_called_once()
+    create_theme_sync.assert_called_once_with(app)
+    theme_sync.start.assert_called_once()
+    theme_sync.stop.assert_called_once()
     instance.close.assert_called_once()

@@ -68,6 +68,7 @@ def test_save_button_keeps_event_loop_live_and_persists_appearance_in_worker(
     window, repository = save_window
     dialog = ClientSettingsDialog(window._container.settings, parent=window)
     dialog.connection_page.server_url.setText("https://updated.test")
+    dialog.sync_page.theme.setCurrentIndex(dialog.sync_page.theme.findData("dark"))
     dialog.font_size_slider.setValue(17)
     monkeypatch.setattr(main_module, "ClientSettingsDialog", lambda *args, **kwargs: dialog)
     theme_threads = []
@@ -107,6 +108,8 @@ def test_save_button_keeps_event_loop_live_and_persists_appearance_in_worker(
     assert window.header.settings_button.isEnabled()
     assert theme_threads and all(thread != qapp.thread() for thread in theme_threads)
     assert ThemeManager().font_size == 17
+    assert ThemeManager().mode == "dark"
+    assert qapp.palette().window().color().lightness() < 128
     heartbeat.stop()
 
 

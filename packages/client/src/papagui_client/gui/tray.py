@@ -48,7 +48,7 @@ from .icons import application_icon, set_process_identity
 from .recognition_admin import RecognitionAdminWidget
 from .recognition_review import RecognitionReviewDialog
 from .tasks import BackgroundTask
-from .theme import ThemeManager, build_stylesheet
+from .theme import ThemeManager, ThemeSynchronizer, build_stylesheet
 from .widgets.click_activated_inputs import ClickActivatedComboBox, ClickActivatedSpinBox
 
 
@@ -1201,7 +1201,9 @@ def run_tray_gui(container: ClientContainer, argv: list[str] | None = None) -> i
 
     if not instance.claim(show_existing, request_show=not options.background):
         return 0
+    theme_sync = ThemeSynchronizer(application)
     try:
+        theme_sync.start()
         controller = TrayController(application, container, show=False)
         from papagui_client.updates.runtime import signal_ready
 
@@ -1211,4 +1213,5 @@ def run_tray_gui(container: ClientContainer, argv: list[str] | None = None) -> i
         application._papagui_tray = (controller, instance)  # type: ignore[attr-defined]
         return application.exec()
     finally:
+        theme_sync.stop()
         instance.close()
