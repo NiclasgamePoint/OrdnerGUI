@@ -20,7 +20,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages/client/src"))
 
-from papagui_client.updates.feed import ReleaseFeed, UpdateError, version
+from papagui_client.updates.feed import COMPATIBILITY_FLOOR, ReleaseFeed, UpdateError, version
 from papagui_client.updates.storage import FileLock, atomic_json, private_directory, snapshot, preserve_ownership
 
 
@@ -197,6 +197,8 @@ class ServerUpdater:
                 return False
             current = self.container()
             current_version = current["Config"].get("Labels", {}).get("org.opencontainers.image.version", "")
+            if version(current_version) < version(COMPATIBILITY_FLOOR):
+                raise UpdateError("A manual server upgrade to the tested compatibility baseline is required")
             if version(release.version) <= version(current_version):
                 return False
             if not current["State"]["Running"]:

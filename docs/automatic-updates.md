@@ -64,6 +64,9 @@ Prozess auf dem Docker-Host verwendet Compose. Voraussetzungen: Docker Compose v
 Python 3.11+ bei direktem Hostbetrieb und genau ein bestehender Servercontainer mit
 Bind-Mounts für `/data`, `/config` sowie einem schreibgeschützten `/source`.
 Benannte Volumes und mehrere Replikate werden nicht automatisch migriert.
+Der bestehende Server muss mindestens auf dem geprüften Ausgangsstand 0.4.3
+stehen. Ältere Installationen werden vor dem ersten automatischen Update einmalig
+mit Sicherung und Abnahme aktualisiert; der Updater hält sie nicht eigenständig an.
 
 Die tatsächlichen absoluten Pfade und der bestehende Compose-Projektname müssen in
 `deploy/updater/updater.example.json` angepasst werden. Ein fremdes Deployment darf

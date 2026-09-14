@@ -57,6 +57,17 @@ def test_success_keeps_backup_and_releases_traffic_only_after_health(tmp_path, m
     assert saved.read_text() == "original customer"
 
 
+def test_server_older_than_tested_baseline_is_not_stopped(tmp_path, monkeypatch):
+    updater, events = updater_fixture(tmp_path, monkeypatch)
+    current = updater.container()
+    current["Config"]["Labels"]["org.opencontainers.image.version"] = "0.4.2"
+    monkeypatch.setattr(updater, "container", lambda: current)
+    with pytest.raises(UpdateError, match="manual server upgrade"):
+        updater.tick()
+    assert not events
+    assert not updater.journal.exists()
+
+
 def test_failed_candidate_restores_both_volumes_and_old_image(tmp_path, monkeypatch):
     updater, events = updater_fixture(tmp_path, monkeypatch, broken=True)
     with pytest.raises(UpdateError):
