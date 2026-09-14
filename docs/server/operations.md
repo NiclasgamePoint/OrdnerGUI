@@ -307,6 +307,34 @@ das Fehlen nicht als Massendeletion interpretieren.
 
 ## Diagnose
 
+Die Telefonnummernerkennung kombiniert die lokale Rufnummernplanprüfung von
+`phonenumbers` mit einer konservativen Formatprüfung: nationale Vorwahl mit `0`
+oder internationale Vorwahl mit `+`/`00`, Leerzeichen, Schrägstrich, Klammern und
+Bindestriche. Kompakte Inlandsnummern ohne Trennzeichen benötigen ein Telefon- oder
+Mobil-Label. Punkte und Dezimalkommas innerhalb von Zahlen sowie daraus abgetrennte
+Teiltreffer werden verworfen, auch bei Wiederholung. Benannte Durchwahlen wie
+`ext. 42` bleiben erlaubt. Die Prüfung bestätigt keine Erreichbarkeit oder Zuordnung
+zu einer Person; dafür gelten weiterhin die Belege und die manuelle Bestätigung.
+
+Beim ersten Zugriff auf die Vorschlagsablage nach diesem Serverupdate werden alte
+offene Vorschläge mit unzulässigen Zahlenformaten einmalig als ungültig ausgeblendet.
+Ihre Belege bleiben als inaktive Historie erhalten. Bestätigte Kundendaten und
+bereits getroffene Entscheidungen bleiben unverändert. **Neu bewerten** wendet
+die neuen Kontextregeln auf vorhandene Dokumentauszüge an; **Neu auslesen** ist
+für diese Korrektur nicht erforderlich.
+
+Die Kundendatenerkennung verwendet Excel-Dateien nicht als Beleg für Telefonnummern,
+auch bei Telefon-/Mobil-Spalten oder benannten Ansprechpartnern. Das gilt für XLS,
+XLSX und die weiteren Excel-Arbeitsmappen-/Vorlagenendungen, einschließlich älterer
+Textextraktionen ohne Zellinformationen. E-Mail-Adressen und andere Angaben werden
+weiter ausgewertet; die Dokument-Volltextsuche bleibt vollständig.
+
+Nach dem Serverupdate **Neu bewerten** beim betroffenen Kunden
+ausführen. Alte Excel-Telefonbelege dieses Kunden entfallen auch dann, wenn die
+jeweilige Arbeitsmappe außerhalb des Dokumentbudgets der erneuten Prüfung liegt.
+Offene Vorschläge ohne verbleibenden Beleg werden als veraltet ausgeblendet;
+unabhängige Belege aus anderen Dokumenten und bereits bestätigte Werte bleiben erhalten.
+
 - `GET /health`: Prozess erreichbar
 - `GET /v2/system/info`: Versionen und Fähigkeiten
 - `GET /v2/server/status`: Laufphase, Fortschritt, Fehler und `document_workers`

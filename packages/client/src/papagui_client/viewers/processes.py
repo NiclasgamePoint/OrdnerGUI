@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from typing import Mapping, Sequence
 
@@ -20,11 +21,15 @@ class PollingCommandRunner:
     ) -> subprocess.CompletedProcess[str]:
         process = subprocess.Popen(
             list(command),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             errors="replace",
             env=dict(environment) if environment is not None else None,
+            # A windowed Qt parent otherwise opens a console for each helper,
+            # including both the Office capability probe and the PDF export.
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         deadline = time.monotonic() + timeout
         while True:

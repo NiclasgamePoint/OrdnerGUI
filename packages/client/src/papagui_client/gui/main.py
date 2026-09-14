@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QStackedWidget,
-    QStyle,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -37,13 +36,14 @@ from papagui_client.application.models import (
 from .customer_detail import CustomerDetailWidget, JournalEditorDialog
 from .customer_editor import CustomerEditorDialog
 from .dialogs import OnboardingDialog
+from .icons import application_icon, set_process_identity
 from .legacy_models import ApplicationStatistics, SearchPreferences, SearchSort
 from .launcher import TrayProcessLauncher
 from .navigation import NavigationController
 from .pages import FolderPage, SearchPage
 from .settings import ClientSettingsDialog, theme_stylesheet
 from .tasks import BackgroundTask
-from .theme import ThemeManager, build_stylesheet
+from .theme import AppearanceSettings, ThemeManager, build_stylesheet, save_appearance
 from .timers import QtTimerAdapter
 from .widgets import AppHeader, IndexStatusBar, SearchFilterPopup
 
@@ -94,6 +94,9 @@ class ClientMainWindow(QMainWindow):
         self._tasks: set[BackgroundTask] = set()
         self._customer_views = []
         self._syncing = False
+        self._settings_saving = False
+        self._saved_configuration = None
+        self._settings_onboarding = False
         self._closing = False
         self._customer_detail_request_id = 0
         self._suggestion_write_busy = False
@@ -106,6 +109,7 @@ class ClientMainWindow(QMainWindow):
         self._application_statistics = ApplicationStatistics()
         self.tray_icon: QSystemTrayIcon | None = None
         self.setWindowTitle("PapaGUI - Kundenmanagement System")
+        self.setWindowIcon(application_icon("client"))
         self.setGeometry(100, 100, 1400, 900)
         self.setMinimumSize(920, 640)
         self.navigator = NavigationController("search", self)
@@ -293,6 +297,8 @@ class ClientMainWindow(QMainWindow):
         except Exception:
             projects = ()
             folders = ()
+        # Folder totals include descendants; count only roots for the overview.
+        root_folders = [hit for hit in folders if hit.folder.parent_id is None]
         statistics = ApplicationStatistics(
             customer_count=len(customers),
             contact_count=sum(len(customer.contacts) for customer in customers),
@@ -305,8 +311,8 @@ class ClientMainWindow(QMainWindow):
                     if service
                 }
             ),
-            file_count=sum(hit.folder.file_count for hit in folders),
-            total_file_size=sum(hit.folder.total_size for hit in folders),
+            file_count=sum(hit.folder.file_count for hit in root_folders),
+            total_file_size=sum(hit.folder.total_size for hit in root_folders),
         )
         self._application_statistics = statistics
         self.search_page.set_statistics(statistics)
@@ -393,7 +399,7 @@ class ClientMainWindow(QMainWindow):
                 self._folder_routes[route] = route
                 metadata = record.metadata or {}
                 folder = metadata.get("folder")
-                file_count = getattr(folder, "file_count", 0)
+                file_count = metadata.get("file_count", getattr(folder, "file_count", None))
                 folder_rows.append(
                     {
                         "folder_name": record.title,
@@ -664,7 +670,7 @@ class ClientMainWindow(QMainWindow):
         close_action.triggered.connect(self.close)
         menu.addAction(close_action)
         self.tray_icon = QSystemTrayIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon), self
+            self.windowIcon(), self
         )
         self.tray_icon.setContextMenu(menu)
         self.tray_icon.activated.connect(self._on_tray_activated)
@@ -695,6 +701,8 @@ class ClientMainWindow(QMainWindow):
             self.tray_icon.setToolTip(f"PapaGUI\n{self.status_bar.status_label.text()}")
 
     def open_settings(self, _checked: bool = False, *, onboarding: bool = False) -> None:
+        if self._settings_saving or self._closing:
+            return
         if onboarding:
             self.open_onboarding()
             return
@@ -709,10 +717,12 @@ class ClientMainWindow(QMainWindow):
             index_server_requested.connect(self._show_index_tray)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
-        self._save_client_settings(dialog.settings())
+        self._save_client_settings(dialog.settings(), appearance=dialog.appearance_settings())
 
     def open_onboarding(self) -> None:
         """Collect only the client-side values required for first use."""
+        if self._settings_saving or self._closing:
+            return
         dialog = OnboardingDialog(
             self._container.settings,
             sources=getattr(self._container, "config_sources", {}),
@@ -725,25 +735,74 @@ class ClientMainWindow(QMainWindow):
             return
         self._save_client_settings(dialog.settings(), onboarding=True)
 
-    def _save_client_settings(self, settings, *, onboarding: bool = False) -> None:
-        try:
-            effective = self._container.save_client_settings(settings)
-        except Exception as exc:
-            QMessageBox.warning(self, "Einstellungen nicht gespeichert", str(exc))
+    def _save_client_settings(
+        self, settings, *, onboarding: bool = False, appearance: AppearanceSettings | None = None
+    ) -> None:
+        if self._settings_saving or self._closing:
             return
-        application = QApplication.instance()
-        if application is not None:
-            apply_application_theme(application, effective.theme)
-        self._refresh_connection_labels()
-        self._refresh_search_metadata()
+        self._settings_saving = True
+        self._settings_onboarding = onboarding
+        self.header.settings_button.setEnabled(False)
+        self.status_bar.set_text("Einstellungen werden gespeichert …")
+
+        def persist():
+            resolved = self._container.persist_client_settings(settings)
+            if appearance is not None:
+                save_appearance(appearance)
+            return resolved
+
+        task = BackgroundTask(persist)
+        task.signals.succeeded.connect(self._client_settings_persisted)
+        task.signals.failed.connect(self._client_settings_save_failed)
+        self._start_task(task)
+
+    def _client_settings_persisted(self, resolved) -> None:
+        self._saved_configuration = resolved
+        self._apply_saved_client_settings()
+
+    def _apply_saved_client_settings(self) -> None:
+        if self._saved_configuration is None or self._closing:
+            return
+        if self._syncing:
+            self.status_bar.set_text(
+                "Einstellungen gespeichert · Übernahme nach dem laufenden Abgleich …"
+            )
+            return
+        resolved = self._saved_configuration
+        self._saved_configuration = None
+        try:
+            effective = self._container.apply_client_settings(resolved)
+            application = QApplication.instance()
+            if application is not None:
+                apply_application_theme(application, effective.theme)
+            self._refresh_connection_labels()
+        except Exception as exc:
+            self._client_settings_save_failed(str(exc))
+            return
+        # Preferences do not change the active catalog or its statistics. Avoid
+        # running those database queries (and clearing search filters) on save.
+        self._settings_saving = False
+        self.header.settings_button.setEnabled(True)
         self.status_bar.set_text(
             "Einrichtung abgeschlossen"
-            if onboarding
+            if self._settings_onboarding
             else "Client-Einstellungen gespeichert"
         )
 
+    def _client_settings_save_failed(self, error: str) -> None:
+        self._saved_configuration = None
+        self._settings_saving = False
+        self.header.settings_button.setEnabled(True)
+        self.status_bar.set_text("Einstellungen konnten nicht übernommen werden")
+        QMessageBox.warning(self, "Einstellungen nicht gespeichert", error)
+
     def synchronize(self) -> None:
         if self._syncing or self._closing:
+            return
+        if self._settings_saving:
+            # Preserve periodic and first-generation retries while settings I/O
+            # is pending, without starting a request against the old connection.
+            self._initial_index_timer.start(1_000)
             return
         self._syncing = True
         self.status_bar.set_text("Synchronisierung läuft …")
@@ -777,6 +836,7 @@ class ClientMainWindow(QMainWindow):
     def _sync_finished(self) -> None:
         self._syncing = False
         self.status_bar.set_busy(False)
+        self._apply_saved_client_settings()
 
     def _sync_failed(self, error: str) -> None:
         self._initial_index_timer.stop()
@@ -1379,6 +1439,10 @@ class ClientMainWindow(QMainWindow):
         self._tasks = {task for task in self._tasks if task.signals is not sender}
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._settings_saving:
+            self.status_bar.set_text("Einstellungen werden noch gespeichert · bitte kurz warten …")
+            event.ignore()
+            return
         self._closing = True
         self._initial_index_timer.stop()
         self._recognition_poll.stop()
@@ -1436,8 +1500,10 @@ def apply_application_theme(application, selected_theme) -> None:
 
 
 def run_main_gui(container: ClientContainer, *, automatic_sync: bool = True) -> int:
+    set_process_identity("client")
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("PapaGUI Client")
+    application.setWindowIcon(application_icon("client"))
     apply_application_theme(application, container.settings.theme)
     try:
         TrayProcessLauncher().start()

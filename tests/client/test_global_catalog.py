@@ -197,6 +197,69 @@ def test_global_search_all_entities_facets_sorting_pagination_and_history(tmp_pa
     assert payload == {"schema_version": 1, "entries": []}
 
 
+def _add_file(connection, key, path, *, source="archive", folder=2, project=7):
+    connection.execute(
+        "INSERT INTO files SELECT ?,?, ?,?,?,?,file_type,30,'2026-08-01',year,"
+        "customer_name,project_name,domain_folder,time_bucket,?,?,? FROM files WHERE id=1",
+        (key, path, f"doc-{key}", source, path, path.rsplit("/", 1)[-1],
+         path.rsplit("/", 1)[0], folder, project),
+    )
+
+
+def test_project_search_counts_nested_files_and_empty_projects(tmp_path):
+    service, catalog, _customers, _history = _service(tmp_path)
+    with sqlite3.connect(catalog) as connection:
+        _add_file(connection, 3, "Heizung/2026/Muster/Angebote/Nachtrag.pdf")
+        # Source IDs must delimit totals even if a foreign project ID is reused.
+        _add_file(connection, 4, "Heizung/2026/Muster/fremd.pdf", source="other")
+        connection.execute("DELETE FROM files WHERE project_root_id=8")
+    before = _digest(catalog)
+
+    page = service.global_search(GlobalSearchQuery(kinds=(GlobalSearchKind.PROJECT,)))
+    counts = {hit.record.title: hit.record.metadata["file_count"] for hit in page.items}
+    assert counts == {"Muster GmbH": 2, "Andere AG": 0}
+    filtered = service.global_search(GlobalSearchQuery(
+        text="Muster", source_id="archive", year="2026", kinds=(GlobalSearchKind.PROJECT,),
+    ))
+    assert filtered.total == 1
+    assert filtered.items[0].record.metadata["file_count"] == 2
+    assert before == _digest(catalog)
+
+
+def test_older_catalog_without_project_file_links_reports_unknown_count(tmp_path):
+    service, catalog, _customers, _history = _service(tmp_path)
+    with sqlite3.connect(catalog) as connection:
+        connection.execute("ALTER TABLE files DROP COLUMN project_root_id")
+    page = service.global_search(GlobalSearchQuery(kinds=(GlobalSearchKind.PROJECT,)))
+    assert page.items
+    assert all(hit.record.metadata["file_count"] is None for hit in page.items)
+
+
+@pytest.mark.parametrize("name", ["Muster", "Muster_%", "Müller+Söhne"])
+def test_folder_totals_include_descendants_but_exclude_neighbours_and_other_sources(
+    tmp_path, name,
+):
+    service, catalog, _customers, _history = _service(tmp_path)
+    root = f"Heizung/2026/{name}"
+    with sqlite3.connect(catalog) as connection:
+        for table in ("folders", "files"):
+            connection.execute(f"UPDATE {table} SET relative_path=REPLACE(relative_path, 'Muster', ?)", (name,))
+        _add_file(connection, 3, f"{root}/Angebote/Nachtrag.pdf")
+        _add_file(connection, 4, f"{root}/Angebote/Pläne/Plan.pdf")
+        _add_file(connection, 5, f"{root} Alt/Nachbar.pdf", folder=9)
+        _add_file(connection, 6, f"{root}/fremd.pdf", source="other")
+        _add_file(connection, 7, "Heizung/2026/MusterX123/falsch.pdf", folder=9)
+    before = _digest(catalog)
+
+    details = service.folder("archive", root)
+    assert details.folder.folder.file_count == 3
+    assert details.folder.folder.total_size == 180
+    assert details.folder.folder.last_modified == "2026-08-01"
+    assert details.children[0].folder.file_count == 2
+    assert len(details.documents) == 1  # The detail list still shows direct files.
+    assert _digest(catalog) == before
+
+
 def test_global_query_and_history_edge_validation(tmp_path):
     with pytest.raises(ValueError):
         GlobalSearchQuery(limit=0)

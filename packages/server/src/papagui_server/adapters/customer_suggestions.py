@@ -14,6 +14,7 @@ from papagui_server.adapters.candidate_migration import (
 from papagui_server.adapters.candidate_schema import record_provenance
 from papagui_server.adapters.candidate_validation import revalidate_pending_candidates, valid_suggestion
 from papagui_server.adapters.recognition_blocklist import SqliteRecognitionBlocklistRepository
+from papagui_server.domain.customer_recognition import allows_phone_source
 from papagui_server.domain.errors import (
     CustomerConflictError, ResourceNotFoundError, SuggestionOverwriteError,
 )
@@ -101,6 +102,17 @@ class SqliteCustomerSuggestionRepository:
             candidate_id = cursor.lastrowid
         else:
             candidate_id = int(alias[0])
+            # A newly valid spelling can share the old rejected syntax's digit
+            # key. Reactivate it with the valid display value, preserving IDs
+            # and historical decisions; confirmed values are never rewritten.
+            contact = payload if suggestion_type == "contact" else {}
+            self._connection.execute(
+                "UPDATE customer_document_suggestions SET value=?,payload_json=?,"
+                "contact_name=?,contact_role=?,contact_email=?,contact_phone=? "
+                "WHERE id=? AND status='pending' AND lifecycle='invalid'",
+                (value, json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                 *(contact.get(field, "") for field in ("name", "role", "email", "phone")), candidate_id),
+            )
             if resolved_party:
                 self._connection.execute(
                     "UPDATE customer_document_suggestions SET party_key=? WHERE id=?",
@@ -382,7 +394,8 @@ class SqliteCustomerSuggestionRepository:
 
     def finalize_run(self, customer_id, run_id, *, evaluated_sources, existing_sources=None):
         rows = self._connection.execute(
-            "SELECT e.id,e.candidate_id,e.source_path,e.last_seen_run FROM candidate_evidence e "
+            "SELECT e.id,e.candidate_id,e.source_path,e.last_seen_run,e.locator_json,"
+            "s.kind,s.suggestion_type,s.contact_phone,s.payload_json FROM candidate_evidence e "
             "JOIN customer_document_suggestions s ON s.id=e.candidate_id WHERE s.customer_id=?",
             (customer_id,),
         ).fetchall()
@@ -390,7 +403,16 @@ class SqliteCustomerSuggestionRepository:
         existing = set(existing_sources) if existing_sources is not None else None
         changed = set()
         for row in rows:
-            if (row["source_path"] in evaluated and row["last_seen_run"] != str(run_id)) or (
+            has_phone = row["kind"] == "phone" or (
+                (row["kind"] == "contact" or row["suggestion_type"] == "contact")
+                and bool(row["contact_phone"] or json.loads(row["payload_json"]).get("phone"))
+            )
+            # The source policy is definitive even when a bounded recheck did
+            # not revisit this workbook. Keep values and decisions as history.
+            excluded_phone = has_phone and not allows_phone_source(
+                row["source_path"], json.loads(row["locator_json"])
+            )
+            if excluded_phone or (row["source_path"] in evaluated and row["last_seen_run"] != str(run_id)) or (
                 existing is not None and row["source_path"] not in existing
             ):
                 self._connection.execute("UPDATE candidate_evidence SET active=0 WHERE id=?", (row["id"],))

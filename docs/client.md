@@ -1,5 +1,13 @@
 # Desktop-Client
 
+Client und Indextray verwenden das PapaGUI-Logo ohne Schrift: beim Client rot mit
+Lupe, beim Indexserver blau mit Serversymbol. Die Icons erscheinen in Fenstern,
+Dialogen, Taskleiste und Infobereich; native Builds enthalten sie auch als
+Datei- beziehungsweise App-Symbol. Nach einem Update beide Anwendungen über
+ihre Tray-Menüs vollständig beenden und neu starten. Falls Windows bei einer
+bereits angehefteten Verknüpfung noch das alte Symbol zeigt, diese lösen und
+die neue ausführbare Datei erneut anheften.
+
 Die serverweite Sperrliste und den vollständigen Neuaufbau findest du unter
 **Indexserver → Tab „Kundenerkennung“**. Beide Funktionen arbeiten auf dem
 Server. Eingaben bleiben beim Tabwechsel erhalten; Statusabfragen pausieren in
@@ -156,6 +164,12 @@ und neue Erkennungsaufträge benötigen die Serververbindung.
 
 ## Clientkonfiguration und Onboarding
 
+Beim Speichern bleibt die Oberfläche bedienbar. Datei- und Darstellungseinstellungen
+werden im Hintergrund geschrieben; bei einem laufenden Abgleich erfolgt die
+Übernahme der neuen Verbindung danach. Der Status unten zeigt den Fortschritt.
+Währenddessen sind weitere Speichervorgänge gesperrt und das Beenden wartet auf
+den Abschluss. Ein Speicherfehler wird angezeigt und lässt sich erneut versuchen.
+
 `client-config.json` speichert Server-URL, Client-API-Token, plattformspezifische
 `source_id`-Zuordnungen, das lokale Synchronisationsintervall und das Theme. Der
 Client schreibt die Datei atomar.
@@ -178,17 +192,24 @@ Docker-Dienst. Das Öffnen des Indexserver-Fensters startet ausschließlich den
 Tray-Prozess.
 
 Der Entwicklungsstarter [`start.ps1`](../start.ps1) verwendet unter Windows
-Python aus `.venv` oder `venv`, setzt die Clientverbindung und startet Tray und
-Hauptclient. Er kann zusätzlich den getrennten Docker-Server starten;
+Python aus `.venv` oder `venv`. Beim ersten Start speichert er seine erzeugten
+Verbindungswerte in `client-config.json`; Server-URL, Token und Pfadzuordnungen
+lassen sich anschließend in den Einstellungen bearbeiten. Eine vorhandene
+Konfiguration bleibt erhalten. Explizit vor dem Start gesetzte Umgebungsvariablen
+behalten ihren Vorrang und werden weiterhin als gesperrte Felder angezeigt.
+Der Hauptclient startet den unabhängigen Tray. Für die lokale HTTP-Verbindung
+auf `localhost`, `127.0.0.1` oder `::1` am konfigurierten `PAPAGUI_API_PORT`
+(Standard: 8765) kann der Starter zusätzlich den getrennten Docker-Server starten;
 `PAPAGUI_SKIP_DOCKER=1` unterbindet diesen Schritt. Bei fehlendem Server bleibt
 der zuletzt synchronisierte lokale Stand nutzbar. Token werden per Python
 erzeugt, Secretdateien per numerischer Windows-Benutzer-SID abgesichert;
-ACL-Fehler erzeugen einen Warnhinweis.
+ACL-Fehler erzeugen einen Warnhinweis. Bei einer gespeicherten NAS-Verbindung
+entfallen der lokale Docker-Start und Änderungen an dessen Tokendatei.
 
 Die Startskripte und die Qt-Oberfläche sind mit synthetischen Tests abgesichert.
-Das ersetzt keine native End-to-End-Abnahme auf Windows, macOS und Linux;
-insbesondere wurde der korrigierte Windows-Start hier nicht auf einem nativen
-Windows-System abgenommen.
+Die Windows-Starttests führen PowerShell nativ aus und ersetzen Docker und GUI
+durch Testfunktionen. Das ersetzt keine vollständige Abnahme der installierten
+Anwendung auf Windows, macOS und Linux.
 
 ### Native macOS-Prozesse
 
@@ -214,6 +235,10 @@ automatisch das Onboarding. Speichern verdrahtet HTTP-Gateways und
 `SourcePathResolver` neu und plant einen bereits laufenden Sync-Timer sofort mit
 dem neuen Intervall. Zulässig sind 15 Minuten bis 48 Stunden. Ein Wechsel des
 Clientdatenordners erfordert bewusst einen Neustart.
+
+Nach einem Wechsel der Serververbindung einen bereits laufenden Indextray über
+sein Infobereich-Menü **Indextray beenden** schließen und erneut öffnen; dieser
+unabhängige Prozess liest seine Verbindung beim Start.
 
 Umgebungsvariablen haben Vorrang vor persistierten Werten. Die Oberfläche zeigt
 diese Herkunft durch gesperrte Eingaben mit Hinweistext, sodass ein scheinbar

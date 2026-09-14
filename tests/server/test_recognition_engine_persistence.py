@@ -46,6 +46,29 @@ def test_active_source_and_excerpt_always_refer_to_same_evidence(store):
     assert item["evidence_count"] == 1
 
 
+@pytest.mark.parametrize("kind", ["phone", "contact"])
+def test_bounded_recheck_retires_excel_phone_evidence_outside_document_budget(store, kind):
+    connection, repo = store
+    source = "source://synthetic/contacts.XLSX"
+    payload = {"name": "Mira Muster", "email": "mira@example.org", "phone": "030 12345678"}
+    repo.add(
+        1, kind=kind, value=json.dumps(payload) if kind == "contact" else "030 12345678",
+        payload=payload if kind == "contact" else None,
+        suggestion_type="contact" if kind == "contact" else "field",
+        source_path=source, excerpt="Synthetic Excel evidence", fingerprint="old-excel",
+        confidence=0, quality="strong", party_role="customer", run_id="old",
+    )
+    add(repo, source=source, kind="email", value="office@example.org")
+    add(repo, source="source://synthetic/letter.pdf", value="+44 20 7946 0958")
+    repo.finalize_run(1, "new", evaluated_sources=set())
+    pending = repo.list_for_customer(1, status="pending")
+    assert {(item["field_name"], item["value"]) for item in pending} == {
+        ("email", "office@example.org"), ("phone", "+44 20 7946 0958"),
+    }
+    assert customer(connection)["phone"] == ""
+    assert connection.execute("SELECT count(*) FROM candidate_decisions").fetchone()[0] == 0
+
+
 def test_rejection_survives_phone_format_copy_and_rename(store):
     connection, repo = store
     add(repo)

@@ -7,7 +7,6 @@ from collections.abc import Callable, Mapping
 from PySide6.QtCore import QItemSelectionModel, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QFormLayout,
     QFrame,
     QHeaderView,
@@ -27,6 +26,7 @@ from papagui_client.presentation.document_workers import document_worker_summary
 
 from .tasks import BackgroundTask
 from .widgets.buttons import AppButton
+from .widgets.click_activated_inputs import ClickActivatedComboBox
 
 
 BLOCKLIST_KINDS = (
@@ -133,7 +133,7 @@ class RecognitionAdminWidget(QWidget):
 
         fields = QFormLayout()
         fields.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-        self.kind_combo = QComboBox()
+        self.kind_combo = ClickActivatedComboBox()
         for kind, label in BLOCKLIST_KINDS:
             self.kind_combo.addItem(label, kind)
         self.value_input = QLineEdit()

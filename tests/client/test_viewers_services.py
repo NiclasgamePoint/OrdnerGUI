@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from unittest.mock import patch
@@ -196,3 +199,59 @@ def test_polling_command_runner_returns_output_and_supports_cancel():
             timeout=2,
             should_cancel=lambda: True,
         )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows console behaviour")
+@pytest.mark.parametrize("helper", ["python", "powershell"])
+def test_preview_helpers_have_no_console_when_started_by_windowed_python(tmp_path, helper):
+    """Use the GUI's pythonw parent and inspect the actual child's console handle."""
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not pythonw.is_file():
+        pytest.skip("pythonw is unavailable")
+    if helper == "python":
+        command = [sys.executable, "-c", (
+            "import ctypes,json,sys; "
+            "ctypes.windll.kernel32.GetConsoleWindow.restype=ctypes.c_void_p; "
+            "print(json.dumps({'console_window':ctypes.windll.kernel32.GetConsoleWindow() or 0,"
+            "'stdin':sys.stdin.read()})); sys.stderr.write('preview-stderr')"
+        )]
+    else:
+        powershell = shutil.which("powershell.exe")
+        if powershell is None:
+            pytest.skip("Windows PowerShell is unavailable")
+        command = [powershell, "-NoProfile", "-NonInteractive", "-Command", """
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices;
+public static class PreviewConsole {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+}';
+@{console_window = [PreviewConsole]::GetConsoleWindow().ToInt64();
+  stdin = [Console]::In.ReadToEnd()} | ConvertTo-Json -Compress;
+[Console]::Error.Write('preview-stderr');
+"""]
+    launch = tmp_path / "windowed preview.py"
+    launch.write_text(
+        "import json,sys\n"
+        "from pathlib import Path\n"
+        "from papagui_client.viewers.processes import PollingCommandRunner\n"
+        "result = PollingCommandRunner().run(sys.argv[2:], timeout=15)\n"
+        "Path(sys.argv[1]).write_text(json.dumps({'returncode':result.returncode,"
+        "'stdout':result.stdout,'stderr':result.stderr}), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "result.json"
+    root = Path(__file__).resolve().parents[2]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join((
+        str(root / "packages/client/src"), str(root / "packages/contracts/src"),
+        environment.get("PYTHONPATH", ""),
+    ))
+    result = subprocess.run(
+        [str(pythonw), str(launch), str(report), *command],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW, env=environment,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["returncode"] == 0, payload["stderr"]
+    assert json.loads(payload["stdout"]) == {"console_window": 0, "stdin": ""}
+    assert payload["stderr"] == "preview-stderr"

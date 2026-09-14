@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -390,6 +391,84 @@ exit 0
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="Windows PowerShell is unavailable")
+def test_windows_start_retains_nas_settings_and_clears_only_generated_overrides(tmp_path):
+    """Exercise complete startup twice; substitute only Docker and the GUI launch."""
+    shutil.copy(ROOT / "start.ps1", tmp_path / "start.ps1")
+    (tmp_path / "tools").mkdir()
+    shutil.copy(ROOT / "tools/prepare_client_start.py", tmp_path / "tools/prepare_client_start.py")
+    (tmp_path / "inspect_client.py").write_text(
+        "import os\n"
+        "from dataclasses import replace\n"
+        "from pathlib import Path\n"
+        "from papagui_client.adapters.json_config import JsonClientConfigRepository\n"
+        "root = Path(os.environ['PAPAGUI_CLIENT_DATA_ROOT'])\n"
+        "repo = JsonClientConfigRepository(root / 'client-config.json')\n"
+        "config = repo.resolve()\n"
+        "assert config.sources['server_url'] == 'persisted'\n"
+        "assert config.sources['api_token'] == 'persisted'\n"
+        "assert config.sources['source_mappings'] == 'persisted'\n"
+        "assert config.sources['theme'] == 'environment:PAPAGUI_CLIENT_THEME'\n"
+        "if not Path('first-start-ok').exists():\n"
+        "    assert config.settings.server_url == 'http://127.0.0.1:8765'\n"
+        "    token_file = Path(os.environ['PAPAGUI_SERVER_CONFIG_PATH']) / 'api-token'\n"
+        "    assert token_file.read_text() == config.settings.api_token\n"
+        "    repo.save(replace(config.settings, server_url='https://nas.test', api_token='synthetic-nas'))\n"
+        "    Path('first-start-ok').touch()\n"
+        "else:\n"
+        "    assert config.settings.server_url == 'https://nas.test'\n"
+        "    assert config.settings.api_token == 'synthetic-nas'\n"
+        "    Path('second-start-ok').touch()\n",
+        encoding="utf-8",
+    )
+    harness = tmp_path / "launch test.ps1"
+    harness.write_text(
+        r"""
+param([string]$PythonPath)
+$tokens = $null
+$parseErrors = $null
+$path = Join-Path $PSScriptRoot 'start.ps1'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $path, [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count) { throw 'Launcher syntax error.' }
+$source = [IO.File]::ReadAllText($path)
+$source = $source.Replace("Join-Path `$PSScriptRoot '.venv/Scripts/python.exe'", '$PythonPath')
+$definitions = $ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -in @('Start-LocalServer', 'Start-DesktopClient')
+}, $false)
+foreach ($definition in $definitions) {
+    $replacement = if ($definition.Name -eq 'Start-LocalServer') {
+        "function Start-LocalServer { Add-Content -LiteralPath 'docker-calls.txt' -Value 'start' }"
+    } else {
+        'function Start-DesktopClient { & $python inspect_client.py; if ($LASTEXITCODE) { throw ''Client assertions failed.'' } }'
+    }
+    $source = $source.Replace($definition.Extent.Text, $replacement)
+}
+$testRoot = $PSScriptRoot
+$source = $source.Replace('$PSScriptRoot', '$testRoot')
+Invoke-Expression $source
+""",
+        encoding="utf-8-sig",
+    )
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("PAPAGUI_")}
+    environment["PYTHONPATH"] = os.pathsep.join(
+        str(ROOT / "packages" / package / "src") for package in ("client", "contracts")
+    )
+    environment["PAPAGUI_CLIENT_THEME"] = "dark"  # Intentional override must survive.
+    arguments = [WINDOWS_POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                 "Bypass", "-File", str(harness), "-PythonPath", sys.executable]
+    for _ in range(2):
+        result = subprocess.run(arguments, cwd=tmp_path, env=environment,
+                                capture_output=True, text=True, errors="replace", timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "first-start-ok").exists()
+    assert (tmp_path / "second-start-ok").exists()
+    assert (tmp_path / "docker-calls.txt").read_text().splitlines() == ["start"]
 
 
 def test_compose_defaults_to_loopback_and_keeps_source_read_only() -> None:

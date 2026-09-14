@@ -20,6 +20,29 @@ DATE_LIKE = re.compile(
     rf"\d{{4}}{_DATE_SEPARATOR}{_DATE_MONTH}{_DATE_SEPARATOR}{_DATE_DAY})(?!\d)",
 )
 
+_PHONE_EXTENSION = re.compile(
+    r"(?:[ \t]*(?:ext(?:ension)?\.?|durchwahl|x|#)[ \t:]*|;ext=)[0-9]{1,10}$", re.I,
+)
+_PHONE_BODY = re.compile(r"\+?[0-9() /\t\-‐-―]+")
+_PHONE_PREFIX = re.compile(r"(?:\+[1-9]|00[1-9]|0[1-9]|\(0[1-9])")
+
+
+def phone_format_allowed(value: str, *, labelled: bool = False) -> bool:
+    """Conservative document syntax, separate from stored-value normalization.
+
+    Number-plan validation alone accepts decimal measurement sequences after
+    dropping punctuation. Require an explicit national/international prefix and
+    ordinary separators. Compact national digits need a nearby phone label.
+    A dot in an extension label (``ext.``) is not a numeric separator.
+    """
+    raw = unicodedata.normalize("NFKC", str(value or "")).strip()
+    main = _PHONE_EXTENSION.sub("", raw).strip()
+    if not _PHONE_BODY.fullmatch(main) or not _PHONE_PREFIX.match(main):
+        return False
+    if DATE_LIKE.fullmatch(main.strip(" ()")):
+        return False
+    return labelled or main.startswith(("+", "00")) or bool(re.search(r"[ ()/\t\-‐-―]", main))
+
 _NAME_TITLES = re.compile(
     r"^(?:(?:herrn?|frau|mr|mrs|ms|miss|dr(?:[.-]ing)?|prof|med|ing|"
     r"dipl[.-]?(?:ing|kfm|kffr))\.?(?:\s+|$))+", re.I,

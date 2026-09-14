@@ -147,8 +147,8 @@ def test_onboarding_honors_environment_overrides(application, tmp_path):
     dialog.close()
 
 
-def test_main_uses_dedicated_onboarding_and_updates_theme_and_metadata(
-    application, tmp_path, monkeypatch
+def test_main_uses_dedicated_onboarding_and_updates_theme_without_reloading_catalog(
+    application, qtbot, tmp_path, monkeypatch
 ):
     from tests.client.test_gui_lifecycle_edges import make_container
 
@@ -171,7 +171,8 @@ def test_main_uses_dedicated_onboarding_and_updates_theme_and_metadata(
         container.settings = settings
         return settings
 
-    container.save_client_settings = save_client_settings
+    container.persist_client_settings = lambda value: value
+    container.apply_client_settings = save_client_settings
     window = ClientMainWindow(container, automatic_sync=False)
 
     class AcceptedOnboarding:
@@ -206,10 +207,11 @@ def test_main_uses_dedicated_onboarding_and_updates_theme_and_metadata(
     window._refresh_search_metadata = lambda: metadata.append(True)
 
     window.open_settings(onboarding=True)
+    qtbot.waitUntil(lambda: not window._settings_saving)
 
     assert saved == [configured]
     assert themes == [ClientTheme.LIGHT]
-    assert metadata == [True]
+    assert metadata == []
     assert "https://configured.test" in window.server_label.text()
     assert "Einrichtung abgeschlossen" in window.status_bar.status_label.text()
     window.close()

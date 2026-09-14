@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 import hashlib
 import json
+from pathlib import PurePosixPath
 import re
 from typing import Any
 
@@ -13,10 +14,11 @@ import phonenumbers
 
 from papagui_server.domain.folder_structure import normalize_identity
 from papagui_server.domain.recognition_values import (
-    DATE_LIKE, LEGAL_FORM, normalize_candidate_value, valid_contact_name,
+    DATE_LIKE, LEGAL_FORM, normalize_candidate_value, phone_format_allowed, valid_contact_name,
 )
 
-RECOGNITION_VERSION = "party-blocks-v3"
+RECOGNITION_VERSION = "party-blocks-v5"
+_EXCEL_EXTENSIONS = frozenset({".xls", ".xlsx", ".xlsm", ".xlsb", ".xlt", ".xltx", ".xltm"})
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.!#$%&'*+/=?^`{|}~-]+@[\w.-]+\.[\w-]+", re.UNICODE)
 _CUSTOMER = re.compile(r"\b(?:auftraggeber|bauherr(?:in)?|kunde|kundin|rechnung\s+an)\b", re.I)
 _OTHER = re.compile(r"^\s*(?:(?P<own>auftragnehmer|eigenes\s+büro)|(?P<supplier>lieferant|nachunternehmer)|(?P<authority>behörde|bauamt)|(?P<project>baustelle|bauvorhaben|projekt(?:adresse)?|objektanschrift))(?=\s*:|\s*$)", re.I | re.M)
@@ -188,6 +190,14 @@ def _phone_values(line: str, kind: str) -> Iterable[tuple[str, str, tuple[str, .
         negative = negatives[-1].start() if negatives else -1
         if negative >= positive and negatives:
             continue
+        if not phone_format_allowed(match.raw_string, labelled=bool(positives)):
+            continue
+        # The matcher may salvage a plausible suffix/prefix of a decimal value,
+        # e.g. "030 12345678" from "0.030 12345678" or "030 12345678,00".
+        if (not match.raw_string.startswith("+") and re.search(r"\d[ \t]*[.,][ \t]*$", line[:start])) or re.match(
+            r"^[ \t]*(?:\.[ \t]*\d|,\d)", line[end:],
+        ):
+            continue
         if re.match(r"\s*(?:EUR|€|mm|cm|m²|kg|Stück)\b", line[end:], re.I):
             continue
         if kind.startswith("table") and not positives:
@@ -199,15 +209,16 @@ def _phone_values(line: str, kind: str) -> Iterable[tuple[str, str, tuple[str, .
             yield match.raw_string, normalized, ("valid-phone-plan", "contact-label" if positives else "unlabelled-phone")
 
 
-def _channels(text: str, kind: str) -> Iterable[tuple[str, str, str, tuple[str, ...]]]:
+def _channels(text: str, kind: str, *, allow_phone: bool) -> Iterable[tuple[str, str, str, tuple[str, ...]]]:
     for line in text.splitlines():
         for match in _EMAIL.finditer(line):
             raw = match.group().rstrip(".")
             normalized = normalize_candidate_value("email", raw)
             if normalized:
                 yield "email", raw, normalized, ("valid-email-syntax",)
-        for raw, normalized, reasons in _phone_values(line, kind):
-            yield "phone", raw, normalized, reasons
+        if allow_phone:
+            for raw, normalized, reasons in _phone_values(line, kind):
+                yield "phone", raw, normalized, reasons
 
 
 def _contact_segments(text: str) -> tuple[str, list[tuple[str, str, str]]]:
@@ -291,9 +302,18 @@ def _company(text: str, identities: tuple[str, ...]) -> str:
     return ""
 
 
+def allows_phone_source(source_path: str, locator: Mapping[str, Any] | None = None) -> bool:
+    """Excel values cannot support phones, including legacy and cell evidence."""
+    locator = locator or {}
+    return not (
+        PurePosixPath(source_path).suffix.casefold() in _EXCEL_EXTENSIONS
+        or locator.get("sheet") or locator.get("cell")
+    )
+
+
 def document_candidates(
     content: str, *, customer_name: str = "", customer_aliases: Iterable[str] = (),
-    own_identities: Iterable[str] = (), blocks: Iterable[Any] = (),
+    own_identities: Iterable[str] = (), blocks: Iterable[Any] = (), source_path: str = "",
 ) -> tuple[DocumentCandidate, ...]:
     """Extract validated information with explicit party and source provenance.
 
@@ -306,6 +326,9 @@ def document_candidates(
     result: list[DocumentCandidate] = []
     seen: set[tuple[str, str, str, str]] = set()
     for text, locator, kind in _blocks(content, blocks):
+        # Spreadsheet numbers are too ambiguous, even below a "Telefon" header.
+        # The path also protects legacy extractions without structured cells.
+        allow_phone = allows_phone_source(source_path, locator) and kind != "cell"
         party_role, party_reasons = _party(text, identities, own)
         if party_role not in {"customer", "unknown"}:
             continue
@@ -332,10 +355,10 @@ def document_candidates(
             result.append(DocumentCandidate(field_name, raw, 0.0, RECOGNITION_VERSION, excerpt[:600], normalized, target_party, party_role, candidate_quality, suggestion_type, payload or {}, dict(locator), party_reasons + reasons + source_review_reasons))
 
         ordinary, contacts = _contact_segments(text)
-        for field_name, raw, normalized, reasons in _channels(ordinary, kind):
+        for field_name, raw, normalized, reasons in _channels(ordinary, kind, allow_phone=allow_phone):
             add(field_name, raw, normalized, reasons)
         for name, role, contact_text in contacts:
-            channels = list(_channels(contact_text, kind))
+            channels = list(_channels(contact_text, kind, allow_phone=allow_phone))
             if not name:
                 for field_name, raw, normalized, reasons in channels:
                     add(field_name, raw, normalized, reasons, excerpt=contact_text)

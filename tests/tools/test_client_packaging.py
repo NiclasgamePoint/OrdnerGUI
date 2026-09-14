@@ -6,6 +6,7 @@ from pathlib import Path
 import runpy
 import re
 import sys
+import struct
 from types import SimpleNamespace
 import tomllib
 
@@ -108,6 +109,13 @@ def test_specs_select_native_shape_for_every_release_target(
 
     assert executable.options["name"] == entrypoint
     assert executable.options["console"] is False
+    icon_role = "client" if entrypoint == "papagui-client" else "server"
+    icons = ROOT / "packages/client/src/papagui_client/resources/icons"
+    assert (str(icons), "papagui_client/resources/icons") in analysis.options["datas"]
+    if platform == "win32":
+        assert executable.options["icon"] == str(icons / f"papagui-{icon_role}.ico")
+    else:
+        assert executable.options["icon"] is None
     assert set(analysis.options["excludes"]) == {
         "papagui_server",
         "app",
@@ -123,12 +131,43 @@ def test_specs_select_native_shape_for_every_release_target(
             "PapaGUI Client.app" if entrypoint == "papagui-client" else "PapaGUI Tray.app"
         )
         assert bundle.options["name"] == expected_name
+        assert bundle.options["icon"] == str(icons / f"papagui-{icon_role}.icns")
         assert bundle.options["bundle_identifier"].startswith("de.papagui.")
         assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.2"
         assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.2"
         assert namespace["application"] == bundle
     else:
         assert "application" not in namespace
+
+
+@pytest.mark.parametrize("role", ("client", "server"))
+def test_native_icon_assets_contain_small_and_high_dpi_sizes(role: str) -> None:
+    icons = ROOT / "packages/client/src/papagui_client/resources/icons"
+    ico = (icons / f"papagui-{role}.ico").read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", ico)
+    assert (reserved, kind) == (0, 1)
+    sizes = set()
+    for index in range(count):
+        width, height, _, _, _, depth, length, offset = struct.unpack_from(
+            "<BBBBHHII", ico, 6 + index * 16
+        )
+        assert (width or 256) == (height or 256)
+        assert depth == 32
+        assert length > 0 and offset + length <= len(ico)
+        sizes.add(width or 256)
+    assert {16, 20, 24, 32, 40, 48, 64, 96, 128, 256} <= sizes
+
+    icns = (icons / f"papagui-{role}.icns").read_bytes()
+    magic, length = struct.unpack_from(">4sI", icns)
+    assert magic == b"icns" and length == len(icns)
+    offset = 8
+    types = set()
+    while offset < len(icns):
+        kind, length = struct.unpack_from(">4sI", icns, offset)
+        assert length > 8 and offset + length <= len(icns)
+        types.add(kind)
+        offset += length
+    assert {b"ic07", b"ic08", b"ic09", b"ic10"} <= types  # 128 through 1024 pixels.
 
 
 def test_ci_uses_component_and_build_tool_locks() -> None:

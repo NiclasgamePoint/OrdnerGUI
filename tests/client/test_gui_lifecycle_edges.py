@@ -399,7 +399,7 @@ def test_main_window_conflict_navigation_and_task_lifecycle(application, tmp_pat
     pool.clear.assert_called()
 
 
-def test_run_main_gui_success_and_detached_tray_failure(monkeypatch, tmp_path):
+def test_run_main_gui_success_and_detached_tray_failure(application, monkeypatch, tmp_path):
     import papagui_client.gui.main as main
 
     class App:
@@ -408,6 +408,9 @@ def test_run_main_gui_success_and_detached_tray_failure(monkeypatch, tmp_path):
 
         def setApplicationName(self, value):
             self.names.append(value)
+
+        def setWindowIcon(self, icon):
+            assert not icon.isNull()
 
         def setStyleSheet(self, value):
             self.style = value
@@ -548,6 +551,8 @@ def test_tray_controller_shutdown_needs_no_admin_logout(application, tmp_path):
     container = make_container(tmp_path)
     with patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=False):
         controller = TrayController(application, container, show=False)
+    assert not controller.window.windowIcon().isNull()
+    assert controller.icon.icon().cacheKey() == controller.window.windowIcon().cacheKey()
     controller.show()
     controller._activated(QSystemTrayIcon.ActivationReason.Context)
     controller._activated(QSystemTrayIcon.ActivationReason.Trigger)
@@ -684,12 +689,15 @@ def test_single_instance_receive_ignores_unknown_messages(monkeypatch, tmp_path,
     assert first.deleted and second.deleted
 
 
-def test_run_tray_gui_second_instance_and_primary(monkeypatch):
+def test_run_tray_gui_second_instance_and_primary(application, monkeypatch):
     import papagui_client.gui.tray as tray
 
     class App:
         def setApplicationName(self, _value):
             pass
+
+        def setWindowIcon(self, icon):
+            assert not icon.isNull()
 
         def setQuitOnLastWindowClosed(self, _value):
             pass

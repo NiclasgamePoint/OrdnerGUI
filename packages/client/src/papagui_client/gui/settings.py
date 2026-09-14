@@ -8,13 +8,12 @@ the client/server boundary again.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QColorDialog,
-    QComboBox,
     QDialog,
     QFormLayout,
     QFrame,
@@ -25,8 +24,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QSlider,
-    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -36,9 +33,14 @@ from PySide6.QtWidgets import (
 
 from papagui_client.config import ClientSettings, ClientTheme
 from papagui_client.gui.settings_help import SettingsHelpController
-from papagui_client.gui.theme import ThemeManager, build_stylesheet
+from papagui_client.gui.theme import AppearanceSettings, ThemeManager, build_stylesheet
 from papagui_client.gui.legacy_models import ApplicationStatistics
 from papagui_client.gui.widgets import AppButton, StatisticsWidget
+from papagui_client.gui.widgets.click_activated_inputs import (
+    ClickActivatedComboBox,
+    ClickActivatedSlider,
+    ClickActivatedSpinBox,
+)
 from papagui_client.presentation.settings import (
     ClientSettingsPresenter,
     ClientSettingsViewModel,
@@ -91,34 +93,6 @@ def _caption(text: str, *, wrap: bool = True) -> QLabel:
     label.setObjectName("PopupCaption")
     label.setWordWrap(wrap)
     return label
-
-
-class ClickActivatedSpinBox(QSpinBox):
-    """Prevent accidental value changes while a settings page is scrolled."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._wheel_adjustment_enabled = False
-        self.lineEdit().installEventFilter(self)
-
-    def eventFilter(self, watched, event):
-        if watched is self.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
-            self._wheel_adjustment_enabled = True
-        return super().eventFilter(watched, event)
-
-    def mousePressEvent(self, event):
-        self._wheel_adjustment_enabled = True
-        super().mousePressEvent(event)
-
-    def focusOutEvent(self, event):
-        self._wheel_adjustment_enabled = False
-        super().focusOutEvent(event)
-
-    def wheelEvent(self, event):
-        if not self._wheel_adjustment_enabled:
-            event.ignore()
-            return
-        super().wheelEvent(event)
 
 
 class ConnectionSettingsPage(QWidget):
@@ -232,11 +206,17 @@ class SourceMappingsSettingsPage(QWidget):
         self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        for column in range(1, len(self.HEADERS)):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self._columns_sized = False
+        self.table.itemChanged.connect(self._mapping_item_changed)
         layout.addWidget(self.table, 1)
         for mapping in model.mappings:
             self.add_mapping(mapping)
@@ -266,6 +246,20 @@ class SourceMappingsSettingsPage(QWidget):
             self.table.setToolTip(
                 "Pfadzuordnungen werden durch PAPAGUI_SOURCE_MAPPINGS überschrieben."
             )
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._columns_sized:
+            # Size after the settings theme is inherited. Empty platform columns
+            # need only their headers; populated paths keep their natural width.
+            self.table.resizeColumnsToContents()
+            self._columns_sized = True
+
+    def _mapping_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.toolTip() == item.text():
+            return
+        item.setToolTip(item.text())
+        self.table.resizeColumnToContents(item.column())
 
     def add_mapping(self, mapping: SourceMappingViewModel | None = None) -> None:
         value = mapping or SourceMappingViewModel("")
@@ -340,7 +334,7 @@ class SyncAppearanceSettingsPage(QWidget):
         interval_layout.setSpacing(8)
         self.interval_value = ClickActivatedSpinBox()
         self.interval_value.setAccessibleName("Dauer zwischen Synchronisierungen")
-        self.interval_unit = QComboBox()
+        self.interval_unit = ClickActivatedComboBox()
         self.interval_unit.setAccessibleName("Einheit des Synchronisationsintervalls")
         self.interval_unit.addItems(["Minuten", "Stunden"])
         self.interval_unit.currentTextChanged.connect(self._update_range)
@@ -389,7 +383,7 @@ class SyncAppearanceSettingsPage(QWidget):
 
         # The selector is attached by ClientSettingsDialog's Aussehen page.
         # Keeping it here preserves the 0.4.2 public API (sync_page.theme).
-        self.theme: QComboBox
+        self.theme: ClickActivatedComboBox
 
     def _update_range(self, unit: str) -> None:
         if unit == "Stunden":
@@ -651,7 +645,7 @@ class ClientSettingsDialog(QDialog):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(12)
         mode_label = _caption("Modus", wrap=False)
-        self.sync_page.theme = QComboBox()
+        self.sync_page.theme = ClickActivatedComboBox()
         self.sync_page.theme.addItem("System", ClientTheme.SYSTEM.value)
         self.sync_page.theme.addItem("Hell", ClientTheme.LIGHT.value)
         self.sync_page.theme.addItem("Dunkel", ClientTheme.DARK.value)
@@ -659,7 +653,7 @@ class ClientSettingsDialog(QDialog):
         form.addRow(mode_label, self.sync_page.theme)
 
         accent_label = _caption("Akzent", wrap=False)
-        self.accent_combo = QComboBox()
+        self.accent_combo = ClickActivatedComboBox()
         for label, color in (
             ("Mint", "#2db89d"),
             ("Ocean", "#1f7dbf"),
@@ -686,7 +680,7 @@ class ClientSettingsDialog(QDialog):
         contrast_row = QHBoxLayout()
         contrast_label = _caption("Kontrast", wrap=False)
         contrast_row.addWidget(contrast_label)
-        self.contrast_slider = QSlider(Qt.Orientation.Horizontal)
+        self.contrast_slider = ClickActivatedSlider(Qt.Orientation.Horizontal)
         self.contrast_slider.setObjectName("AppearanceSlider")
         self.contrast_slider.setRange(70, 140)
         self.contrast_slider.setValue(self._theme_manager.contrast)
@@ -701,7 +695,7 @@ class ClientSettingsDialog(QDialog):
         font_row = QHBoxLayout()
         font_label = _caption("Schriftgröße", wrap=False)
         font_row.addWidget(font_label)
-        self.font_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_size_slider = ClickActivatedSlider(Qt.Orientation.Horizontal)
         self.font_size_slider.setObjectName("AppearanceSlider")
         self.font_size_slider.setRange(10, 20)
         self.font_size_slider.setValue(self._theme_manager.font_size)
@@ -786,14 +780,12 @@ class ClientSettingsDialog(QDialog):
             theme=str(self.sync_page.theme.currentData()),
         )
 
-    def _persist_appearance(self) -> None:
+    def appearance_settings(self) -> AppearanceSettings:
         selected_theme = ClientTheme(str(self.sync_page.theme.currentData()))
         mode = self._effective_mode(selected_theme) if selected_theme is ClientTheme.SYSTEM else selected_theme.value
-        self._theme_manager.set_mode(mode)
-        self._theme_manager.set_accent(self._selected_accent)
-        self._theme_manager.set_contrast(self.contrast_slider.value())
-        self._theme_manager.set_font_size(self.font_size_slider.value())
-        self._theme_manager.save()
+        return AppearanceSettings(
+            mode, self._selected_accent, self.contrast_slider.value(), self.font_size_slider.value()
+        )
 
     def _validate_and_accept(self) -> None:
         try:
@@ -801,7 +793,6 @@ class ClientSettingsDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(self, "Einstellungen prüfen", str(exc))
             return
-        self._persist_appearance()
         self.accept()
 
     def size_for_parent(self) -> QSize:

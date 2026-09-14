@@ -13,7 +13,7 @@ from papagui_server.domain.errors import ResourceNotFoundError
 from papagui_server.domain.models import ServerSettings
 from papagui_server.domain.source_paths import source_uri
 
-PIPELINE_VERSION = "customer-recognition-3"
+PIPELINE_VERSION = "customer-recognition-5"
 
 
 def all_customers(repository):
@@ -121,6 +121,7 @@ class DocumentRecognitionService:
                             customer_aliases=tuple(v for v in [customer.get("company", "")] if v),
                             own_identities=tuple(v.strip() for v in settings.recognition_own_names.split(",") if v.strip()),
                             blocks=document.get("blocks", ()),
+                            source_path=source.relative_path,
                         )
                         document_hash = document.get("content_hash") or hashlib.sha256(content.encode()).hexdigest()
                         family_text = " ".join(unicodedata.normalize("NFKC", content).casefold().split())

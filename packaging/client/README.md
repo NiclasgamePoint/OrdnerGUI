@@ -28,6 +28,15 @@ client dependencies. They exclude the server, the historical root `app`
 package and known index-writer modules. No source data, index or customer
 database is packaged by these definitions.
 
+Application artwork lives in
+`packages/client/src/papagui_client/resources/icons/` and is included in both
+wheels and frozen products. Each Windows executable embeds its own multi-size
+ICO, and each macOS bundle embeds its corresponding ICNS. Qt uses the packaged
+ICO/PNG for windows, dialogs and trays, including source launches. Windows app
+identities are `de.papagui.client` and `de.papagui.tray`. Asset provenance,
+generation prompts and the export command are documented in
+[Application icons](../../docs/development/app-icons.md).
+
 The CI workflow installs the pinned GUI runtime from
 `packages/client/requirements-lock.txt` and the pinned PyInstaller frontend
 from `packaging/client/requirements-build-lock.txt`. Linux and Windows produce ordinary native

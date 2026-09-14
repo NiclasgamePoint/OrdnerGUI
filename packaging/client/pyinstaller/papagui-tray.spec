@@ -5,6 +5,7 @@ import sys
 project_root = Path(SPEC).resolve().parents[3]
 client_src = project_root / "packages" / "client" / "src"
 contracts_src = project_root / "packages" / "contracts" / "src"
+icons = client_src / "papagui_client" / "resources" / "icons"
 sys.path.insert(0, str(client_src))
 from papagui_client import __version__ as client_version
 
@@ -12,7 +13,7 @@ analysis = Analysis(
     [str(client_src / "papagui_client" / "entrypoints" / "tray.py")],
     pathex=[str(client_src), str(contracts_src)],
     binaries=[],
-    datas=[],
+    datas=[(str(icons), "papagui_client/resources/icons")],
     hiddenimports=[],
     excludes=[
         "papagui_server",
@@ -37,12 +38,14 @@ executable = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon=str(icons / "papagui-server.ico") if sys.platform == "win32" else None,
 )
 
 if sys.platform == "darwin":
     application = BUNDLE(
         executable,
         name="PapaGUI Tray.app",
+        icon=str(icons / "papagui-server.icns"),
         bundle_identifier="de.papagui.tray",
         info_plist={
             "CFBundleDisplayName": "PapaGUI Tray",

@@ -45,21 +45,30 @@ class CatalogNavigationQueries:
             if not {"id", "source_id", "relative_path", "name"} <= folder_columns:
                 raise CatalogUnavailableError("Catalog folder records are not portable v2")
             file_columns = columns(connection, "files")
+            # Binary path bounds include descendants without treating '%' or '_'
+            # in folder names as LIKE wildcards. The source/path index serves
+            # these range queries, including catalogs without folder_id.
+            descendants = (
+                "item.source_id=folders.source_id "
+                "AND item.relative_path >= (folders.relative_path || '/') COLLATE BINARY "
+                "AND item.relative_path < (folders.relative_path || '0') COLLATE BINARY"
+            )
+            portable = {"source_id", "relative_path"} <= file_columns
             count = (
-                "(SELECT COUNT(*) FROM files item WHERE item.folder_id=folders.id)"
-                if "folder_id" in file_columns
+                f"(SELECT COUNT(*) FROM files item WHERE {descendants})"
+                if portable
                 else "0"
             )
             size = (
                 "(SELECT COALESCE(SUM(item.file_size),0) FROM files item "
-                "WHERE item.folder_id=folders.id)"
-                if {"folder_id", "file_size"} <= file_columns
+                f"WHERE {descendants})"
+                if portable and "file_size" in file_columns
                 else "0"
             )
             modified = (
                 "(SELECT MAX(item.modified_date) FROM files item "
-                "WHERE item.folder_id=folders.id)"
-                if {"folder_id", "modified_date"} <= file_columns
+                f"WHERE {descendants})"
+                if portable and "modified_date" in file_columns
                 else "NULL"
             )
             clauses: list[str] = []
@@ -185,6 +194,19 @@ class CatalogNavigationQueries:
     def project_records(self, query: GlobalSearchQuery) -> list[GlobalSearchRecord]:
         term = query.text.strip().casefold()
         result = []
+        with closing(read_only(self._database())) as connection:
+            if {"source_id", "project_root_id"} <= columns(connection, "files"):
+                where = "AND source_id=?" if query.source_id is not None else ""
+                counts = {
+                    (str(row[0]), int(row[1])): int(row[2])
+                    for row in connection.execute(
+                        "SELECT source_id,project_root_id,COUNT(*) FROM files "
+                        f"WHERE project_root_id IS NOT NULL {where} GROUP BY source_id,project_root_id",
+                        (query.source_id,) if query.source_id is not None else (),
+                    )
+                }
+            else:
+                counts = None
         for value in self.project_roots(query.source_id):
             searchable = " ".join(
                 (
@@ -217,7 +239,11 @@ class CatalogNavigationQueries:
                     f"{value.service_type} · {value.year} · {value.city}".strip(" ·"),
                     value.source.source_id,
                     value.source.relative_path,
-                    metadata={"project": value},
+                    metadata={
+                        "project": value,
+                        "file_count": counts.get((value.source.source_id, value.id), 0)
+                        if counts is not None else None,
+                    },
                 )
             )
         return result

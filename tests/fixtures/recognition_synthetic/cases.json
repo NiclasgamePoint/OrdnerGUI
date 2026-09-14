@@ -826,10 +826,6 @@
       "own_identities": [],
       "expected": [
         {
-          "field_name": "phone",
-          "value": "+493012345678"
-        },
-        {
           "field_name": "email",
           "value": "sheet@example.org"
         }
@@ -852,12 +848,7 @@
         }
       ],
       "own_identities": [],
-      "expected": [
-        {
-          "field_name": "phone",
-          "value": "+493012345678"
-        }
-      ]
+      "expected": []
     },
     {
       "id": "repeated-source",

@@ -15,7 +15,15 @@ $packagePaths = @(
     (Join-Path $PSScriptRoot 'packages/client/src')
 )
 $env:PYTHONPATH = ($packagePaths + @($env:PYTHONPATH) | Where-Object { $_ }) -join [IO.Path]::PathSeparator
-$env:PAPAGUI_INDEX_SERVER_URL = if ($env:PAPAGUI_INDEX_SERVER_URL) { $env:PAPAGUI_INDEX_SERVER_URL } else { 'http://127.0.0.1:8765' }
+# Distinguish convenience defaults from intentional environment overrides.
+$clientDefaultVariables = @('PAPAGUI_INDEX_SERVER_URL', 'PAPAGUI_API_TOKEN', 'PAPAGUI_SOURCE_MAPPINGS') |
+    Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+$prepareArguments = @()
+foreach ($variable in $clientDefaultVariables) {
+    $prepareArguments += @('--default-variable', $variable)
+}
+$localApiPort = if ($env:PAPAGUI_API_PORT) { $env:PAPAGUI_API_PORT } else { '8765' }
+$env:PAPAGUI_INDEX_SERVER_URL = if ($env:PAPAGUI_INDEX_SERVER_URL) { $env:PAPAGUI_INDEX_SERVER_URL } else { "http://127.0.0.1:$localApiPort" }
 $env:PAPAGUI_CLIENT_DATA_ROOT = if ($env:PAPAGUI_CLIENT_DATA_ROOT) { $env:PAPAGUI_CLIENT_DATA_ROOT } else { Join-Path $PSScriptRoot 'client-data' }
 $env:PAPAGUI_SERVER_DATA_PATH = if ($env:PAPAGUI_SERVER_DATA_PATH) { $env:PAPAGUI_SERVER_DATA_PATH } else { Join-Path $PSScriptRoot 'docker-server-data' }
 $env:PAPAGUI_SERVER_CONFIG_PATH = if ($env:PAPAGUI_SERVER_CONFIG_PATH) { $env:PAPAGUI_SERVER_CONFIG_PATH } else { Join-Path $PSScriptRoot 'docker-config' }
@@ -61,8 +69,6 @@ function Initialize-Secret([string]$Name, [string]$Filename) {
     }
 }
 
-Initialize-Secret 'PAPAGUI_API_TOKEN' 'api-token'
-
 if (-not $env:PAPAGUI_SOURCE_PATH) {
     $env:PAPAGUI_SOURCE_PATH = Join-Path $PSScriptRoot 'Bauvorhaben'
 }
@@ -71,6 +77,14 @@ if (-not $env:PAPAGUI_SOURCE_MAPPINGS) {
     $mapping[$env:PAPAGUI_SOURCE_ID] = @{ windows = $env:PAPAGUI_SOURCE_PATH }
     $env:PAPAGUI_SOURCE_MAPPINGS = $mapping | ConvertTo-Json -Compress
 }
+
+$startLocalServer = & $python tools/prepare_client_start.py --local-server @prepareArguments
+if ($LASTEXITCODE -ne 0) { throw 'Die gespeicherte Clientverbindung konnte nicht gelesen werden.' }
+if ($startLocalServer -eq 'true') {
+    Initialize-Secret 'PAPAGUI_API_TOKEN' 'api-token'
+}
+& $python tools/prepare_client_start.py --seed @prepareArguments
+if ($LASTEXITCODE -ne 0) { throw 'Die Clientkonfiguration konnte nicht vorbereitet werden.' }
 
 function Start-LocalServer([int]$HealthCheckAttempts = 600) {
     if ($env:PAPAGUI_SKIP_DOCKER -eq '1') { return }
@@ -130,7 +144,11 @@ function Start-LocalServer([int]$HealthCheckAttempts = 600) {
     Write-Warning 'Server-Healthcheck hat das Zeitlimit erreicht; Client startet offline.'
 }
 
-Start-LocalServer
+if ($startLocalServer -eq 'true') { Start-LocalServer }
+# Children load the saved, editable values. Only explicit overrides are inherited.
+foreach ($variable in $clientDefaultVariables) {
+    [Environment]::SetEnvironmentVariable($variable, $null, 'Process')
+}
 
 function Start-DesktopClient {
     # The client owns tray startup. pythonw keeps both GUI processes console-free

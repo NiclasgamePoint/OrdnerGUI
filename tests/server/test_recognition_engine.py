@@ -300,9 +300,50 @@ def test_spreadsheet_cells_join_same_row_and_use_explicit_column_headers():
         ("A3", "Andere Person"), ("B3", "+44 20 7946 0958"), ("C3", "fremd@example.org"),
     ]]
     values = fields("", blocks=blocks)
-    assert {item.normalized_value for item in values if item.quality == "strong"} == {"+493012345678", "ada@example.org"}
+    assert {item.normalized_value for item in values if item.quality == "strong"} == {"ada@example.org"}
+    assert not any(item.field_name == "phone" for item in values)
     assert all(item.source_locator["cell"] == "A2:C2" for item in values if item.quality == "strong")
     assert all(item.quality == "review" for item in values if "fremd" in item.value or "+44" in item.value)
+
+
+@pytest.mark.parametrize("extension", ["xls", "xlsx", "XLSX", "xlsm", "xlsb", "xlt", "xltx", "xltm"])
+def test_excel_plain_text_excludes_customer_and_contact_phones(extension):
+    text = (f"Kunde: {CUSTOMER}\nTelefon: 030 12345678\nMail: ada@example.org\n"
+            "Ansprechpartner: Mira Muster\nMobil: +44 20 7946 0958\nMail: mira@example.org")
+    values = document_candidates(text, customer_name=CUSTOMER, source_path=f"Projekt/Kontakte.{extension}")
+    assert not any(item.field_name == "phone" for item in values)
+    assert any(item.field_name == "email" and item.value == "ada@example.org" for item in values)
+    contact, = [item for item in values if item.field_name == "contact"]
+    assert contact.payload["name"] == "Mira Muster"
+    assert contact.payload["email"] == "mira@example.org"
+    assert contact.payload["phone"] == ""
+
+
+def test_excel_phone_only_contact_does_not_create_an_empty_suggestion():
+    values = document_candidates(
+        f"Kunde: {CUSTOMER}\nAnsprechpartner: Mira Muster\nTelefon: 030 12345678",
+        customer_name=CUSTOMER, source_path="Kontakte.xlsx",
+    )
+    assert values == ()
+
+
+@pytest.mark.parametrize("locator", [{"sheet": "Kontakt"}, {"cell": "A1"}, {"kind": "cell"}])
+def test_spreadsheet_blocks_exclude_contact_phones_even_without_source_path(locator):
+    values = document_candidates("", customer_name=CUSTOMER, blocks=[{
+        "text": f"Kunde: {CUSTOMER}\nAnsprechpartner: Mira Muster\nTelefon: 030 12345678\nMail: mira@example.org",
+        **locator,
+    }])
+    contact, = [item for item in values if item.field_name == "contact"]
+    assert contact.payload["phone"] == ""
+    assert contact.payload["email"] == "mira@example.org"
+
+
+@pytest.mark.parametrize("extension", ["pdf", "doc", "docx", "txt"])
+def test_phone_in_labelled_document_table_remains_available(extension):
+    values = fields("", source_path=f"Projekt.xlsx/Kontakt.{extension}", blocks=[{
+        "text": f"Kunde: {CUSTOMER}\nTelefon: 030 12345678", "kind": "table_row",
+    }])
+    assert [item.normalized_value for item in values] == ["+493012345678"]
 
 
 def test_numeric_table_without_contact_column_never_becomes_phone():

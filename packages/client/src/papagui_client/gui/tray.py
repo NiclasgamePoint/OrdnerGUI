@@ -19,7 +19,6 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
     QFrame,
@@ -34,7 +33,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
-    QStyle,
     QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
@@ -46,10 +44,12 @@ from papagui_client.presentation.document_workers import document_worker_summary
 from papagui_client.presentation.server_settings import ServerSettingsPresenter
 from papagui_client.presentation.tray import TrayHealth, TrayPresenter, TrayStatusViewModel
 
+from .icons import application_icon, set_process_identity
 from .recognition_admin import RecognitionAdminWidget
 from .recognition_review import RecognitionReviewDialog
 from .tasks import BackgroundTask
 from .theme import ThemeManager, build_stylesheet
+from .widgets.click_activated_inputs import ClickActivatedComboBox, ClickActivatedSpinBox
 
 
 INSTANCE_NAME = "papagui-client-server-tray-v2"
@@ -131,6 +131,7 @@ class ServerTrayWindow(QDialog):
 
         self.setObjectName("IndexControlWindow")
         self.setWindowTitle("PapaGUI · Indexserver")
+        self.setWindowIcon(application_icon("server"))
         self.setWindowFlag(Qt.WindowType.Tool, True)
         self.setMinimumSize(760, 620)
         self.resize(900, 760)
@@ -335,7 +336,7 @@ class ServerTrayWindow(QDialog):
 
         interval_row = QHBoxLayout()
         self.interval_value = self._spin(15, 2880)
-        self.interval_unit = QComboBox()
+        self.interval_unit = ClickActivatedComboBox()
         self.interval_unit.addItems(["Minuten", "Stunden"])
         interval_row.addWidget(self.interval_value, 1)
         interval_row.addWidget(self.interval_unit)
@@ -348,7 +349,7 @@ class ServerTrayWindow(QDialog):
         self.daily_reconciliation_enabled = self._check(form, "Täglicher Abgleich")
         self.content_indexing_enabled = self._check(form, "Dokumentinhalte indexieren")
         self.content_enabled = self.content_indexing_enabled
-        self.resource_profile = QComboBox()
+        self.resource_profile = ClickActivatedComboBox()
         for label, value in (
             ("Schonend", "gentle"),
             ("Ausgewogen", "balanced"),
@@ -446,7 +447,7 @@ class ServerTrayWindow(QDialog):
         form: QFormLayout | None = None,
     ) -> QSpinBox:
         del form
-        widget = QSpinBox()
+        widget = ClickActivatedSpinBox()
         widget.setRange(minimum, maximum)
         widget.setSuffix(suffix)
         widget.valueChanged.connect(self._mark_settings_dirty)
@@ -1080,7 +1081,7 @@ class TrayController:
         self.application = application
         self.window = ServerTrayWindow(container)
         self.icon = QSystemTrayIcon(
-            application.style().standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon),
+            self.window.windowIcon(),
             application,
         )
         menu = QMenu()
@@ -1176,8 +1177,10 @@ def run_tray_gui(container: ClientContainer, argv: list[str] | None = None) -> i
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--background", action="store_true")
     options = parser.parse_args(argv)
+    set_process_identity("server")
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("PapaGUI Indexserver")
+    application.setWindowIcon(application_icon("server"))
     application.setQuitOnLastWindowClosed(False)
     theme = ThemeManager()
     if hasattr(application, "setPalette"):

@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- Telefonnummernerkennung um eine konservative Formatprüfung ergänzen: keine
+  Messwertreihen mit Punkten oder Dezimalkommas, keine Teiltreffer aus solchen
+  Zahlen und keine unbeschrifteten kompakten Inlandsnummern. Bestehende offene
+  Vorschläge mit unzulässigen Formaten werden ausgeblendet; bestätigte Werte
+  und Entscheidungen bleiben erhalten.
+
+- Zahlenfelder, Auswahllisten und Schieberegler in Client- und Indexserver-Einstellungen
+  erst nach ausdrücklichem Klick per Mausrad bearbeiten. Beim bloßen Darüberfahren scrollt die Seite; nach
+  Fokus- oder Tabwechsel sind die Felder wieder gegen versehentliche Änderungen geschützt.
+
+- Einstellungen ohne blockierenden UI-Thread speichern: Konfiguration,
+  Windows-Dateirechte und Darstellung werden im Hintergrund geschrieben.
+  Neue Verbindungswerte und Qt-Timer werden nach einem laufenden Abgleich im
+  Hauptthread übernommen; fällige Abgleiche werden nachgeholt. Unveränderte
+  Designs und Katalogstatistiken werden beim Speichern nicht neu aufgebaut.
+
+- Pfadzuordnungen in den Sucheinstellungen lesbar formatieren: inhaltsabhängige,
+  verstellbare Spalten, einzeilige Pfade, passende Zeilenhöhen und vollständige
+  Pfade als Tooltip; lange Tabellen lassen sich horizontal durchscrollen.
+
+- Eigene PapaGUI-Icons für Client (rot) und Indexserver (blau): transparente Motive ohne
+  Schrift für Fenster, Dialoge und Tray, getrennte Windows-Taskleistenkennungen
+  sowie mehrstufige ICO- und ICNS-Dateien für ausführbare Builds und macOS-Bundles.
+
+- Telefonnummern aus Excel-Dateien von der Kundendatenerkennung ausschließen,
+  einschließlich beschrifteter Telefonspalten und Ansprechpartner-Vorschlägen.
+  E-Mail-Adressen und andere Angaben bleiben nutzbar. Erneute Prüfung zieht alte
+  Excel-Telefonbelege zurück; bestätigte Kundendaten bleiben erhalten.
+
+- Word-Vorschau unter Windows ohne zusätzliche Konsolenfenster: Office-Prüfung
+  und Konvertierung starten wie die übrigen Vorschauhelfer ohne Konsole.
+
+- Dateianzahlen in Projektsuchergebnissen aus dem Katalog übernehmen; Ordnersummen
+  berücksichtigen Unterordner, die Gesamtstatistik zählt Dateien nur einmal.
+  Fehlende Zähler aus älteren Katalogen erscheinen als unbekannt statt als null.
+- Windows-Komfortstart speichert erzeugte Verbindungswerte als bearbeitbare
+  Clientkonfiguration. Gespeicherte NAS-Verbindungen bleiben beim Neustart erhalten
+  und lösen keinen lokalen Docker-Start aus; explizite Umgebungsvariablen behalten Vorrang.
+
 - Kundenerkennung nach dem Dateiscan beschleunigt: Dokumentrangfolge einmal
   berechnen und Texte direkt über ihre FTS-Zeilen laden. Eigenen Fortschritt für
   Kundengruppen und Dokumentprüfung anzeigen; Statusabfragen bleiben auch während

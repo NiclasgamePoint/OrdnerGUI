@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
+import openpyxl
 
 from papagui_server.adapters.catalog import SqliteCatalogIndexer
 from papagui_server.adapters.catalog_reader import SqliteCatalogReader
@@ -18,6 +21,27 @@ from papagui_server.domain.models import ServerSettings
 
 NAME = "Beispiel GmbH"
 CONTACT = "Auftraggeber: Beispiel GmbH\nTelefon: +49 30 12345678\nE-Mail: kontakt@example.org"
+
+
+def test_measurement_rows_are_excluded_from_persisted_phone_and_contact_suggestions(tmp_path):
+    measurement = "0.81 10.0 9.3 62.2 25.8"
+    fixture = setup(tmp_path, {
+        "Berechnung.txt": f"Kunde: {NAME}\n" + (measurement + "\n") * 8,
+        "Kontakt.txt": (
+            f"Kunde: {NAME}\nTelefon: 040/12345678\n"
+            f"Ansprechpartner: Mira Muster\nTelefon: {measurement}\nE-Mail: mira@example.org"
+        ),
+    })
+    fixture.service.run("primary", customer_id=fixture.customer_id, exhaustive=True)
+    status, suggestions, current = state(fixture)
+    phones = [row for row in suggestions if row["field_name"] == "phone"]
+    assert [row["normalized_value"] for row in phones] == ["+494012345678"]
+    contacts = [row for row in suggestions if row["field_name"] == "contact"]
+    assert len(contacts) == 1
+    assert contacts[0]["payload"]["email"] == "mira@example.org"
+    assert contacts[0]["payload"]["phone"] == ""
+    assert current["phone"] == ""
+    assert status["pipeline_version"] == "customer-recognition-5"
 
 
 def setup(tmp_path, documents, *, settings=None, assign=True, create_root=True):
@@ -73,6 +97,67 @@ def state(fixture):
         customer = work.customers.get(fixture.customer_id)
         work.commit()
     return status, suggestions, customer
+
+
+@pytest.mark.parametrize("legacy_text", [False, True])
+def test_excel_phone_evidence_retires_on_reassessment_without_losing_other_sources(
+    tmp_path, legacy_text,
+):
+    fixture = setup(tmp_path, {"Kontakt.txt": CONTACT})
+    spreadsheet = fixture.project / "Kontakte.xlsx"
+    workbook = openpyxl.Workbook()
+    workbook.active["A1"] = (
+        "Auftraggeber: Beispiel GmbH\nTelefon: 030 12345678\n"
+        "Mobil: +44 20 7946 0958\nMail: excel@example.org\n"
+        "Ansprechpartner: Mira Muster\nTelefon: 030 12345678\nMail: mira@example.org"
+    )
+    workbook.save(spreadsheet)
+    workbook.close()
+    before = hashlib.sha256(spreadsheet.read_bytes()).hexdigest()
+    fixture.rebuild()
+    source = "source://primary/Planung/2026/Beispiel GmbH/Kontakte.xlsx"
+    contact = {"name": "Mira Muster", "role": "", "email": "mira@example.org", "phone": "030 12345678"}
+    with fixture.factory() as work:
+        # Reproduce candidates saved by the previous recognition policy.
+        for kind, value in (("phone", "030 12345678"), ("phone", "+44 20 7946 0958"),
+                            ("phone", "+1 202-555-0123"), ("contact", json.dumps(contact))):
+            work.suggestions.add(
+                fixture.customer_id, kind=kind, value=value, source_path=source,
+                excerpt="Synthetic old Excel evidence", fingerprint="", confidence=0,
+                quality="strong", party_role="customer", run_id="old",
+                engine_version="customer-recognition-3", source_locator={"sheet": "Sheet", "cell": "A1"},
+                suggestion_type="contact" if kind == "contact" else "field",
+                payload=contact if kind == "contact" else None,
+            )
+        pending = work.suggestions.list_for_customer(fixture.customer_id, status="pending")
+        accepted = next(row for row in pending if row["value"] == "+1 202-555-0123")
+        current = work.customers.get(fixture.customer_id)
+        work.suggestions.decide(
+            fixture.customer_id, accepted["id"], action="accept",
+            expected_revision=current["revision"], current_customer=current,
+        )
+        work.commit()
+    if legacy_text:
+        fixture.service._catalog = SimpleNamespace(
+            list_project_roots=fixture.reader.list_project_roots,
+            document_evidence=lambda **kwargs: [
+                {**document, "blocks": []}
+                for document in fixture.reader.document_evidence(**kwargs)
+            ],
+        )
+    fixture.service.run("primary", customer_id=fixture.customer_id, exhaustive=True)
+    status, suggestions, customer = state(fixture)
+    phones = [row for row in suggestions if row["field_name"] == "phone"]
+    assert len(phones) == 1
+    assert phones[0]["normalized_value"] == "+493012345678"
+    assert phones[0]["source"]["relative_path"].endswith("Kontakt.txt")
+    assert phones[0]["evidence_count"] == 1
+    assert customer["phone"] == "+1 202-555-0123"  # A confirmed value is retained.
+    assert any(row["value"] == "excel@example.org" for row in suggestions)
+    contacts = [row for row in suggestions if row["field_name"] == "contact"]
+    assert contacts and all(not row["payload"].get("phone") for row in contacts)
+    assert status["pipeline_version"] == "customer-recognition-5"
+    assert hashlib.sha256(spreadsheet.read_bytes()).hexdigest() == before
 
 
 def test_adaptive_second_round_finds_document_beyond_initial_24(tmp_path: Path) -> None:

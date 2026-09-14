@@ -28,7 +28,7 @@ papagui-tray = "papagui_client.entrypoints.tray:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-papagui_client = ["py.typed"]
+papagui_client = ["py.typed", "resources/icons/*.png", "resources/icons/*.ico", "resources/icons/*.icns"]
 
 [tool.setuptools.dynamic]
 version = {attr = "papagui_client.__version__"}

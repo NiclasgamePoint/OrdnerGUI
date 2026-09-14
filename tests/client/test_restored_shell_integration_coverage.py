@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox, QProgressBar, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QProgressBar, QSystemTrayIcon
 
 from papagui_contracts import (
     CatalogFacets,
@@ -202,7 +202,7 @@ class _Search:
                     "Muster Projekt",
                     source_id="archive",
                     relative_path="2026/Muster",
-                    metadata={"folder": self.folder_value},
+                    metadata={"project": SimpleNamespace(), "file_count": 5},
                 ),
                 self.root / "2026/Muster",
             ),
@@ -429,6 +429,10 @@ def test_search_split_filters_overlay_and_error_paths(window):
     widget.filter_popup.include_subfolders_checkbox.setChecked(False)
     widget.start_full_search()
     assert widget.search_page.folder_section.row_count == 1
+    assert any(
+        label.text().startswith("5 Dateien")
+        for label in widget.search_page.folder_section.findChildren(QLabel)
+    )
 
     for sort_index in range(widget.filter_popup.sort_combo.count()):
         widget.filter_popup.sort_combo.setCurrentIndex(sort_index)
@@ -455,6 +459,15 @@ def test_search_split_filters_overlay_and_error_paths(window):
     widget.header.search_input.setText("lang")
     widget.on_search_text_changed("lang")
     assert widget.search_debounce.isActive()
+
+
+@pytest.mark.parametrize("count,expected", [(None, "Dateianzahl unbekannt"), (0, "0 Dateien")])
+def test_folder_result_distinguishes_missing_count_from_empty_folder(window, count, expected):
+    widget, _value = window
+    widget.search_page.set_folders([{"folder_name": "Projekt", "file_count": count}], 1)
+    assert expected in {
+        label.text() for label in widget.search_page.folder_section.findChildren(QLabel)
+    }
 
 
 def test_search_metadata_filter_popup_and_statistics_fallback(window, monkeypatch):
@@ -870,7 +883,7 @@ def test_launcher_visible_commands_and_platform_edges(monkeypatch):
     assert launcher.command(background=False) == ["/tmp/papagui-tray"]
 
 
-def test_theme_application_and_main_entrypoint_lifecycle(monkeypatch):
+def test_theme_application_and_main_entrypoint_lifecycle(application, monkeypatch):
     themed = []
 
     class _Theme:
@@ -903,6 +916,9 @@ def test_theme_application_and_main_entrypoint_lifecycle(monkeypatch):
 
         def setApplicationName(self, name):
             self.name = name
+
+        def setWindowIcon(self, icon):
+            assert not icon.isNull()
 
         def exec(self):
             return 23

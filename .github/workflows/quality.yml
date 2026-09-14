@@ -52,7 +52,7 @@ jobs:
       - name: Test client
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests/contracts tests/client tests/architecture tests/tools/test_check_frozen_client.py tests/tools/test_client_packaging.py tests/tools/test_start_scripts.py -q
+        run: python -m pytest tests/contracts tests/client tests/architecture tests/tools/test_check_frozen_client.py tests/tools/test_client_packaging.py tests/tools/test_start_scripts.py tests/tools/test_prepare_client_start.py -q
       - name: Parse POSIX launchers
         if: runner.os != 'Windows'
         run: bash -n start.sh start.command index-tray.sh tools/docker_smoke.sh

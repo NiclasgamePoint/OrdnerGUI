@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from .dialogs.centered_popup import CenteredPopupDialog
 from .widgets.buttons import AppButton
+from .widgets.click_activated_inputs import ClickActivatedComboBox
 
 
 class RecognitionReviewDialog(CenteredPopupDialog):
@@ -91,7 +91,7 @@ class RecognitionReviewDialog(CenteredPopupDialog):
         entity_type_label = QLabel("Kundentyp bestätigen")
         entity_type_label.setObjectName("PopupCaption")
         details_layout.addWidget(entity_type_label)
-        self.entity_type_combo = QComboBox()
+        self.entity_type_combo = ClickActivatedComboBox()
         for entity_type in ("Privatperson", "Unternehmen", "Organisation"):
             self.entity_type_combo.addItem(entity_type, entity_type)
         self.entity_type_combo.setToolTip(
@@ -160,7 +160,7 @@ class RecognitionReviewDialog(CenteredPopupDialog):
         # Compatibility aliases kept from the first 0.4.2 client UI.
         self.cases = self.case_list
         self.details = self.case_details
-        self.customer = QComboBox(self)
+        self.customer = ClickActivatedComboBox(self)
         self.customer.hide()
         self._load_customers()
         self.reload()

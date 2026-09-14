@@ -96,6 +96,8 @@ def test_main_window_passes_statistics_and_connects_independent_tray(monkeypatch
 
     monkeypatch.setattr(main_module, "ClientSettingsDialog", build_dialog)
     window = SimpleNamespace(
+        _settings_saving=False,
+        _closing=False,
         _container=SimpleNamespace(
             settings=object(),
             config_sources={"server_url": "file"},
@@ -120,8 +122,9 @@ def test_main_window_retains_statistics_computed_from_local_read_models():
     search = SimpleNamespace(
         project_roots=lambda: (object(), object(), object()),
         folders=lambda: (
-            SimpleNamespace(folder=SimpleNamespace(file_count=4, total_size=1_024)),
-            SimpleNamespace(folder=SimpleNamespace(file_count=6, total_size=2_048)),
+            SimpleNamespace(folder=SimpleNamespace(parent_id=None, file_count=4, total_size=1_024)),
+            SimpleNamespace(folder=SimpleNamespace(parent_id=None, file_count=6, total_size=2_048)),
+            SimpleNamespace(folder=SimpleNamespace(parent_id=1, file_count=3, total_size=512)),
         ),
     )
     page = SimpleNamespace(set_statistics=Mock())

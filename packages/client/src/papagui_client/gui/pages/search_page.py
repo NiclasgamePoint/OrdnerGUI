@@ -257,8 +257,11 @@ class SearchPage(QWidget):
         rows = []
         for folder in folders:
             relative_path = str(folder.get("relative_path") or "")
-            file_count = int(folder.get("file_count") or 0)
-            subtitle = f"{file_count} Dateien"
+            file_count = folder.get("file_count")
+            subtitle = (
+                f"{int(file_count)} Dateien" if file_count is not None
+                else "Dateianzahl unbekannt"
+            )
             if relative_path:
                 subtitle += f" · {relative_path}"
             path = str(folder.get("folder_path") or "")

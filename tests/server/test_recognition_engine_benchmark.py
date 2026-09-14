@@ -17,7 +17,8 @@ def test_synthetic_benchmark_reports_errors_recall_and_group_metrics():
     result = benchmark.run_benchmark()
     assert result["dataset"]["kind"] == "synthetic-only"
     assert result["dataset"]["case_count"] >= 50
-    assert result["current"]["overall"] == {"true_positive": 27, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0}
+    # The two Excel phone values are excluded by the source policy.
+    assert result["current"]["overall"] == {"true_positive": 25, "false_positive": 0, "false_negative": 0, "precision": 1.0, "recall": 1.0}
     assert result["legacy_regex_baseline"]["overall"]["false_positive"] > 0
     assert result["legacy_regex_baseline"]["overall"]["false_negative"] > 0
     assert set(result["current"]["by"]) == {"field", "format", "group", "split", "customer"}

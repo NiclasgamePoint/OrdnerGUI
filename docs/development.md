@@ -192,7 +192,8 @@ $env:PAPAGUI_SOURCE_PATH = 'C:\Daten\Bauvorhaben'
 .\start.bat
 ```
 
-`start.bat` lässt über `start.ps1` automatisch das Server-Image bauen und einen
+Für die konfigurierte lokale Serververbindung lässt `start.bat` über `start.ps1`
+automatisch das Server-Image bauen und einen
 fehlenden Container erstellen; vorhandene Container werden gestartet oder bei
 Änderungen aktualisiert. Docker verwendet beim Build seinen Cache. Build- und
 Startausgaben bleiben im Konsolenfenster sichtbar. Erst nach erfolgreichem
@@ -202,6 +203,13 @@ ohne Konsole. Das Startskript beendet sich danach; beim Doppelklick auf `start.b
 schließt damit auch das Konsolenfenster. Für `--sync-only` und `--help` bleibt die
 Konsolenausgabe erhalten. Bei Docker-Fehlern nennt der Starter die Ursache und
 startet den Client offline.
+
+Die erzeugten Client-Standardwerte werden beim ersten Start in der geschützten
+`client-config.json` gespeichert. Sie bleiben in der Oberfläche bearbeitbar.
+Gespeicherte Einstellungen haben Vorrang vor diesen Starter-Standardwerten;
+explizit gesetzte Umgebungsvariablen behalten dagegen ihren Vorrang.
+Mit gespeicherter NAS-Adresse startet der Windows-Starter nur den Client samt
+Tray und ändert die lokale Server-Tokendatei nicht.
 
 Beim ersten Serverstart kann die API schon erreichbar sein, während der erste
 Index noch aufgebaut wird. Der Client zeigt dann „Server erreichbar · Noch kein

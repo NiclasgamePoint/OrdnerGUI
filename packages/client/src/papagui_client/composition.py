@@ -26,7 +26,7 @@ from .application.customers import OfflineFirstCustomerStore
 from .application.journals import OfflineFirstJournalStore
 from .application.paths import SourcePathResolver
 from .application.sync import SyncCoordinator as GenerationSyncCoordinator
-from .config import ClientSettings
+from .config import ClientSettings, ResolvedClientConfiguration
 from .presentation.coordinators import (
     CustomerCoordinator,
     DataSession,
@@ -170,12 +170,19 @@ class ClientContainer:
 
     def save_client_settings(self, settings: ClientSettings) -> ClientSettings:
         """Persist preferences, then re-apply environment overrides visibly."""
+        return self.apply_client_settings(self.persist_client_settings(settings))
+
+    def persist_client_settings(self, settings: ClientSettings) -> ResolvedClientConfiguration:
+        """Perform configuration I/O without changing live services or GUI timers."""
         if settings.data_root.resolve() != self.settings.data_root.resolve():
             raise ValueError("Ein Wechsel des Clientdatenordners erfordert einen Neustart")
         self.config_repository.save(settings)
-        resolved = self.config_repository.resolve()
-        self.config_sources = dict(resolved.sources)
+        return self.config_repository.resolve()
+
+    def apply_client_settings(self, resolved: ResolvedClientConfiguration) -> ClientSettings:
+        """Adopt persisted preferences on the owner's thread after active sync finishes."""
         self.reconfigure(resolved.settings)
+        self.config_sources = dict(resolved.sources)
         return resolved.settings
 
     def reconfigure(self, settings: ClientSettings) -> None:

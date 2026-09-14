@@ -101,6 +101,8 @@ class JsonClientConfigRepository:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode:
                 details = (result.stderr or result.stdout).strip()

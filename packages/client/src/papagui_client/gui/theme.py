@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from PySide6.QtGui import QColor, QPalette
 
 from papagui_client.gui.legacy_models import ui_settings
@@ -21,6 +23,24 @@ def _tint(color_hex: str, lighter: bool, amount: int) -> str:
     if lighter:
         return color.lighter(amount).name()
     return color.darker(amount).name()
+
+
+@dataclass(frozen=True, slots=True)
+class AppearanceSettings:
+    mode: str
+    accent: str
+    contrast: int
+    font_size: int
+
+
+def save_appearance(settings: AppearanceSettings) -> None:
+    """Create QSettings in the calling worker; never share a GUI-owned instance."""
+    manager = ThemeManager()
+    manager.set_mode(settings.mode)
+    manager.set_accent(settings.accent)
+    manager.set_contrast(settings.contrast)
+    manager.set_font_size(settings.font_size)
+    manager.save()
 
 
 class ThemeManager:
@@ -89,11 +109,12 @@ class ThemeManager:
         self.font_size = max(self.MIN_FONT_SIZE, min(self.MAX_FONT_SIZE, int(font_size)))
 
     def apply(self, app):
-        app.setStyleSheet("")
-        app.setPalette(build_palette(self.mode, self.accent, self.contrast))
-        app.setStyleSheet(
-            build_stylesheet(self.mode, self.accent, self.contrast, self.font_size)
-        )
+        palette = build_palette(self.mode, self.accent, self.contrast)
+        stylesheet = build_stylesheet(self.mode, self.accent, self.contrast, self.font_size)
+        if app.palette() != palette:
+            app.setPalette(palette)
+        if app.styleSheet() != stylesheet:
+            app.setStyleSheet(stylesheet)
 
 
 def _bounded_int(value, fallback: int, minimum: int, maximum: int) -> int:

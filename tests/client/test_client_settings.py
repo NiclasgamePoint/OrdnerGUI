@@ -411,7 +411,7 @@ def test_theme_and_package_native_fullscreen_helpers(monkeypatch):
     window.showFullScreen.assert_not_called()
 
 
-def test_main_window_settings_save_cancel_failure_and_onboarding(application, tmp_path, monkeypatch):
+def test_main_window_settings_save_cancel_failure_and_onboarding(application, qtbot, tmp_path, monkeypatch):
     from tests.client.test_gui_lifecycle_edges import make_container
 
     container = make_container(tmp_path)
@@ -424,7 +424,8 @@ def test_main_window_settings_save_cancel_failure_and_onboarding(application, tm
         container.settings = value
         return value
 
-    container.save_client_settings = save_client_settings
+    container.persist_client_settings = lambda value: value
+    container.apply_client_settings = save_client_settings
     window = ClientMainWindow(container, automatic_sync=False)
 
     class Dialog:
@@ -442,19 +443,24 @@ def test_main_window_settings_save_cancel_failure_and_onboarding(application, tm
         def settings(self):
             return configured(tmp_path, theme=ClientTheme.DARK)
 
+        def appearance_settings(self):
+            return None
+
     monkeypatch.setattr("papagui_client.gui.main.ClientSettingsDialog", Dialog)
     window.open_settings()
     assert not saved
     Dialog.result = Dialog.DialogCode.Accepted
     monkeypatch.setattr("papagui_client.gui.main.OnboardingDialog", Dialog)
     window.open_settings(onboarding=True)
+    qtbot.waitUntil(lambda: not window._settings_saving)
     assert saved and "abgeschlossen" in window.status.text()
     assert "https://server.test" in window.server_label.text()
 
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *_args: warnings.append(_args))
-    container.save_client_settings = lambda _value: (_ for _ in ()).throw(OSError("full"))
+    container.persist_client_settings = lambda _value: (_ for _ in ()).throw(OSError("full"))
     window.open_settings()
+    qtbot.waitUntil(lambda: not window._settings_saving)
     assert warnings
     window.close()
 
