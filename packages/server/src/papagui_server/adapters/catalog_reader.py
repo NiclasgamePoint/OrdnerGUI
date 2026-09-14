@@ -288,9 +288,13 @@ class SqliteCatalogReader:
                 if modern
                 else "'ok' AS extraction_status, '' AS extraction_reason, '' AS extraction_version"
             )
+            # Materialize ranking once: a coroutine can otherwise be restarted
+            # for every FTS row. UNINDEXED path cannot support a point lookup;
+            # retain the actual FTS rowid (also for legacy catalogs) to load text.
             rows = connection.execute(
-                f"""WITH ranked AS (
-                    SELECT files.path, files.project_root_id, files.source_id,
+                f"""WITH ranked AS MATERIALIZED (
+                    SELECT content.rowid AS content_rowid,
+                           files.path, files.project_root_id, files.source_id,
                            files.relative_path, files.modified_date, files.content_hash,
                            {metadata}, ROW_NUMBER() OVER (
                                PARTITION BY files.project_root_id
@@ -300,7 +304,7 @@ class SqliteCatalogReader:
                      WHERE files.source_id=? AND files.project_root_id IS NOT NULL
                            {project_clause}
                 ) SELECT ranked.*, content.content AS content
-                    FROM ranked JOIN file_content_fts content ON content.path=ranked.path
+                    FROM ranked JOIN file_content_fts content ON content.rowid=ranked.content_rowid
                    WHERE ranking>? AND ranking<=?
                    ORDER BY project_root_id, ranking""",
                 (source_id, *ids, offset_per_project, offset_per_project + documents_per_project),

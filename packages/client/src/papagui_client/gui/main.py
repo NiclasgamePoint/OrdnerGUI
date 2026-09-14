@@ -118,6 +118,9 @@ class ClientMainWindow(QMainWindow):
         self._refresh_search_metadata()
         self._init_system_tray()
         self._sync_timer = QtTimerAdapter(self)
+        self._initial_index_timer = QTimer(self)
+        self._initial_index_timer.setSingleShot(True)
+        self._initial_index_timer.timeout.connect(self.synchronize)
         if automatic_sync:
             self._container.sync.start(self._sync_timer, self.synchronize, immediate=True)
         if getattr(self._container, "onboarding_required", False):
@@ -751,11 +754,17 @@ class ClientMainWindow(QMainWindow):
         self._start_task(task)
 
     def _sync_complete(self, result) -> None:
-        self.status_bar.set_text(
-            "Synchronisiert · " + ", ".join(result.changed_components)
-            if result.changed
-            else "Synchronisiert · aktuell"
-        )
+        if result.awaiting_generation and self._sync_timer.active:
+            self._initial_index_timer.start(5_000)
+        else:
+            self._initial_index_timer.stop()
+        if result.awaiting_generation:
+            message = "Server erreichbar · Noch kein fertiger Index verfügbar."
+        elif result.changed:
+            message = "Synchronisiert · " + ", ".join(result.changed_components)
+        else:
+            message = "Synchronisiert · aktuell"
+        self.status_bar.set_text(message)
         if result.customer_replay is not None:
             self._handle_conflicts(result.customer_replay.conflicts)
         if result.journal_replay is not None:
@@ -770,6 +779,7 @@ class ClientMainWindow(QMainWindow):
         self.status_bar.set_busy(False)
 
     def _sync_failed(self, error: str) -> None:
+        self._initial_index_timer.stop()
         self.status_bar.set_text(f"Offline · {error}")
         self.status_bar.set_busy(False)
 
@@ -1370,6 +1380,7 @@ class ClientMainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closing = True
+        self._initial_index_timer.stop()
         self._recognition_poll.stop()
         self.search_debounce.stop()
         self._container.sync.stop()

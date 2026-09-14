@@ -15,6 +15,7 @@ from papagui_contracts import (
 )
 from papagui_client.adapters.filesystem_generations import FilesystemGenerationStore
 from papagui_client.application.sync import SyncCoordinator, SyncError
+from papagui_client.application.errors import GenerationNotReady
 
 
 NOW = "2026-09-02T10:00:00+00:00"
@@ -105,6 +106,37 @@ def test_sync_activates_json_pointer_and_retains_active_plus_three(tmp_path):
         "index-5",
     ]
     assert not (store.root / "current").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_pending_generation_keeps_local_data_then_installs_when_ready(tmp_path, monkeypatch, existing):
+    store = FilesystemGenerationStore(tmp_path / "cache")
+    payload = archive(tmp_path, GenerationComponentKind.INDEX, "i-1", "synthetic index")
+    gateway = FakeGateway(
+        manifest(component(GenerationComponentKind.INDEX, "i-1", payload), None),
+        {(GenerationComponentKind.INDEX, "i-1"): payload},
+    )
+    coordinator = SyncCoordinator(gateway, store)
+    pointer = store.root / "active-generation.json"
+    if existing:
+        assert coordinator.sync().changed
+        before = pointer.read_bytes()
+
+    with monkeypatch.context() as patcher:
+        def pending():
+            raise GenerationNotReady
+        patcher.setattr(gateway, "current_manifest", pending)
+        result = coordinator.sync()
+    assert result.awaiting_generation and not result.changed
+    assert result.current == ({"index": "i-1"} if existing else {})
+    if existing:
+        assert pointer.read_bytes() == before
+    else:
+        assert not pointer.exists()
+    ready = coordinator.sync()
+    assert not ready.awaiting_generation
+    assert ready.changed is not existing
+    assert ready.current == {"index": "i-1"}
 
 
 def test_corrupt_download_does_not_change_active_pointer_or_backups(tmp_path):

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
+import hashlib
+from pathlib import Path
 import sys
+import time
 
-from PySide6.QtCore import QDateTime, QIODevice, QSignalBlocker, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QDateTime, QIODevice, QLockFile, QSignalBlocker, QStandardPaths, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
@@ -611,19 +614,43 @@ class ServerTrayWindow(QDialog):
             "failed": "Indexjob ist fehlgeschlagen",
             "idle": "Indexserver wartet",
         }
-        self.status_label.setText(labels.get(state, str(index.get("message") or state)))
-        self._set_progress(self.progress_bar, processed, total, active)
+        phase_labels = {
+            "catalog": "Dateien und Dokumentinhalte erfassen",
+            "customer-recognition": "Kunden und Projekte zuordnen",
+            "customer-documents": "Kundendaten aus Dokumenten prüfen",
+            "publishing": "Index und Kundendaten veröffentlichen",
+        }
+        recognition_phase = phase in {"customer-recognition", "customer-documents"}
+        after_scan = recognition_phase or phase == "publishing"
+        # Older servers keep the completed file count during recognition.
+        has_recognition_progress = "catalog_processed_items" in progress
+        phase_processed = 0 if after_scan and not has_recognition_progress else processed
+        self.status_label.setText(
+            phase_labels[phase] + " …" if state == "running" and phase in phase_labels
+            else labels.get(state, str(index.get("message") or state))
+        )
+        self._set_progress(self.progress_bar, phase_processed, total, active)
         job_details: list[str] = []
         if phase:
-            job_details.append(f"Phase: {phase}")
-        if processed or total:
+            job_details.append(f"Phase: {phase_labels.get(phase, phase)}")
+        if after_scan:
+            scanned = self._integer(progress.get("catalog_processed_items"), processed)
+            job_details.append(f"Dateierfassung abgeschlossen: {scanned} Dateien")
+        if recognition_phase and has_recognition_progress:
+            unit = "Kundengruppen zugeordnet" if phase == "customer-recognition" else "Kunden geprüft"
+            if total:
+                job_details.append(f"{processed} von {total} {unit}")
+            if phase == "customer-documents":
+                documents = self._integer(progress.get("evaluated_documents"), 0)
+                job_details.append(f"{documents} Dokumente auf Kundendaten geprüft")
+        elif not after_scan and (processed or total):
             job_details.append(
                 f"{processed} von {total} Einträgen verarbeitet" if total else f"{processed} Einträge verarbeitet"
             )
         if failed:
             job_details.append(f"{failed} Einträge mit Fehlern")
         current = self._current_source(progress)
-        if current:
+        if current and not after_scan:
             job_details.append(f"Aktuell: {current}")
         message = str(index.get("message") or "").strip()
         if message:
@@ -638,25 +665,29 @@ class ServerTrayWindow(QDialog):
         self.start_button.setEnabled(not active)
         self.rebuild_button.setEnabled(not active)
 
-        content_phase = any(
+        content_phase = not after_scan and any(
             token in phase.casefold()
             for token in ("catalog", "content", "document", "extract", "ocr", "inhalt", "dokument")
         )
         if active and content_phase:
             self.content_status_label.setText("Dokumentinhalte werden indexiert")
-        elif state in {"completed", "no_changes"}:
+        elif after_scan or state in {"completed", "no_changes"}:
             self.content_status_label.setText("Dateiindizierung abgeschlossen")
         elif state in {"error", "failed"}:
             self.content_status_label.setText("Dateiindizierung mit Fehler beendet")
         else:
             self.content_status_label.setText("Dateiindizierung wartet")
-        self._set_progress(self.content_progress_bar, processed, total, active and content_phase)
+        content_count = self._integer(progress.get("catalog_processed_items"), processed)
+        self._set_progress(
+            self.content_progress_bar, content_count, content_count if after_scan else total,
+            active and content_phase,
+        )
         self.content_detail_label.setText(
             " · ".join(
                 part
                 for part in (
-                    f"Phase {phase}" if phase else "",
-                    f"{processed} / {total}" if total else "",
+                    "Dateierfassung abgeschlossen" if after_scan else f"Phase {phase}" if phase else "",
+                    f"{content_count} Dateien" if after_scan else f"{processed} / {total}" if total else "",
                     f"{failed} Fehler" if failed else "",
                 )
                 if part
@@ -1083,26 +1114,53 @@ class TrayController:
 
 
 class SingleInstanceServer:
-    def __init__(self):
+    def __init__(self, lock_directory: Path | None = None):
+        directory = lock_directory or Path(
+            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        suffix = hashlib.sha256(str(directory.resolve()).encode("utf-8")).hexdigest()[:16]
+        self.name = f"{INSTANCE_NAME}-{suffix}"
+        self.lock = QLockFile(str(directory / "index-tray.lock"))
+        self.lock.setStaleLockTime(0)
         self.server = QLocalServer()
+        self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
 
     def claim(self, on_show, *, request_show: bool = True) -> bool:
-        if self.server.listen(INSTANCE_NAME):
-            self.server.newConnection.connect(lambda: self._receive(on_show))
-            return True
-        socket = QLocalSocket()
-        socket.connectToServer(INSTANCE_NAME, QIODevice.OpenModeFlag.WriteOnly)
-        if socket.waitForConnected(300):
+        # Windows permits several QLocalServers to listen on the same named pipe.
+        # Claim an OS-backed file lock before creating either a listener or a GUI.
+        if not self.lock.tryLock(0):
+            if self.lock.error() != QLockFile.LockError.LockFailedError:
+                raise OSError("Die Sperre für den Indextray konnte nicht angelegt werden.")
             if request_show:
-                socket.write(b"show")
-                socket.waitForBytesWritten(300)
-            socket.disconnectFromServer()
+                self._request_show()
             return False
-        QLocalServer.removeServer(INSTANCE_NAME)
-        if not self.server.listen(INSTANCE_NAME):
-            return True
+        if not self.server.listen(self.name):
+            # Only the lock owner may clean up a Unix socket left by a crashed tray.
+            QLocalServer.removeServer(self.name)
+            if not self.server.listen(self.name):
+                self.lock.unlock()
+                raise OSError(self.server.errorString())
         self.server.newConnection.connect(lambda: self._receive(on_show))
         return True
+
+    def _request_show(self) -> None:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            socket = QLocalSocket()
+            socket.connectToServer(self.name, QIODevice.OpenModeFlag.WriteOnly)
+            if socket.waitForConnected(100):
+                socket.write(b"show")
+                if socket.waitForBytesWritten(300):
+                    socket.disconnectFromServer()
+                    return
+            socket.abort()
+            time.sleep(0.05)
+        raise OSError("Der Indextray antwortet noch nicht. Bitte erneut öffnen.")
+
+    def close(self) -> None:
+        self.server.close()
+        self.lock.unlock()
 
     def _receive(self, on_show) -> None:
         while self.server.hasPendingConnections():
@@ -1128,9 +1186,23 @@ def run_tray_gui(container: ClientContainer, argv: list[str] | None = None) -> i
         application.setStyleSheet(
             build_stylesheet(theme.mode, theme.accent, theme.contrast, theme.font_size)
         )
-    controller = TrayController(application, container, show=not options.background)
     instance = SingleInstanceServer()
-    if not instance.claim(controller.show, request_show=not options.background):
+    controller = None
+    show_requested = not options.background
+
+    def show_existing() -> None:
+        nonlocal show_requested
+        show_requested = True
+        if controller is not None:
+            controller.show()
+
+    if not instance.claim(show_existing, request_show=not options.background):
         return 0
-    application._papagui_tray = (controller, instance)  # type: ignore[attr-defined]
-    return application.exec()
+    try:
+        controller = TrayController(application, container, show=False)
+        if show_requested:
+            controller.show()
+        application._papagui_tray = (controller, instance)  # type: ignore[attr-defined]
+        return application.exec()
+    finally:
+        instance.close()

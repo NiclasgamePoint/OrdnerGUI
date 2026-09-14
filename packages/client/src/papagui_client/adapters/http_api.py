@@ -39,6 +39,7 @@ from papagui_client.application.errors import (
     CustomerGatewayConflict,
     CustomerGatewayIdempotencyConflict,
     CustomerGatewayUnavailable,
+    GenerationNotReady,
 )
 
 
@@ -146,9 +147,25 @@ class HttpGenerationGateway:
         except ApiRejectedError as exc:
             if exc.status != 404:
                 raise
-            payload = self._transport.json("GET", "/v1/index/current")
+            if self._generation_pending(exc):
+                raise GenerationNotReady from exc
+            try:
+                payload = self._transport.json("GET", "/v1/index/current")
+            except ApiRejectedError as legacy_exc:
+                if self._generation_pending(legacy_exc):
+                    raise GenerationNotReady from legacy_exc
+                raise
             self._api_version = 1
         return GenerationManifest.from_dict(payload)
+
+    @staticmethod
+    def _generation_pending(error: ApiRejectedError) -> bool:
+        detail = error.payload.get("error")
+        return (
+            error.status == 404
+            and isinstance(detail, Mapping)
+            and detail.get("code") == "not_found"
+        )
 
     def download_component(
         self,

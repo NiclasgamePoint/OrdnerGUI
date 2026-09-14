@@ -27,7 +27,12 @@ class TrayProcessLauncher:
             suffix = ".exe" if os.name == "nt" else ""
             sibling = executable.with_name(f"papagui-tray{suffix}")
             return [str(sibling), *arguments]
-        return [sys.executable, "-m", "papagui_client.entrypoints.tray", *arguments]
+        executable = Path(sys.executable)
+        if os.name == "nt":
+            windowed = executable.with_name("pythonw.exe")
+            if windowed.is_file():
+                executable = windowed
+        return [str(executable), "-m", "papagui_client.entrypoints.tray", *arguments]
 
     @staticmethod
     def _macos_bundle(executable: Path) -> Path | None:
@@ -56,7 +61,7 @@ class TrayProcessLauncher:
         }
         if os.name == "nt":
             options["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
         else:
             options["start_new_session"] = True

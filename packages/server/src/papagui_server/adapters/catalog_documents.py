@@ -230,6 +230,7 @@ class ParallelDocuments:
         progress,
     ):
         seen, pending, formats, stored = set(), {}, {}, {}
+        previous_folder, metadata = None, None
         processed = 0
         executor = ThreadPoolExecutor(
             max_workers=self.workers, thread_name_prefix="papagui-document"
@@ -280,6 +281,8 @@ class ParallelDocuments:
             processed += 1
             self.status.count(processed_documents=1)
             if processed % 25 == 0:
+                # Persist artifacts before a resumable catalog can reference them.
+                self.store.flush()
                 connection.commit()
             progress(processed, relative)
 
@@ -307,7 +310,10 @@ class ParallelDocuments:
                 seen.add(relative)
                 self.status.count(discovered_documents=1)
                 stat = path.stat()
-                metadata = parser.parse_file(source_id, relative)
+                folder = relative.rpartition("/")[0]
+                if folder != previous_folder:
+                    metadata = parser.parse_file(source_id, relative)
+                    previous_folder = folder
                 extension = path.suffix.casefold().lstrip(".")
                 eligible = (
                     self.settings.content_indexing_enabled

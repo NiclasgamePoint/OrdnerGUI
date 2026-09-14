@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Kundenerkennung nach dem Dateiscan beschleunigt: Dokumentrangfolge einmal
+  berechnen und Texte direkt über ihre FTS-Zeilen laden. Eigenen Fortschritt für
+  Kundengruppen und Dokumentprüfung anzeigen; Statusabfragen bleiben auch während
+  der Veröffentlichung erreichbar.
+
+- Katalogaufbau beschleunigt: Volltextänderungen über indizierte Zeilenverweise,
+  transaktionale Cache-Größenzähler und gebündelte Schreibvorgänge; Cache-Artefakte
+  werden vor den zugehörigen Katalog-Checkpoints gespeichert. Große Artefakte
+  lösen frühzeitige Checkpoints aus. Wiederaufnahme und bestehende Caches bleiben
+  unterstützt; synthetischen Pyinstrument-Benchmark ergänzt.
+
+- Ersten Indexaufbau als erreichbaren Server mit ausstehender Generation anzeigen;
+  automatische Wiederholungen übernehmen den fertigen Index ohne falsche Offline-Meldung.
+- Mehrfache Indextray-Fenster unter Windows durch eine Instanzsperre verhindern;
+  weitere Statusklicks aktivieren das bestehende Fenster.
+- Windows-GUI und Tray mit `pythonw.exe` ohne dauerhafte Konsolen starten und den
+  zusätzlichen Tray-Start aus dem Startskript entfernen.
+
+- Windows-Komfortstart erstellt fehlende Server-Images und Container mit sichtbarer
+  Docker-Ausgabe; Exitcodes, fehlende Startvoraussetzungen und Containerabbrüche
+  werden vor dem Offline-Fallback geprüft. Native Regressionstests ergänzt.
+
 - Windows-Testfälle für native Pfade, Toolnamen, Prozesszeilenenden und simulierte
   Plattformen korrigiert; Linux-Ressourcenprüfungen verwenden isolierte Testwerte.
   Bash-Syntaxprüfungen testen jedes Startskript und verwenden unter Windows Git Bash.

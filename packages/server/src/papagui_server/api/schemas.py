@@ -126,6 +126,8 @@ class IndexProgressModel(ApiModel):
     phase: str
     current_source: SourcePathModel | None
     legacy_current_path: str | None
+    catalog_processed_items: int | None = Field(default=None, ge=0)
+    evaluated_documents: int | None = Field(default=None, ge=0)
 
 
 class IndexStatusModel(ApiModel):

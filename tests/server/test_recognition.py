@@ -50,7 +50,15 @@ def test_folder_and_document_recognition_are_safe_and_idempotent(tmp_path: Path)
     )
     recognizer = container.recognition
 
-    first = recognizer.synchronize(source, source_id="primary", minimum_year=2016)
+    progress = []
+    first = recognizer.synchronize(
+        source, source_id="primary", minimum_year=2016,
+        progress=lambda *values: progress.append(values),
+    )
+    assert progress[0] == ("customer-recognition", 0, 1, 0)
+    assert ("customer-recognition", 1, 1, 0) in progress
+    assert ("customer-documents", 0, 1, 1) in progress
+    assert progress[-1] == ("customer-documents", 1, 1, 2)
     assert first == {
         "detected": 2,
         "created": 1,

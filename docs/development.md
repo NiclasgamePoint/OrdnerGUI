@@ -123,6 +123,21 @@ die synthetische Fixture und öffnet weder Kundendokumente noch produktive
 Einstellungen. Er misst die fachliche Erkennung, nicht OCR oder GUI-Latenzen.
 Pyinstrument ist eine Entwicklungsabhängigkeit und gehört nicht in Produktartefakte.
 
+Den Katalogaufbau einschließlich Metadaten, Textspeicherung, Cache und Wiederholung
+misst ein separater Benchmark mit 1.500 frisch erzeugten Textdateien:
+
+```powershell
+.\.venv\Scripts\python.exe tools/profile_catalog.py --documents 1500
+```
+
+Er schreibt Messwerte nach `profiles/catalog.json` sowie je Lauf einen HTML- und
+Textbericht. Der synthetische Leser arbeitet ohne OCR und externe Parser, damit
+die Kosten des Katalogs sichtbar werden. Gemessen werden Metadaten allein und
+der Katalog mit Textspeicherung, jeweils beim ersten und unveränderten Folgelauf.
+Die temporäre Quelle und die Testdatenbanken werden anschließend entfernt.
+Ergebnisse und Grenzen des Vorher/Nachher-Vergleichs stehen im
+[Katalog-Prüfbericht](development/catalog-performance-2026-09-11.md).
+
 Für einen einzelnen GUI-Test lässt sich die CLI direkt nutzen, nachdem `profiles/`
 angelegt wurde:
 
@@ -143,10 +158,13 @@ Serverprozessen oder Workerthreads muss gesondert profiliert werden.
 - `start.ps1` beziehungsweise `start.bat`: Windows-Komfortstart
 
 Die POSIX-Skripte werden mit `bash -n` geprüft. Der Windows-CI-Job sieht eine
-PowerShell-AST-Prüfung von `start.ps1` vor. Die Windows-Tests führen außerdem
-ausschließlich dessen Secret-Hilfsfunktionen mit synthetischen temporären
-Dateien aus: Token-Erzeugung, Speicherung, Wiederverwendung, Dateirechte und
-Generatorfehler. Auf anderen Plattformen werden diese Fälle übersprungen.
+PowerShell-AST-Prüfung von `start.ps1` vor. Die Windows-Tests führen dessen
+Secret-Hilfsfunktionen mit synthetischen temporären Dateien aus: Token-Erzeugung,
+Speicherung, Wiederverwendung, Dateirechte und Generatorfehler. Der Serverstart
+wird mit einem lokalen Docker-Ersatz und simulierten Healthchecks geprüft,
+einschließlich Buildfehlern, Containerabbruch und Offline-Start. Dabei werden
+keine echten Container oder GUI-Prozesse gestartet. Auf anderen Plattformen
+werden diese Fälle übersprungen.
 `start.bat` delegiert an Windows PowerShell. Ein lokal erzeugtes natives
 Artefakt wird mit `python tools/check_frozen_client.py dist` auf Paketgrenzen
 geprüft und über `--help` beziehungsweise einen Offline-Sync-Smoke gestartet.
@@ -174,9 +192,33 @@ $env:PAPAGUI_SOURCE_PATH = 'C:\Daten\Bauvorhaben'
 .\start.bat
 ```
 
+`start.bat` lässt über `start.ps1` automatisch das Server-Image bauen und einen
+fehlenden Container erstellen; vorhandene Container werden gestartet oder bei
+Änderungen aktualisiert. Docker verwendet beim Build seinen Cache. Build- und
+Startausgaben bleiben im Konsolenfenster sichtbar. Erst nach erfolgreichem
+Compose-Aufruf wartet der Starter auf die Server-API und öffnet danach den Client
+mit `pythonw.exe`. Der Client startet selbst den unabhängigen Indextray, ebenfalls
+ohne Konsole. Das Startskript beendet sich danach; beim Doppelklick auf `start.bat`
+schließt damit auch das Konsolenfenster. Für `--sync-only` und `--help` bleibt die
+Konsolenausgabe erhalten. Bei Docker-Fehlern nennt der Starter die Ursache und
+startet den Client offline.
+
+Beim ersten Serverstart kann die API schon erreichbar sein, während der erste
+Index noch aufgebaut wird. Der Client zeigt dann „Server erreichbar · Noch kein
+fertiger Index verfügbar.“ und prüft bei aktiver automatischer Synchronisierung
+alle fünf Sekunden erneut. Vorhandene lokale Daten bleiben dabei erhalten.
+Sobald eine vollständige Generation bereitsteht, wird sie übernommen und das
+normale Synchronisierungsintervall gilt wieder.
+
+Der Indextray verwendet eine benutzerbezogene Dateisperre zusätzlich zum lokalen
+Qt-Socket. Weitere Statusklicks aktivieren das vorhandene Fenster; sie erzeugen
+keine weiteren Tray-Fenster. Nach einem Update der Tray-Steuerung alte
+Indextray-Instanzen einmal über deren Menü beenden und den Client neu starten.
+
 Die Starter verwenden standardmäßig `Bauvorhaben` im Repository. Ein anderer
 Mount wird über `PAPAGUI_SOURCE_PATH` gesetzt. Dieses Verzeichnis ist nicht in
-Git enthalten. Fehlt es, startet der Windows-Starter keinen Servercontainer;
+Git enthalten. Fehlt es, meldet der Windows-Starter den fehlenden Quellordner
+und startet keinen Servercontainer;
 eine geöffnete GUI kann dann leer oder offline sein. Der lokale Serverstart
 kann die konfigurierte Quelle indexieren. Für einen Entwicklungs-Smoke nur
 einen eigens angelegten synthetischen Quellordner verwenden.

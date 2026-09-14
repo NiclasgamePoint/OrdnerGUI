@@ -334,3 +334,33 @@ def test_invalid_or_completed_persisted_state_is_not_recovered(tmp_path: Path) -
     assert _coordinator(tmp_path).status()["index"]["state"] == "idle"
     state.write_text(json.dumps({"state": "completed"}), encoding="utf-8")
     assert _coordinator(tmp_path).status()["index"]["state"] == "idle"
+
+
+def test_recognition_reports_its_own_progress_and_keeps_catalog_count(tmp_path):
+    statuses = []
+
+    class ReportingRecognizer:
+        def synchronize(self, *args, progress, **kwargs):
+            statuses.append(coordinator.status())
+            progress("customer-recognition", 1, 2, 0)
+            statuses.append(coordinator.status())
+            progress("customer-documents", 1, 2, 17)
+            statuses.append(coordinator.status())
+            return {"detected": 2}
+
+    class ReportingPublisher(Publisher):
+        def publish_all(self):
+            statuses.append(coordinator.status())
+            return super().publish_all()
+
+    coordinator = _coordinator(tmp_path, recognizer=ReportingRecognizer(), publisher=ReportingPublisher())
+    assert coordinator.run_once() == 0
+    progress = [status["index"]["progress"] for status in statuses]
+    assert [(row["phase"], row["processed_items"], row["total_items"]) for row in progress] == [
+        ("customer-recognition", 0, 0), ("customer-recognition", 1, 2),
+        ("customer-documents", 1, 2), ("publishing", 0, 0),
+    ]
+    assert all(row["catalog_processed_items"] == 10 for row in progress)
+    assert all(not row.get("current_source") and not row.get("legacy_current_path") for row in progress)
+    assert progress[2]["evaluated_documents"] == 17
+    assert coordinator.status()["index"]["progress"]["processed_items"] == 10

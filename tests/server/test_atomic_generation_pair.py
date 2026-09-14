@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
+import threading
 
 import pytest
 
@@ -36,6 +38,30 @@ def _artifacts(publisher: GenerationV2Publisher) -> dict[str, tuple[str, ...]]:
         )
         for component in ("index", "customers")
     }
+
+
+def test_status_stays_responsive_while_archives_are_being_built(tmp_path, monkeypatch):
+    publisher = _publisher(tmp_path)
+    previous = publisher.publish_all()
+    entered = threading.Event()
+    release = threading.Event()
+    original = publisher._stage
+
+    def slow_stage(component, sources):
+        entered.set()
+        assert release.wait(5)
+        return original(component, sources)
+
+    monkeypatch.setattr(publisher, "_stage", slow_stage)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        publishing = pool.submit(publisher.publish_all)
+        try:
+            assert entered.wait(2)
+            assert pool.submit(publisher.retention_status).result(timeout=1)["state"] == "ok"
+            assert publisher.current() == previous
+        finally:
+            release.set()
+        assert publishing.result(timeout=5) != previous
 
 
 def test_customer_stage_failure_never_activates_or_rotates_half_pair(

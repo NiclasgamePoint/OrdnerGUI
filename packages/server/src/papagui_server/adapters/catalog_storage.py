@@ -87,6 +87,14 @@ class CatalogSqliteWriter:
             """
         )
 
+        # FTS5's UNINDEXED path column is not a B-tree index. Build this lookup
+        # once per staged connection, including catalogs written by older versions.
+        connection.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS content_rowids(path TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL)"
+        )
+        connection.execute("DELETE FROM content_rowids")
+        connection.execute("INSERT INTO content_rowids SELECT path,rowid FROM file_content_fts")
+
     def upsert_file(
         self,
         connection: sqlite3.Connection,
@@ -172,11 +180,20 @@ class CatalogSqliteWriter:
                     uri,
                 ),
             )
-        connection.execute("DELETE FROM file_content_fts WHERE path=?", (uri,))
+        self.remove_content(connection, uri)
         if content:
-            connection.execute(
+            cursor = connection.execute(
                 "INSERT INTO file_content_fts(path, content) VALUES (?, ?)", (uri, content)
             )
+            connection.execute("INSERT INTO content_rowids VALUES (?,?)", (uri, cursor.lastrowid))
+
+    @staticmethod
+    def remove_content(connection: sqlite3.Connection, uri: str) -> None:
+        connection.execute(
+            "DELETE FROM file_content_fts WHERE rowid=(SELECT fts_rowid FROM content_rowids WHERE path=?)",
+            (uri,),
+        )
+        connection.execute("DELETE FROM content_rowids WHERE path=?", (uri,))
 
     def update_file_classification(
         self,
@@ -368,4 +385,9 @@ def document_priority(filename: str, content: str) -> int:
     )
     score -= sum(10 for word in technical if word in name)
     score -= sum(2 for word in technical if word in text)
-    return score + min(5, sum(character.isalpha() for character in text) // 100)
+    letters = 0
+    for character in text:
+        letters += character.isalpha()
+        if letters >= 500:
+            break  # Text-quality contribution is capped; remaining letters cannot change it.
+    return score + letters // 100

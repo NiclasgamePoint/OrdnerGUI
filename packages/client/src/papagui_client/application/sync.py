@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from papagui_contracts.generations import GenerationComponentKind
 
 from .models import InstalledGeneration, SyncResult
+from .errors import GenerationNotReady
 from .ports import GenerationGateway, GenerationStore
 
 
@@ -25,6 +26,15 @@ class SyncCoordinator:
         self._store.import_legacy_symlink()
         try:
             manifest = self._gateway.current_manifest()
+        except GenerationNotReady:
+            return SyncResult(
+                current={
+                    kind.value: generation
+                    for kind in (GenerationComponentKind.INDEX, GenerationComponentKind.CUSTOMERS)
+                    if (generation := self._store.current_generation(kind)) is not None
+                },
+                awaiting_generation=True,
+            )
         except Exception as exc:
             if isinstance(exc, SyncError):
                 raise

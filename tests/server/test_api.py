@@ -27,6 +27,36 @@ def _run(coroutine):
     return asyncio.run(coroutine)
 
 
+def test_status_http_response_preserves_recognition_progress(tmp_path):
+    async def scenario():
+        container = _container(tmp_path)
+        coordinator = container.coordinator
+        coordinator._state.state = "running"
+        coordinator._state.phase = "customer-recognition"
+        coordinator._state.processed_count = 5153
+        coordinator._state.current_path = "last.txt"
+        app = create_app(container, manage_lifecycle=False)
+        headers = {"Authorization": "Bearer client-token-123"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            for phase in ("customer-recognition", "customer-documents"):
+                coordinator._recognition_progress(phase, 42, 80, 720)
+                response = await client.get("/v2/server/status", headers=headers)
+                assert response.status_code == 200
+                progress = response.json()["index"]["progress"]
+                assert progress["phase"] == phase
+                assert (progress["processed_items"], progress["total_items"]) == (42, 80)
+                assert progress["catalog_processed_items"] == 5153
+                assert progress["evaluated_documents"] == 720
+                assert progress["current_source"] is None
+            coordinator._set_phase("publishing")
+            response = await client.get("/v2/server/status", headers=headers)
+            assert response.status_code == 200
+            assert response.json()["index"]["progress"]["catalog_processed_items"] == 5153
+            assert (await client.get("/health")).status_code == 200
+
+    _run(scenario())
+
+
 def test_api_preserves_aggregate_document_workers(tmp_path, monkeypatch):
     async def scenario():
         container = _container(tmp_path)

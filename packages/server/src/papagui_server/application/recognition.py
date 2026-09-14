@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 import hashlib
 import json
 from pathlib import Path
@@ -59,6 +60,7 @@ class RecognitionApplicationService:
         self, _source_path: Path, *, source_id: str, minimum_year: int,
         cancelled=lambda: False,
         exhaustive: bool = False,
+        progress: Callable[[str, int, int, int], None] | None = None,
     ) -> dict[str, int]:
         roots = [
             CatalogProjectRoot.from_dict(value)
@@ -82,14 +84,20 @@ class RecognitionApplicationService:
                 grouped: dict[str, list[CatalogProjectRoot]] = defaultdict(list)
                 for root in roots:
                     grouped[root.recognition_key].append(root)
-                for key in sorted(grouped):
+                if progress:
+                    progress("customer-recognition", 0, len(grouped), 0)
+                for number, key in enumerate(sorted(grouped), 1):
                     if cancelled():
                         raise InterruptedError("Kundenerkennung abgebrochen.")
                     self._process_group(work, grouped[key], customers, run_id, stats)
                     customers = all_customers(work.customers)
+                    if progress:
+                        progress("customer-recognition", number, len(grouped), 0)
                 work.recognition.mark_unseen_stale(run_id)
                 work.commit()
             document_options = {"exhaustive": True} if exhaustive else {}
+            if progress:
+                document_options["progress"] = progress
             stats["suggestions"] = self.documents.run(source_id, cancelled=cancelled, **document_options)["suggestions"]
             with self._unit_of_work() as work:
                 work.recognition.finish_run(run_id, stats)

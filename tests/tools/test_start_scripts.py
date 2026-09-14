@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -203,11 +204,192 @@ def test_start_scripts_manage_only_the_client_token_secret() -> None:
     assert not any("PASSWORD" in name for name in environment)
 
 
-def test_windows_health_wait_detects_a_crashed_detached_container() -> None:
-    powershell = (ROOT / "start.ps1").read_text(encoding="utf-8")
-    assert "$dockerStart.Refresh()" in powershell
-    assert "compose -f deploy/server/compose.yaml ps --status running --quiet" in powershell
-    assert "Der Servercontainer ist nach dem Compose-Start nicht mehr aktiv" in powershell
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="Windows PowerShell is unavailable")
+@pytest.mark.parametrize(
+    "scenario,expected_commands,health_calls,sleeps,message",
+    [
+        ("create", ["info", "version", "up"], 1, 0, "PapaGUI-Server ist erreichbar"),
+        ("retry", ["info", "version", "up", "ps"], 2, 1, "PapaGUI-Server ist erreichbar"),
+        ("build_failure", ["info", "version", "up"], 0, 0, "Exitcode 7"),
+        ("engine_offline", ["info"], 0, 0, "Docker ist nicht erreichbar"),
+        ("no_compose", ["info", "version"], 0, 0, "Docker Compose ist nicht verfuegbar"),
+        ("crash", ["info", "version", "up", "ps"], 1, 0, "nicht mehr aktiv"),
+        ("timeout", ["info", "version", "up", "ps", "ps", "ps"], 3, 3, "Zeitlimit"),
+        ("skip", [], 0, 0, ""),
+        ("missing_source", [], 0, 0, "Quellordner"),
+        ("missing_docker", [], 0, 0, "Docker wurde nicht gefunden"),
+    ],
+)
+def test_windows_server_bootstrap(
+    tmp_path: Path,
+    scenario: str,
+    expected_commands: list[str],
+    health_calls: int,
+    sleeps: int,
+    message: str,
+) -> None:
+    """Run the real bootstrap with a native fake Docker, no GUI or customer data."""
+    fake_bin = tmp_path / "fake docker bin"
+    fake_bin.mkdir()
+    (fake_bin / "docker.cmd").write_text(
+        "@echo off\n"
+        'echo %*>>"%~dp0calls.txt"\n'
+        f'if "%~1"=="info" exit /b {9 if scenario == "engine_offline" else 0}\n'
+        f'if "%~2"=="version" exit /b {8 if scenario == "no_compose" else 0}\n'
+        'if "%~4"=="ps" (\n'
+        + ("  rem No running container\n" if scenario == "crash" else "  echo synthetic-container\n")
+        + "  exit /b 0\n)\n"
+        'if not "%~4"=="up" exit /b 99\n'
+        "echo synthetic Docker build progress 1>&2\n"
+        f"exit /b {7 if scenario == 'build_failure' else 0}\n",
+        encoding="ascii",
+    )
+    harness = tmp_path / "server bootstrap.ps1"
+    harness.write_text(
+        r"""
+param([string]$LauncherPath, [string]$FakeBin, [string]$Scenario)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $LauncherPath, [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -ne 0) { throw 'Launcher contains PowerShell syntax errors.' }
+$definition = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Start-LocalServer'
+}, $false)
+if (-not $definition) { throw 'Server bootstrap function is missing.' }
+Invoke-Expression $definition.Extent.Text
+$env:PATH = $FakeBin + ';' + $env:PATH
+if ((Get-Command docker).Source -ne (Join-Path $FakeBin 'docker.cmd')) {
+    throw 'Fake Docker must take precedence over the real installation.'
+}
+$env:PAPAGUI_SKIP_DOCKER = if ($Scenario -eq 'skip') { '1' } else { $null }
+$env:PAPAGUI_SOURCE_PATH = Join-Path $PSScriptRoot 'synthetic source'
+$env:PAPAGUI_INDEX_SERVER_URL = 'http://synthetic.invalid:8765/'
+if ($Scenario -ne 'missing_source') {
+    New-Item -ItemType Directory -Path $env:PAPAGUI_SOURCE_PATH | Out-Null
+}
+if ($Scenario -eq 'missing_docker') {
+    function Get-Command { param($Name, $ErrorAction) return $null }
+}
+$script:healthCalls = 0
+$script:sleeps = 0
+function Invoke-RestMethod {
+    [CmdletBinding()]
+    param([string]$Uri, [int]$TimeoutSec)
+    if ($Uri -ne 'http://synthetic.invalid:8765/health' -or $TimeoutSec -ne 1) {
+        throw 'Unexpected healthcheck request.'
+    }
+    $script:healthCalls++
+    if ($Scenario -in @('crash', 'timeout') -or
+        ($Scenario -eq 'retry' -and $script:healthCalls -eq 1)) {
+        throw 'Synthetic server is not ready.'
+    }
+    return @{status = 'ok'}
+}
+function Start-Sleep { param([int]$Seconds) $script:sleeps++ }
+Start-LocalServer -HealthCheckAttempts 3
+if ($ErrorActionPreference -ne 'Stop') { throw 'Bootstrap changed caller error handling.' }
+Write-Output ('STATE:' + (@{health_calls = $script:healthCalls; sleeps = $script:sleeps} |
+    ConvertTo-Json -Compress))
+exit 0
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [
+            WINDOWS_POWERSHELL or "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(harness),
+            "-LauncherPath",
+            str(ROOT / "start.ps1"),
+            "-FakeBin",
+            str(fake_bin),
+            "-Scenario",
+            scenario,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=30,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert message in output
+    state = json.loads(next(line[6:] for line in result.stdout.splitlines() if line.startswith("STATE:")))
+    assert state == {"health_calls": health_calls, "sleeps": sleeps}
+    command_log = fake_bin / "calls.txt"
+    commands = command_log.read_text().splitlines() if command_log.exists() else []
+    arguments = {
+        "info": "info",
+        "version": "compose version",
+        "up": "compose -f deploy/server/compose.yaml up -d --build papagui-server",
+        "ps": "compose -f deploy/server/compose.yaml ps --status running --quiet papagui-server",
+    }
+    assert commands == [arguments[command] for command in expected_commands]
+    if "up" in expected_commands:
+        assert "synthetic Docker build progress" in output  # Native stderr is normal progress.
+
+
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="Windows PowerShell is unavailable")
+def test_windows_desktop_bootstrap_starts_only_windowed_client(tmp_path: Path) -> None:
+    harness = tmp_path / "desktop bootstrap.ps1"
+    harness.write_text(
+        r"""
+param([string]$LauncherPath)
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $LauncherPath, [ref]$tokens, [ref]$parseErrors
+)
+$definition = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Start-DesktopClient'
+}, $false)
+if (-not $definition) { throw 'Desktop launcher is missing.' }
+Invoke-Expression $definition.Extent.Text
+$python = Join-Path $PSScriptRoot 'python.exe'
+New-Item -Path (Join-Path $PSScriptRoot 'pythonw.exe') -ItemType File | Out-Null
+$script:launches = @()
+function Start-Process {
+    param($FilePath, $ArgumentList, $WindowStyle)
+    $script:launches += @{file = $FilePath; arguments = $ArgumentList; style = $WindowStyle}
+}
+Start-DesktopClient --offline
+if ($script:launches.Count -ne 1) { throw 'Desktop bootstrap must launch exactly one process.' }
+$launch = $script:launches[0]
+if ($launch.file -ne (Join-Path $PSScriptRoot 'pythonw.exe') -or
+    ($launch.arguments -join ' ') -ne '-m papagui_client --offline' -or
+    $launch.style -ne 'Hidden') {
+    throw 'Desktop was not launched without a console or arguments were lost.'
+}
+exit 0
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [
+            WINDOWS_POWERSHELL or "powershell.exe", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-File", str(harness),
+            "-LauncherPath", str(ROOT / "start.ps1"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_compose_defaults_to_loopback_and_keeps_source_read_only() -> None:

@@ -5,6 +5,10 @@ from __future__ import annotations
 from papagui_contracts.customers import Customer
 
 
+class GenerationNotReady(RuntimeError):
+    """The server is reachable but has no complete published generation yet."""
+
+
 class CustomerGatewayUnavailable(RuntimeError):
     pass
 

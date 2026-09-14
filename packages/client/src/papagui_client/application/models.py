@@ -290,6 +290,7 @@ class SyncResult:
     current: Mapping[str, str] = field(default_factory=dict)
     customer_replay: ReplayResult | None = None
     journal_replay: JournalReplayResult | None = None
+    awaiting_generation: bool = False
 
     @property
     def changed(self) -> bool:

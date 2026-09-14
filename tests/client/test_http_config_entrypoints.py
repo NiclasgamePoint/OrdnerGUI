@@ -30,6 +30,7 @@ from papagui_client.application.models import (
     SyncResult,
 )
 from papagui_client.application.sync import SyncError
+from papagui_client.application.errors import GenerationNotReady
 from papagui_client.composition import ClientContainer, build_client, build_tray
 from papagui_client.config import ClientSettings, default_data_root
 from papagui_client.entrypoints import client as client_entrypoint
@@ -154,6 +155,44 @@ def test_http_transport_download_and_unavailable_errors(monkeypatch, tmp_path):
     with pytest.raises(ApiRejectedError) as caught:
         _HttpTransport("http://server").download("/archive", destination)
     assert caught.value.status == 403
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_generation_gateway_recognizes_pending_generation(legacy):
+    gateway = HttpGenerationGateway("http://server")
+    gateway._transport = Mock()
+    pending = ApiRejectedError(404, "not ready", {"error": {"code": "not_found"}})
+    gateway._transport.json.side_effect = (
+        [ApiRejectedError(404, "route missing"), pending] if legacy else [pending]
+    )
+    with pytest.raises(GenerationNotReady):
+        gateway.current_manifest()
+    assert gateway._transport.json.call_count == (2 if legacy else 1)
+
+
+def test_windows_tray_uses_windowed_python_and_no_console_flag(monkeypatch, tmp_path):
+    import papagui_client.gui.launcher as launcher
+
+    monkeypatch.setattr(launcher, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(launcher, "sys", SimpleNamespace(executable=str(tmp_path / "python.exe")))
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.touch()
+    process = Mock()
+    monkeypatch.setattr(launcher.subprocess, "Popen", process)
+    monkeypatch.setattr(launcher.subprocess, "CREATE_NEW_PROCESS_GROUP", 1, raising=False)
+    monkeypatch.setattr(launcher.subprocess, "CREATE_NO_WINDOW", 2, raising=False)
+    launcher.TrayProcessLauncher().show()
+    assert process.call_args.args[0] == [str(pythonw), "-m", "papagui_client.entrypoints.tray"]
+    assert process.call_args.kwargs["creationflags"] == 3
+    assert process.call_args.kwargs["stdout"] == launcher.subprocess.DEVNULL
+
+
+def test_generation_gateway_unknown_routes_are_errors():
+    gateway = HttpGenerationGateway("http://server")
+    gateway._transport = Mock()
+    gateway._transport.json.side_effect = ApiRejectedError(404, "route missing")
+    with pytest.raises(ApiRejectedError):
+        gateway.current_manifest()
 
 
 def test_generation_gateway_v2_v1_fallback_and_download_routes(tmp_path):
@@ -464,9 +503,9 @@ def test_entrypoint_import_errors_tray_forwarding_and_launch_commands(monkeypatc
     import papagui_client.gui.launcher as launcher_module
     monkeypatch.setattr(launcher_module, "os", SimpleNamespace(**vars(launcher_module.os)))
     monkeypatch.setattr(launcher_module, "sys", SimpleNamespace(**vars(launcher_module.sys)))
-    monkeypatch.setattr(launcher_module, "Path", PurePosixPath)
     monkeypatch.setattr("papagui_client.gui.launcher.sys.frozen", False, raising=False)
     assert launcher.command()[1:] == ["-m", "papagui_client.entrypoints.tray", "--background"]
+    monkeypatch.setattr(launcher_module, "Path", PurePosixPath)
     monkeypatch.setattr("papagui_client.gui.launcher.sys.frozen", True, raising=False)
     monkeypatch.setattr("papagui_client.gui.launcher.sys.executable", "/opt/PapaGUI/papagui-client")
     monkeypatch.setattr("papagui_client.gui.launcher.os.name", "posix")
@@ -493,7 +532,7 @@ def test_entrypoint_import_errors_tray_forwarding_and_launch_commands(monkeypatc
         "papagui_client.gui.launcher.subprocess.CREATE_NEW_PROCESS_GROUP", 1, raising=False
     )
     monkeypatch.setattr(
-        "papagui_client.gui.launcher.subprocess.DETACHED_PROCESS", 2, raising=False
+        "papagui_client.gui.launcher.subprocess.CREATE_NO_WINDOW", 2, raising=False
     )
     launcher.start()
     assert popen.call_args.kwargs["creationflags"]

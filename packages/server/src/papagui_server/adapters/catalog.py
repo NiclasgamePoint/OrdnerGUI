@@ -231,31 +231,32 @@ class SqliteCatalogIndexer:
                 status=self._document_status,
                 cancelled=cancelled,
             )
-            seen = pipeline.run(
-                connection=connection,
-                files=self._files(
-                    source_path,
-                    settings.excluded_folder_names,
-                    newest_years_first=settings.newest_years_first,
-                ),
-                source_path=source_path,
-                source_id=source_id,
-                parser=parser,
-                known=known,
-                root_ids=root_ids,
-                parser_fingerprint=parser_fingerprint,
-                verify_content=verify_content,
-                forced=force_extraction,
-                selected_projects=selected_projects,
-                run_id=run_id,
-                progress=progress,
-            )
+            with self.extraction_store.buffered_writes():
+                seen = pipeline.run(
+                    connection=connection,
+                    files=self._files(
+                        source_path,
+                        settings.excluded_folder_names,
+                        newest_years_first=settings.newest_years_first,
+                    ),
+                    source_path=source_path,
+                    source_id=source_id,
+                    parser=parser,
+                    known=known,
+                    root_ids=root_ids,
+                    parser_fingerprint=parser_fingerprint,
+                    verify_content=verify_content,
+                    forced=force_extraction,
+                    selected_projects=selected_projects,
+                    run_id=run_id,
+                    progress=progress,
+                )
             removed = set(known) - seen
             for relative in removed:
                 if cancelled():
                     raise InterruptedError("Indexlauf abgebrochen.")
                 uri = _source_uri(source_id, relative)
-                connection.execute("DELETE FROM file_content_fts WHERE path=?", (uri,))
+                self._writer.remove_content(connection, uri)
                 connection.execute(
                     "DELETE FROM files WHERE source_id=? AND relative_path=?",
                     (source_id, relative),

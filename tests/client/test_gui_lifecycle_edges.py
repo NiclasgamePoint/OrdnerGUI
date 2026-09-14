@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import subprocess
+import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 import pytest
@@ -198,6 +200,27 @@ def test_main_window_sync_status_and_customer_rendering(application, tmp_path):
     window._closing = True
     window.synchronize()
     window.close()
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_main_window_waits_for_first_index_and_retries_on_gui_thread(qtbot, tmp_path, automatic):
+    window = ClientMainWindow(make_container(tmp_path), automatic_sync=False)
+    qtbot.addWidget(window)
+    window._start_task = lambda task: task.run()
+    if automatic:
+        window._sync_timer.start(900, window.synchronize)
+    window._sync_complete(SyncResult(awaiting_generation=True))
+    assert "Server erreichbar" in window.status.text()
+    assert "Offline" not in window.status.text()
+    assert window._initial_index_timer.isActive() is automatic
+    if automatic:
+        assert window._initial_index_timer.interval() == 5_000
+        window._initial_index_timer.start(1)
+        qtbot.waitUntil(lambda: "aktuell" in window.status.text())
+        assert not window._initial_index_timer.isActive()
+        assert window._sync_timer.interval_seconds == 900
+    window.close()
+    assert not window._initial_index_timer.isActive()
 
 
 class Editor:
@@ -463,6 +486,34 @@ def test_tray_window_actions_and_shutdown(application, tmp_path, monkeypatch):
     window.close()
 
 
+def test_tray_reports_customer_progress_after_file_scan(application, tmp_path):
+    window = ServerTrayWindow(make_container(tmp_path))
+    try:
+        progress = {
+            "phase": "customer-documents", "processed_items": 42, "total_items": 80,
+            "catalog_processed_items": 5153, "evaluated_documents": 720,
+        }
+        window._apply_status_details({"state": "online", "index": {"state": "running", "progress": progress}})
+        assert "Kundendaten aus Dokumenten" in window.status_label.text()
+        assert "42 von 80 Kunden geprüft" in window.detail_label.text()
+        assert "720 Dokumente" in window.detail_label.text()
+        assert "5153 Dateien" in window.detail_label.text()
+        assert (window.progress_bar.value(), window.progress_bar.maximum()) == (42, 80)
+        assert window.content_progress_bar.value() == window.content_progress_bar.maximum() == 5153
+
+        # The new client also explains older servers' frozen scan counters.
+        progress = {"phase": "customer-recognition", "processed_items": 5153, "total_items": 0,
+                    "current_source": {"source_id": "primary", "relative_path": "last.txt"}}
+        window._apply_status_details({"index": {"state": "running", "progress": progress}})
+        assert "Kunden und Projekte zuordnen" in window.status_label.text()
+        assert "Dateierfassung abgeschlossen: 5153 Dateien" in window.detail_label.text()
+        assert "last.txt" not in window.detail_label.text()
+        assert window.progress_bar.maximum() == 0
+    finally:
+        window.shutdown()
+        window.close()
+
+
 def test_tray_owns_recognition_review(application, tmp_path, monkeypatch):
     container = make_container(tmp_path)
     opened = []
@@ -567,33 +618,63 @@ class LocalSocket:
         self.deleted = True
 
 
-def test_single_instance_all_claim_and_receive_paths(monkeypatch):
+def test_single_instance_repeated_show_reuses_owner(qtbot, tmp_path):
+    shown = []
+    owner = SingleInstanceServer(tmp_path)
+    assert owner.claim(lambda: shown.append(True))
+    try:
+        for number in range(3):
+            # Keep the owner's event loop running while a separate process sends
+            # the request, just as a click in the independent main client does.
+            follower = subprocess.Popen(
+                [
+                    sys.executable, "-c",
+                    "from pathlib import Path; import sys; "
+                    "from PySide6.QtWidgets import QApplication; "
+                    "from papagui_client.gui.tray import SingleInstanceServer; "
+                    "app = QApplication([]); instance = SingleInstanceServer(Path(sys.argv[1])); "
+                    "assert not instance.claim(lambda: None); "
+                    "assert not instance.server.isListening(); instance.close()",
+                    str(tmp_path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                qtbot.waitUntil(lambda: follower.poll() is not None, timeout=10_000)
+                stdout, stderr = follower.communicate()
+                assert follower.returncode == 0, (stdout, stderr)
+                qtbot.waitUntil(lambda: len(shown) == number + 1)
+            finally:
+                if follower.poll() is None:
+                    follower.kill()
+                    follower.wait()
+        background = SingleInstanceServer(tmp_path)
+        assert not background.claim(lambda: None, request_show=False)
+        assert shown == [True, True, True]
+        background.close()
+    finally:
+        owner.close()
+    replacement = SingleInstanceServer(tmp_path)
+    try:
+        assert replacement.claim(lambda: None)
+    finally:
+        replacement.close()
+
+
+def test_single_instance_failed_listener_does_not_create_another_window(monkeypatch, tmp_path, qapp):
+    instance = SingleInstanceServer(tmp_path)
+    monkeypatch.setattr(instance.server, "listen", lambda _name: False)
+    with pytest.raises(OSError):
+        instance.claim(lambda: None)
+    assert not instance.lock.isLocked()
+
+
+def test_single_instance_receive_ignores_unknown_messages(monkeypatch, tmp_path, qapp):
     import papagui_client.gui.tray as tray
 
-    monkeypatch.setattr(tray, "QLocalServer", LocalServer)
-    monkeypatch.setattr(tray, "QLocalSocket", LocalSocket)
-    LocalServer.listen_results = [True]
-    assert SingleInstanceServer().claim(lambda: None)
-
-    LocalServer.listen_results = [False]
-    LocalSocket.connects = True
-    foreground = SingleInstanceServer()
-    assert not foreground.claim(lambda: None)
-    assert foreground.server is not None
-    assert LocalSocket.instances[-1].writes == [b"show"]
-
-    LocalServer.listen_results = [False]
-    background = SingleInstanceServer()
-    assert not background.claim(lambda: None, request_show=False)
-    assert LocalSocket.instances[-1].writes == []
-
-    LocalServer.listen_results = [False, False]
-    LocalSocket.connects = False
-    assert SingleInstanceServer().claim(lambda: None)
-    LocalServer.listen_results = [False, True]
-    claimed = SingleInstanceServer()
-    assert claimed.claim(lambda: None)
-
+    claimed = tray.SingleInstanceServer(tmp_path)
+    claimed.server = LocalServer()
     shown = []
     first = LocalSocket(b"ignore")
     second = LocalSocket(b"show")
@@ -628,18 +709,23 @@ def test_run_tray_gui_second_instance_and_primary(monkeypatch):
 
     controller = SimpleNamespace(show=lambda: None)
     monkeypatch.setattr(tray, "QApplication", Application)
-    monkeypatch.setattr(tray, "TrayController", lambda *_args, **_kwargs: controller)
+    create_controller = Mock(return_value=controller)
+    monkeypatch.setattr(tray, "TrayController", create_controller)
 
     requests = []
     instance = SimpleNamespace(
-        claim=lambda _show, *, request_show=True: requests.append(request_show) or False
+        claim=lambda _show, *, request_show=True: requests.append(request_show) or False,
+        close=Mock(),
     )
     monkeypatch.setattr(tray, "SingleInstanceServer", lambda: instance)
     assert tray.run_tray_gui(object(), ["--background"]) == 0
     assert requests == [False]
+    create_controller.assert_not_called()
     instance.claim = (
         lambda _show, *, request_show=True: requests.append(request_show) or True
     )
     assert tray.run_tray_gui(object(), []) == 31
     assert requests[-1] is True
     assert app._papagui_tray[0] is controller
+    create_controller.assert_called_once()
+    instance.close.assert_called_once()

@@ -178,6 +178,7 @@ class IndexRunCoordinator:
     def status(self) -> dict[str, Any]:
         with self._lock:
             snapshot = self._state.snapshot().to_dict()
+            recognition_progress = dict(self._state.extra.get("recognition_progress") or {})
         current = self._publisher.current()
         components = dict((current or {}).get("components") or {})
         current_path = str(snapshot["current_path"])
@@ -189,11 +190,22 @@ class IndexRunCoordinator:
         except ValueError:
             current_source = None
             legacy_current_path = current_path or None
+        phase = str(snapshot["phase"])
+        processed = int(snapshot["processed_count"])
+        total = 0
+        if phase in {"customer-recognition", "publishing"}:
+            current_source = legacy_current_path = None
+            processed = 0
+            if phase == "customer-recognition":
+                phase = str(recognition_progress.get("phase", phase))
+                processed = int(recognition_progress.get("processed_items", 0))
+                total = int(recognition_progress.get("total_items", 0))
         index_status = IndexStatus(
             state=IndexRunState.parse(state_aliases.get(state_value, state_value)),
             progress=IndexProgress(
-                processed_items=int(snapshot["processed_count"]),
-                phase=str(snapshot["phase"]),
+                processed_items=processed,
+                total_items=total,
+                phase=phase,
                 current_source=current_source,
                 legacy_current_path=legacy_current_path,
             ),
@@ -221,6 +233,12 @@ class IndexRunCoordinator:
             active_customer_generation=(components.get("customers") or {}).get("generation"),
             message=source_message or None,
         ).to_dict()
+        if snapshot["phase"] in {"customer-recognition", "publishing"}:
+            payload["index"]["progress"]["catalog_processed_items"] = int(snapshot["processed_count"])
+        if snapshot["phase"] == "customer-recognition":
+            payload["index"]["progress"]["evaluated_documents"] = int(
+                recognition_progress.get("evaluated_documents", 0)
+            )
         payload["source_id"] = self.source_id
         payload["source_available"] = source_available
         payload["settings"] = self._settings.load().to_dict()
@@ -367,6 +385,7 @@ class IndexRunCoordinator:
                 source_id=self.source_id,
                 minimum_year=self._settings.load().minimum_customer_year,
                 cancelled=self._cancel.is_set,
+                progress=self._recognition_progress,
             )
             if self._cancel.is_set():
                 raise InterruptedError("Indexlauf abgebrochen.")
@@ -418,6 +437,15 @@ class IndexRunCoordinator:
         with self._lock:
             self._state.phase = phase
             self._persist_state()
+
+    def _recognition_progress(self, phase: str, processed: int, total: int, documents: int) -> None:
+        # Polling sees each completed unit without forcing a disk write for every
+        # document. Cancellation/completion still persist the whole run state.
+        with self._lock:
+            self._state.extra["recognition_progress"] = {
+                "phase": phase, "processed_items": processed,
+                "total_items": total, "evaluated_documents": documents,
+            }
 
     def extract_customer_documents(self, project_root_ids: list[int], cancelled) -> None:
         with self.operation_lock:

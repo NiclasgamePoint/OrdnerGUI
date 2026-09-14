@@ -34,15 +34,18 @@ class DocumentRecognitionService:
         self._settings = settings
         self._document_limit = documents_per_project
 
-    def run(self, source_id, *, customer_id=None, cancelled=lambda: False, exhaustive=False):
+    def run(self, source_id, *, customer_id=None, cancelled=lambda: False, exhaustive=False,
+            progress=None):
         settings = self._settings.load() if self._settings else ServerSettings(
             priority_documents_per_project=self._document_limit
         )
         manager = self._catalog.snapshot() if hasattr(self._catalog, "snapshot") else nullcontext(self._catalog)
+        if progress:
+            progress("customer-documents", 0, 0, 0)
         with manager as catalog:
-            return self._evaluate(catalog, source_id, customer_id, settings, cancelled, exhaustive)
+            return self._evaluate(catalog, source_id, customer_id, settings, cancelled, exhaustive, progress)
 
-    def _evaluate(self, catalog, source_id, customer_id, settings, cancelled, exhaustive):
+    def _evaluate(self, catalog, source_id, customer_id, settings, cancelled, exhaustive, progress=None):
         roots = [CatalogProjectRoot.from_dict(value) for value in catalog.list_project_roots(source_id=source_id)]
         by_customer = defaultdict(list)
         with self._work() as work:
@@ -56,7 +59,9 @@ class DocumentRecognitionService:
             work.commit()
         run_id = uuid.uuid4().hex
         stats = {"suggestions": 0, "evaluated": 0, "customers": 0}
-        for customer in customers:
+        if progress:
+            progress("customer-documents", 0, len(customers), 0)
+        for customer_number, customer in enumerate(customers, 1):
             if cancelled():
                 raise InterruptedError("Kundendatenprüfung abgebrochen.")
             owner = int(customer["id"])
@@ -151,6 +156,9 @@ class DocumentRecognitionService:
                                 ))
                             work.commit()
                         evaluated.add(uri)
+                        if progress:
+                            progress("customer-documents", customer_number - 1, len(customers),
+                                     stats["evaluated"] + len(evaluated))
                     if changed:
                         break
             counts["evaluated"] = len(evaluated)
@@ -170,6 +178,8 @@ class DocumentRecognitionService:
                 current = work.customers.get(owner)
                 if current is None:
                     work.commit()
+                    if progress:
+                        progress("customer-documents", customer_number, len(customers), stats["evaluated"])
                     continue
                 if enabled and not changed:
                     work.suggestions.finalize_run(owner, run_id,
@@ -203,6 +213,8 @@ class DocumentRecognitionService:
                     catalog_version=catalog.snapshot_version() if hasattr(catalog, "snapshot_version") else "")
                 work.commit()
             stats["customers"] += 1
+            if progress:
+                progress("customer-documents", customer_number, len(customers), stats["evaluated"])
         return stats
 
 

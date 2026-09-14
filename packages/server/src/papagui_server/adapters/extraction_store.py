@@ -8,6 +8,7 @@ import json
 import shutil
 from pathlib import Path
 import sqlite3
+import threading
 import time
 from typing import Iterable
 
@@ -27,6 +28,7 @@ def artifact_identity(result: ExtractionResult) -> str:
 class ExtractionStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
+        self._writes = threading.local()
 
     def peek(
         self, content_hash: str, version_hash: str, *, max_attempts: int = 3
@@ -59,10 +61,53 @@ class ExtractionStore:
 
     @contextmanager
     def _connection(self):
+        batch = getattr(self._writes, "batch", None)
+        if batch is not None:
+            if "connection" not in batch:
+                batch["connection"] = self._open_writer()
+                # A bounded batch must not take an exclusive spill lock while
+                # document readers are waiting for the writer to drain their queue.
+                batch["connection"].execute("PRAGMA cache_spill=OFF")
+            yield batch["connection"]
+            return
+        connection = self._open_writer()
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
+    @contextmanager
+    def buffered_writes(self):
+        """One lazy writer; readers keep using independent read-only connections."""
+        if getattr(self._writes, "batch", None) is not None:
+            raise RuntimeError("Extraction write batches must not be nested")
+        self._writes.batch = batch = {}
+        try:
+            yield
+        except InterruptedError:
+            # The catalog also commits completed work on a controlled cancellation.
+            self.flush()
+            raise
+        else:
+            self.flush()
+        finally:
+            if "connection" in batch:
+                batch["connection"].close()  # Uncommitted work rolls back on errors.
+            del self._writes.batch
+
+    def flush(self) -> None:
+        batch = getattr(self._writes, "batch", None)
+        if batch is not None and "connection" in batch:
+            batch["connection"].commit()
+            batch["bytes"] = 0
+
+    def _open_writer(self):
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
         try:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute("""CREATE TABLE IF NOT EXISTS document_extractions (
                 content_hash TEXT NOT NULL, version_hash TEXT NOT NULL,
                 result_json TEXT NOT NULL, status TEXT NOT NULL,
@@ -73,10 +118,39 @@ class ExtractionStore:
                 content_hash TEXT NOT NULL, artifact_hash TEXT NOT NULL,
                 result_json TEXT NOT NULL, touched_at REAL NOT NULL,
                 PRIMARY KEY(content_hash, artifact_hash))""")
-            yield connection
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='extraction_storage_usage' AND type='table'"
+            ).fetchone():
+                self._initialize_usage(connection)
             connection.commit()
-        finally:
+            return connection
+        except BaseException:
             connection.close()
+            raise
+
+    @staticmethod
+    def _initialize_usage(connection: sqlite3.Connection) -> None:
+        # Seed existing caches once, then maintain the quota transactionally.
+        # Triggers also cover retries, cleanup, and independent writer connections.
+        connection.execute(
+            "CREATE TABLE extraction_storage_usage(id INTEGER PRIMARY KEY CHECK(id=1), payload_bytes INTEGER NOT NULL)"
+        )
+        connection.execute("INSERT INTO extraction_storage_usage VALUES (1,0)")
+        for table in ("document_extractions", "immutable_document_extractions"):
+            connection.execute(
+                f"UPDATE extraction_storage_usage SET payload_bytes=payload_bytes+"
+                f"(SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))),0) FROM {table}) WHERE id=1"
+            )
+            for operation, change in (
+                ("INSERT", "length(CAST(NEW.result_json AS BLOB))"),
+                ("DELETE", "-length(CAST(OLD.result_json AS BLOB))"),
+                ("UPDATE OF result_json", "length(CAST(NEW.result_json AS BLOB))-length(CAST(OLD.result_json AS BLOB))"),
+            ):
+                name = operation.split()[0].lower()
+                connection.execute(
+                    f"CREATE TRIGGER {table}_usage_{name} AFTER {operation} ON {table} BEGIN "
+                    f"UPDATE extraction_storage_usage SET payload_bytes=payload_bytes+({change}) WHERE id=1; END"
+                )
 
     def get(
         self, content_hash: str, version_hash: str, *, max_attempts: int = 3
@@ -111,23 +185,29 @@ class ExtractionStore:
         self, result: ExtractionResult, *, retry_delay_seconds: int = 300, max_store_mb: int = 1024
     ) -> bool:
         payload = json.dumps(result.to_dict(), ensure_ascii=False)
+        payload_size = len(payload.encode("utf-8"))
+        artifact_hash = result.artifact_hash or artifact_identity(result)
         maximum = max_store_mb * 1024 * 1024
         with self._connection() as connection:
-            size = int(
-                connection.execute(
-                    "SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))), 0) FROM document_extractions WHERE NOT (content_hash=? AND version_hash=?)",
-                    (result.content_hash, result.version_hash),
-                ).fetchone()[0]
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
+            size = connection.execute(
+                "SELECT payload_bytes FROM extraction_storage_usage WHERE id=1"
+            ).fetchone()[0]
+            previous = connection.execute(
+                "SELECT length(CAST(result_json AS BLOB)) FROM document_extractions WHERE content_hash=? AND version_hash=?",
+                (result.content_hash, result.version_hash),
+            ).fetchone()
+            immutable = connection.execute(
+                "SELECT 1 FROM immutable_document_extractions WHERE content_hash=? AND artifact_hash=?",
+                (result.content_hash, artifact_hash),
             )
-            immutable_size = int(
-                connection.execute(
-                    "SELECT COALESCE(SUM(length(CAST(result_json AS BLOB))), 0) FROM immutable_document_extractions"
-                ).fetchone()[0]
-            )
+            growth = payload_size - (previous[0] if previous else 0)
+            growth += 0 if immutable.fetchone() else payload_size
             if (
-                size + immutable_size + 2 * len(payload.encode()) > maximum
+                size + growth > maximum
                 or shutil.disk_usage(self.database_path.parent).free
-                < 2 * len(payload.encode()) + 4 * 1024 * 1024
+                < 2 * payload_size + 4 * 1024 * 1024
             ):
                 return False
             now = time.time()
@@ -135,7 +215,7 @@ class ExtractionStore:
                 "INSERT OR IGNORE INTO immutable_document_extractions VALUES (?, ?, ?, ?)",
                 (
                     result.content_hash,
-                    result.artifact_hash or artifact_identity(result),
+                    artifact_hash,
                     payload,
                     now,
                 ),
@@ -158,6 +238,11 @@ class ExtractionStore:
                     now,
                 ),
             )
+            batch = getattr(self._writes, "batch", None)
+            if batch is not None:
+                batch["bytes"] = batch.get("bytes", 0) + 2 * payload_size
+                if batch["bytes"] >= 1024 * 1024:
+                    self.flush()
         return True
 
     def read(self, content_hash: str, version_hash: str) -> ExtractionResult | None:

@@ -72,47 +72,79 @@ if (-not $env:PAPAGUI_SOURCE_MAPPINGS) {
     $env:PAPAGUI_SOURCE_MAPPINGS = $mapping | ConvertTo-Json -Compress
 }
 
-$dockerStart = $null
-if ($env:PAPAGUI_SKIP_DOCKER -ne '1' -and (Test-Path $env:PAPAGUI_SOURCE_PATH)) {
-    try {
-        docker info *> $null
-        $dockerStart = Start-Process -FilePath 'docker' -ArgumentList @('compose', '-f', 'deploy/server/compose.yaml', 'up', '-d', '--build', 'papagui-server') -WindowStyle Hidden -PassThru
-        Write-Host 'PapaGUI-Server wird im Hintergrund gebaut und gestartet.'
-    } catch {
-        Write-Warning 'Docker ist nicht erreichbar; der Client verwendet seinen letzten lokalen Stand.'
+function Start-LocalServer([int]$HealthCheckAttempts = 600) {
+    if ($env:PAPAGUI_SKIP_DOCKER -eq '1') { return }
+    if (-not (Test-Path -LiteralPath $env:PAPAGUI_SOURCE_PATH -PathType Container)) {
+        Write-Warning "Der Quellordner '$env:PAPAGUI_SOURCE_PATH' fehlt; Client startet offline."
+        return
     }
-}
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Write-Warning 'Docker wurde nicht gefunden. Bitte Docker Desktop installieren; Client startet offline.'
+        return
+    }
 
-if ($dockerStart) {
+    try {
+        # Windows PowerShell must also inspect native exit codes. Docker writes
+        # normal build progress to stderr, which must not abort the launcher.
+        $ErrorActionPreference = 'Continue'
+        & docker info *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Docker ist nicht erreichbar. Bitte Docker Desktop starten; Client startet offline.'
+            return
+        }
+        & docker compose version *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Docker Compose ist nicht verfuegbar. Bitte Docker Desktop aktualisieren; Client startet offline.'
+            return
+        }
+
+        Write-Host 'PapaGUI-Server wird gebaut und gestartet. Beim ersten Start kann dies einige Minuten dauern.'
+        # Compose builds a missing image and creates a missing container. Existing
+        # builds use the cache; stopped containers are started again.
+        & docker compose -f deploy/server/compose.yaml up -d --build papagui-server 2>&1 |
+            ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Docker konnte den Server nicht bauen oder starten (Exitcode $LASTEXITCODE). Siehe Ausgabe oben; Client startet offline."
+            return
+        }
+    } catch {
+        Write-Warning "Der lokale Serverstart ist fehlgeschlagen: $($_.Exception.Message). Client startet offline."
+        return
+    }
+
     Write-Host 'Warte auf den Server-Healthcheck ...'
-    $healthy = $false
-    foreach ($attempt in 1..600) {
+    foreach ($attempt in 1..$HealthCheckAttempts) {
         try {
-            Invoke-RestMethod -Uri ($env:PAPAGUI_INDEX_SERVER_URL.TrimEnd('/') + '/health') -TimeoutSec 1 | Out-Null
-            $healthy = $true
+            Invoke-RestMethod -Uri ($env:PAPAGUI_INDEX_SERVER_URL.TrimEnd('/') + '/health') -TimeoutSec 1 -ErrorAction Stop | Out-Null
             Write-Host 'PapaGUI-Server ist erreichbar.'
-            break
+            return
         } catch {
-            $dockerStart.Refresh()
-            if ($dockerStart.HasExited -and $dockerStart.ExitCode -ne 0) {
-                Write-Warning 'Docker konnte den Servercontainer nicht starten.'
-                break
-            }
-            if ($dockerStart.HasExited) {
-                $runningContainer = & docker compose -f deploy/server/compose.yaml ps --status running --quiet papagui-server 2>$null
-                if ($LASTEXITCODE -ne 0 -or -not $runningContainer) {
-                    Write-Warning 'Der Servercontainer ist nach dem Compose-Start nicht mehr aktiv.'
-                    break
-                }
+            $runningContainer = & docker compose -f deploy/server/compose.yaml ps --status running --quiet papagui-server 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $runningContainer) {
+                Write-Warning 'Der Servercontainer ist nach dem Compose-Start nicht mehr aktiv; Client startet offline.'
+                return
             }
             Start-Sleep -Seconds 1
         }
     }
-    if (-not $healthy) {
-        Write-Warning 'Server-Healthcheck nach 10 Minuten noch nicht erfolgreich; Client startet offline.'
-    }
+    Write-Warning 'Server-Healthcheck hat das Zeitlimit erreicht; Client startet offline.'
 }
 
-Start-Process -FilePath $python -ArgumentList @('-m', 'papagui_client.entrypoints.tray', '--background') -WindowStyle Hidden
-& $python -m papagui_client @args
-exit $LASTEXITCODE
+Start-LocalServer
+
+function Start-DesktopClient {
+    # The client owns tray startup. pythonw keeps both GUI processes console-free
+    # and lets the batch/PowerShell bootstrap exit as soon as the GUI is launched.
+    $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
+    if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) {
+        throw 'pythonw.exe fehlt in der virtuellen Umgebung. Bitte die Python-Installation reparieren.'
+    }
+    Start-Process -FilePath $pythonw -ArgumentList (@('-m', 'papagui_client') + @($args)) -WindowStyle Hidden
+}
+
+if ('--sync-only' -in $args -or '--help' -in $args -or '-h' -in $args) {
+    & $python -m papagui_client @args
+    exit $LASTEXITCODE
+}
+Start-DesktopClient @args
+exit 0

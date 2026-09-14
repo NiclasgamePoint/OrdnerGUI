@@ -126,7 +126,9 @@ class CatalogReaderPort(Protocol):
 
 class CustomerRecognizerPort(Protocol):
     def synchronize(
-        self, source_path: Path, *, source_id: str, minimum_year: int
+        self, source_path: Path, *, source_id: str, minimum_year: int,
+        cancelled: Callable[[], bool] = lambda: False,
+        progress: Callable[[str, int, int, int], None] | None = None,
     ) -> dict[str, int]: ...
 
 

@@ -22,11 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.sync_only and not arguments.offline:
         try:
             result = container.sync.sync()
-            message = (
-                "Neue Datengeneration aktiviert: " + ", ".join(result.changed_components)
-                if result.changed
-                else "Lokale Datengeneration ist aktuell."
-            )
+            if result.awaiting_generation:
+                message = "Server erreichbar; noch kein fertiger Index verfügbar."
+            elif result.changed:
+                message = "Neue Datengeneration aktiviert: " + ", ".join(result.changed_components)
+            else:
+                message = "Lokale Datengeneration ist aktuell."
             print(message)
         except SyncError as exc:
             if not container.sync.has_local_data():

@@ -67,6 +67,7 @@ class GenerationV2Publisher:
         self.active_path = self.data_path / "active-generation.json"
         self.retention_status_path = self.root / "retention-status.json"
         self._lock = threading.RLock()
+        self._retention_lock = threading.Lock()
         self._retention_failures = self._load_retention_failures()
 
     def publish_index(self) -> dict[str, Any]:
@@ -142,7 +143,8 @@ class GenerationV2Publisher:
 
     def retention_status(self) -> dict[str, Any]:
         """Return durable cleanup diagnostics without weakening active data."""
-        with self._lock:
+        # Status polling must not wait for archive creation or SQLite backups.
+        with self._retention_lock:
             failures = dict(self._retention_failures)
         return {
             "state": "degraded" if failures else "ok",
@@ -343,10 +345,11 @@ class GenerationV2Publisher:
         try:
             self._prune(component)
         except Exception as error:  # Active data wins over strict cleanup.
-            self._retention_failures[component] = {
-                "message": str(error) or type(error).__name__,
-                "observed_at": _utc_now(),
-            }
+            with self._retention_lock:
+                self._retention_failures[component] = {
+                    "message": str(error) or type(error).__name__,
+                    "observed_at": _utc_now(),
+                }
             logger.exception(
                 "Generationsbereinigung für %s fehlgeschlagen; "
                 "sie wird beim nächsten Publizieren erneut versucht",
@@ -354,7 +357,9 @@ class GenerationV2Publisher:
             )
             self._persist_retention_failures()
         else:
-            if self._retention_failures.pop(component, None) is not None:
+            with self._retention_lock:
+                cleared = self._retention_failures.pop(component, None) is not None
+            if cleared:
                 self._persist_retention_failures()
 
     def _load_retention_failures(self) -> dict[str, dict[str, str]]:
@@ -375,13 +380,15 @@ class GenerationV2Publisher:
         }
 
     def _persist_retention_failures(self) -> None:
+        with self._retention_lock:
+            failures = dict(self._retention_failures)
         try:
             atomic_json(
                 self.retention_status_path,
                 {
-                    "state": "degraded" if self._retention_failures else "ok",
+                    "state": "degraded" if failures else "ok",
                     "required_predecessors": BACKUP_COUNT,
-                    "failures": self._retention_failures,
+                    "failures": failures,
                     "updated_at": _utc_now(),
                 },
             )

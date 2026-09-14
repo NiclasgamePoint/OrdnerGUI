@@ -1411,6 +1411,18 @@
       "IndexProgressModel": {
         "additionalProperties": false,
         "properties": {
+          "catalog_processed_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Processed Items"
+          },
           "current_source": {
             "anyOf": [
               {
@@ -1420,6 +1432,18 @@
                 "type": "null"
               }
             ]
+          },
+          "evaluated_documents": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluated Documents"
           },
           "failed_items": {
             "title": "Failed Items",
