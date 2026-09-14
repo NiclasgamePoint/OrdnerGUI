@@ -71,7 +71,11 @@ def click_editor(editor, qtbot):
         qtbot.keyClick(view, Qt.Key.Key_Return)
         QApplication.processEvents()
         assert not editor.field.view().isVisible()
-    assert editor.field.hasFocus()
+        # The offscreen macOS backend does not reactivate a parent window after
+        # a popup closes. Supply that window-manager event, without setting the
+        # field's focus or enabling its wheel guard from the test.
+        editor.field.window().activateWindow()
+    qtbot.waitUntil(editor.field.hasFocus)
 
 
 def test_hover_wheel_scrolls_page_without_changing_value(editor):

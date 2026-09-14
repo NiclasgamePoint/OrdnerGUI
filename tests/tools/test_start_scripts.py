@@ -317,6 +317,9 @@ exit 0
             scenario,
         ],
         cwd=tmp_path,
+        # Actions runs Python under PowerShell 7; its module paths cannot be
+        # imported by the Windows PowerShell 5.1 executable used by start.bat.
+        env={key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"},
         capture_output=True,
         text=True,
         errors="replace",

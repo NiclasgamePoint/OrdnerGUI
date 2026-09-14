@@ -60,6 +60,12 @@ class ClickActivatedSpinBox(_ClickActivatedWheel, QSpinBox):
 class ClickActivatedComboBox(_ClickActivatedWheel, QComboBox):
     """A selection input protected against accidental changes while scrolling."""
 
+    def hidePopup(self):
+        restore_focus = self._wheel_adjustment_enabled and self.view().isVisible()
+        super().hidePopup()
+        if restore_focus and self.isVisible():
+            self.setFocus(Qt.FocusReason.PopupFocusReason)
+
 
 class ClickActivatedSlider(_ClickActivatedWheel, QSlider):
     """A slider protected against accidental changes while scrolling."""
