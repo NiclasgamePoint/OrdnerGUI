@@ -37,8 +37,7 @@ $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
 $acl.AddAccessRule($rule)
 [System.IO.Directory]::SetAccessControl($path, $acl)
 """
-        env = os.environ.copy()
-        env.pop("PSModulePath", None)
+        env = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
         env["PAPAGUI_PRIVATE_DIRECTORY"] = str(path)
         powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", script], env=env, check=True, capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -46,7 +47,7 @@ def check(image: str, previous_ref: str, workspace: Path | None, previous_archiv
             (config / "api-token").write_text("synthetic-test-token")
             compose = case / "compose.json"
             compose.write_text(json.dumps({"services": {"papagui-server": {
-                "image": previous_image, "user": "0:0", "command": ["serve", "--no-run-on-start"],
+                "image": previous_image, "user": f"{os.getuid()}:{os.getgid()}", "command": ["serve", "--no-run-on-start"],
                 "environment": {"PAPAGUI_API_TOKEN_FILE": "/config/api-token"},
                 "volumes": [f"{source}:/source:ro", f"{data}:/data", f"{config}:/config"],
             }}}))

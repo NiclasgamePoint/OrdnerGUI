@@ -181,16 +181,21 @@ def test_source_launch_does_not_download_or_replace_itself(monkeypatch):
     assert "PAPAGUI_UPDATER_CHILD" not in os.environ
 
 
-def test_private_directory_removes_explicit_access_for_other_users(tmp_path):
+def test_private_directory_removes_explicit_access_for_other_users(tmp_path, monkeypatch):
     target = tmp_path / "private"
     target.mkdir()
     if os.name == "nt":
+        # Windows normalizes os.environ keys to uppercase. Simulate a parent
+        # PowerShell 7 process whose module path must not reach PowerShell 5.1.
+        monkeypatch.setenv("PSMODULEPATH", str(Path(os.environ["ProgramFiles"]) / "PowerShell/7/Modules"))
         subprocess.run(["icacls", str(target), "/grant", "*S-1-1-0:(OI)(CI)R"], check=True, capture_output=True)
-    storage.private_directory(target)
+    try:
+        storage.private_directory(target)
+    except subprocess.CalledProcessError as error:
+        pytest.fail(error.stderr.decode(errors="replace"), pytrace=False)
     (target / "writable").write_text("synthetic")
     if os.name == "nt":
-        env = os.environ.copy()
-        env.pop("PSModulePath", None)
+        env = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
         env["PAPAGUI_PRIVATE_DIRECTORY"] = str(target)
         command = "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $env:PAPAGUI_PRIVATE_DIRECTORY; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; if (-not $acl.AreAccessRulesProtected) { exit 2 }; foreach ($r in $acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])) { if ($r.IdentityReference -ne $sid -or $r.AccessControlType -ne 'Allow') { exit 3 } }"
         subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command], env=env, check=True, capture_output=True)
