@@ -77,6 +77,7 @@ exit 0
             str(tmp_path / "synthetic config"),
         ],
         cwd=tmp_path,
+        env={key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"},
         capture_output=True,
         text=True,
         errors="replace",
