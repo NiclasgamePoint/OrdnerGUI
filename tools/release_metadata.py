@@ -34,6 +34,10 @@ def check(*, sync: bool = False) -> None:
     matrix = json.loads((ROOT / "packaging/client/build-matrix.json").read_text(encoding="utf-8"))
     if matrix["version"] != versions["client"]:
         raise ValueError("Build matrix version differs from client")
+    sources = json.loads((ROOT / "packaging/upstream-sources.json").read_text(encoding="utf-8"))
+    locked = (ROOT / "packages/client/requirements-lock.txt").read_text(encoding="utf-8").casefold().splitlines()
+    if f"pyside6=={sources['qt_version']}" not in locked:
+        raise ValueError("Pinned Qt/PySide sources differ from the runtime lock")
     for component in COMPONENTS:
         package = ROOT / "packages" / component
         metadata = tomllib.loads((package / "pyproject.toml").read_text(encoding="utf-8"))

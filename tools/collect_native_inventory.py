@@ -25,19 +25,34 @@ def binaries(value):
 
 
 def collect(analyses: list[Path], output: Path) -> None:
-    from packaging.requirements import Requirement
-
-    owners = {}
-    for line in (ROOT / "packages/client/requirements-lock.txt").read_text().splitlines():
-        if not line.strip() or line.startswith("#"):
-            continue
-        requirement = Requirement(line)
-        if requirement.marker and not requirement.marker.evaluate():
-            continue
-        dist = metadata.distribution(requirement.name)
-        for file in dist.files or []:
-            owners[Path(dist.locate_file(file)).resolve()] = f"{dist.metadata['Name']}=={dist.version}"
     output.mkdir(parents=True, exist_ok=True)
+    selected = {Path(source).resolve() for analysis in analyses
+                for _, source, _ in binaries(ast.literal_eval(analysis.read_text(encoding="utf-8")))}
+    owners = {}
+    for dist in metadata.distributions():
+        matched = []
+        for file in dist.files or []:
+            if file.name.lower().endswith((".dll", ".pyd", ".so", ".dylib")) or ".so." in file.name:
+                path = Path(dist.locate_file(file)).resolve()
+                if path in selected:
+                    matched.append(path)
+        if not matched:
+            continue
+        name = dist.metadata["Name"]
+        for path in matched:
+            owners[path] = f"{name}=={dist.version}"
+        # Optional dependencies (for example Pillow via openpyxl) may be picked
+        # up by PyInstaller even when they are not direct runtime lock entries.
+        # Preserve notices only for distributions actually present in the payload.
+        destination = output / "python-native" / name
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "METADATA").write_text(dist.read_text("METADATA") or "", encoding="utf-8")
+        for file in dist.files or []:
+            if any(word in file.name.casefold() for word in ("license", "licence", "copying", "copyright", "notice")):
+                path = Path(dist.locate_file(file))
+                if path.is_file():
+                    filename = hashlib.sha256(str(file).encode()).hexdigest()[:16] + "-" + file.name
+                    shutil.copy2(path, destination / filename)
     inventory = []
     for analysis in analyses:
         entries = list(binaries(ast.literal_eval(analysis.read_text(encoding="utf-8"))))

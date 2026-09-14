@@ -85,3 +85,27 @@ def test_server_sources_require_both_architectures_and_valid_checksums(tmp_path,
     archive.unlink()
     with pytest.raises(UpdateError, match="Missing"):
         publisher.server_source_assets(tmp_path)
+
+
+def test_native_inventory_preserves_optional_package_notices_without_host_paths(tmp_path, modules, monkeypatch):
+    from types import SimpleNamespace
+
+    module = importlib.import_module("collect_native_inventory")
+    binary = tmp_path / "optional.pyd"
+    binary.write_bytes(b"synthetic native library")
+    notice = tmp_path / "LICENCE.txt"
+    notice.write_text("Synthetic copyright")
+    dist = SimpleNamespace(files=[Path("optional.pyd"), Path("LICENCE.txt")],
+                           metadata={"Name": "optional-package"}, version="1.0",
+                           locate_file=lambda file: tmp_path / file,
+                           read_text=lambda _: "Name: optional-package\n")
+    monkeypatch.setattr(module.metadata, "distributions", lambda: [dist])
+    analysis = tmp_path / "product/Analysis-00.toc"
+    analysis.parent.mkdir()
+    analysis.write_text(repr([("package/optional.pyd", str(binary), "EXTENSION")]))
+    output = tmp_path / "out"
+    module.collect([analysis], output)
+    inventory = json.loads((output / "native-inventory.json").read_text())
+    assert inventory["binaries"][0]["owner"] == "optional-package==1.0"
+    assert str(tmp_path) not in (output / "native-inventory.json").read_text()
+    assert any(path.read_text() == "Synthetic copyright" for path in (output / "python-native/optional-package").iterdir())
