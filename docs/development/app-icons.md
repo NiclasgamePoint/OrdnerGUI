@@ -1,6 +1,11 @@
 # Anwendungssymbole
 
 Die vom Benutzer bereitgestellte Vorlage liegt lokal in `data/logo_preview.png`.
+Der Projektinhaber `NiclasgamePoint` hat am 14. September 2026 bestätigt, dass
+diese ursprüngliche Vorlage mit ChatGPT ohne weitere Bildvorlagen erstellt wurde
+und öffentlich weitergegeben werden darf. Diese Herkunftsangabe dokumentiert
+seine Bestätigung; sie behauptet keine ausschließlichen Rechte oder Rechte an
+fremden Marken. Die nachfolgenden Ableitungen sind unten dokumentiert.
 Die Anwendung lädt ihre Symbole ausschließlich aus den mitgelieferten Ressourcen
 unter `packages/client/src/papagui_client/resources/icons/`.
 

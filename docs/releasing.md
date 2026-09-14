@@ -1,15 +1,19 @@
 ﻿# Versionierung und Releasevorbereitung
 
 Stand: **14. September 2026**. Der gemeinsame Testcheckpoint **0.4.3** trägt den
-Tagtext **PreRelease Testing**. Der folgende Entwicklungsstand **0.4.4** ergänzt
+Tagtext **PreRelease Testing**. Der folgende Entwicklungsstand **0.5.0** ergänzt
 [automatische Updates](automatic-updates.md). Das ist noch keine öffentliche
 Produktfreigabe. GitHub-Zugriff, Actions und Joblogs sind verfügbar.
+
+Die konkrete [Beta-Arbeitsliste und Signierungsanleitung](beta-readiness.md)
+beschreibt den geprüften Stand, Ordner- und Netzwerkgrenzen sowie die noch
+vorbereitete Veröffentlichung von GitHub-Pre-releases für Windows und Linux.
 
 ## Versionsstand
 
 | Bestandteil | Stand |
 | --- | --- |
-| Client, Server, Contracts | jeweils 0.4.4; Checkpoint 0.4.3 bleibt unverändert |
+| Client, Server, Contracts | jeweils 0.5.0; Checkpoint 0.4.3 behält seinen Quellstand; Git-IDs durch Historienbereinigung geändert |
 | API / Generationsschema | v2; bestehende Kompatibilitätswege bleiben erhalten |
 | Release-Python | 3.11; lokale Testumgebung `build/release-venv` |
 | PySide6 / PyInstaller | 6.11.1 / 6.22.2 laut Lockdateien |
@@ -48,7 +52,8 @@ Vor einer öffentlichen Produktfreigabe bleiben erforderlich:
   Offlinebetrieb und kundenspezifische Abläufe. Automatisierte Starttests ersetzen das nicht.
 - Vollständige native Fremdsoftware-/Lizenzinventare und passende Quellarchive für
   die ausgelieferten GPL-/LGPL-Komponenten, einschließlich Qt/PDFium/Python.
-- Rechte an der ursprünglichen Logovorlage und früheren Fremdbeiträgen klären.
+- Herkunft des eigenen Codes (Inhaber/Codex) und öffentliche Weitergabe der
+  Logovorlage sind bestätigt. Fremdsoftwarehinweise bleiben separat erhalten.
 - Windows-Code-Signing sowie Apple Developer ID, Notarisierung und Stapling;
   vorhandene Installer sind ausdrücklich unsignierte Testartefakte.
 - Zielhardware, Ressourcenverbrauch und echte Backup-/Wiederherstellungsabläufe abnehmen.
@@ -84,6 +89,11 @@ kein GitHub Release und installiert kein Update.
 Push- und PR-Workflows bauen Testartefakte ohne Registry-Push. Der neue Workflow
 `release.yml` reagiert auf stabile veröffentlichte Releases, führt die Prüfungen
 aus und lädt erst danach Images, Installer und zuletzt das Updatemanifest hoch.
-Die Kompatibilitätsprüfung verwendet den unveränderten Tag 0.4.3. Vor jedem
+Für Pre-releases prüft derselbe Workflow Windows/Linux und lädt deren Installer,
+das Serverimage sowie `papagui-beta.json` mit dem Digest hoch. Dabei werden
+macOS-Pakete und das Aktivierungsmanifest ausgelassen. Dieser neue Pfad ist
+lokal getestet; ein tatsächlicher Beta-Release-Lauf steht noch aus.
+Die Kompatibilitätsprüfung verwendet den Tag 0.4.3 (Quellstand unverändert,
+Commit seit der Historienbereinigung `dbf6c9a`). Vor jedem
 künftigen Release müssen dessen eigene Prüfungen bestehen; das grüne Ergebnis
 von 0.4.3 gilt nicht für spätere Änderungen. Details: [Updateablauf](automatic-updates.md).

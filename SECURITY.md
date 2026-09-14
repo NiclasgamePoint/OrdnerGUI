@@ -87,17 +87,24 @@ Server; eine externe Modellstufe ist nicht Bestandteil der Pipeline.
 
 ## Lieferkette
 
-CI prüft getrennte Dependency-Locks, Paketgrenzen und Artefaktinhalt. Die
-enthaltenen Workflows erzeugen unsignierte Client-Testartefakte und bauen
-Serverimages mit `push: false`. Öffentliche Releases, Code Signing,
-Notarisierung und Auto-Updates sind darin nicht eingerichtet. Eine erfolgreiche
-lokale Prüfung bestätigt weder einen entfernten CI-Lauf noch die native Abnahme
-auf allen Plattformen.
+CI prüft getrennte Dependency-Locks, Paketgrenzen und Artefaktinhalt. Push- und
+PR-Workflows erzeugen unsignierte Client-Testartefakte und prüfen Serverimages.
+Der Releaseworkflow für stabile Veröffentlichungen kann nach erfolgreicher
+Prüfung Images, Installer und ein Updatemanifest veröffentlichen. Automatische
+Updates ab 0.5.0 prüfen HTTPS-Herkunft, GitHub-Asset-Metadaten, Prüfsummen und
+Kompatibilitätsangaben; Ablauf und Rückfallmechanismen stehen unter
+[Automatische Updates](docs/automatic-updates.md). Eine separate kryptographische
+Signatur des Updatemanifests sowie Code Signing und Apple-Notarisierung sind
+noch nicht eingerichtet. Eine erfolgreiche lokale Prüfung bestätigt weder
+einen entfernten CI-Lauf noch die native Abnahme auf allen Plattformen.
 
 ## Offene Hardening-Punkte
 
 - Zertifikate und Signaturprozess für Clientartefakte
-- endgültige Projektlizenz und vollständige Third-Party-Notices
+- vollständige native Third-Party-Inventare und zugehörige Quellbereitstellung;
+  die Projektlizenz ist bereits GPL-3.0-or-later
+- [Beta-Abnahme](docs/beta-readiness.md) einschließlich Quellidentität,
+  Netzwerkbetrieb, privatem Sicherheitsmeldeweg und Signierung
 - Tokenrotation ohne Wartungsfenster
 - ACL-Prüfung für konkrete Synology-Freigaben
 - Security-Review vor einer zukünftigen IMAP-Integration

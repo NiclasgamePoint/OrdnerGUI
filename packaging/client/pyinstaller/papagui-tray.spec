@@ -9,6 +9,14 @@ icons = client_src / "papagui_client" / "resources" / "icons"
 sys.path.insert(0, str(client_src))
 from papagui_client import __version__ as client_version
 
+version_resource = None
+if sys.platform == "win32":
+    sys.path.insert(0, str(project_root / "tools"))
+    from windows_version_info import write_version_info
+    version_resource = str(write_version_info(
+        project_root / "build/windows-version-info", client_version, "papagui-tray"
+    ))
+
 analysis = Analysis(
     [str(client_src / "papagui_client" / "entrypoints" / "tray.py")],
     pathex=[str(client_src), str(contracts_src)],
@@ -38,6 +46,7 @@ executable = EXE(
     strip=False,
     upx=True,
     console=False,
+    version=version_resource,
     icon=str(icons / "papagui-server.ico") if sys.platform == "win32" else None,
 )
 

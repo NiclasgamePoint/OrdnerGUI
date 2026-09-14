@@ -2,6 +2,10 @@ name: Unsigned client artifacts
 
 on:
   workflow_call:
+    inputs:
+      windows-linux-only:
+        type: boolean
+        default: false
   push:
     branches: [main]
   workflow_dispatch:
@@ -13,6 +17,11 @@ on:
       - 'tools/*install*'
       - 'tools/collect_licenses.py'
       - 'tools/release_metadata.py'
+      - 'tools/windows_version_info.py'
+      - 'tools/prepare_upstream_sources.py'
+      - 'tools/collect_native_inventory.py'
+      - 'packaging/upstream-sources.json'
+      - 'docs/native-license-review.md'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
       - '.github/workflows/client-artifacts.yml'
@@ -21,19 +30,36 @@ permissions:
   contents: read
 
 jobs:
+  upstream-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: build/upstream-sources
+          key: upstream-sources-${{ hashFiles('packaging/upstream-sources.json') }}
+      - name: Verify upstream sources and extract notices
+        run: python tools/prepare_upstream_sources.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-notices
+          path: build/upstream-notices
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-sources
+          path: build/upstream-sources
+          compression-level: 0
+
   build:
+    needs: upstream-sources
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact: linux-x64
-          - os: windows-latest
-            artifact: windows-x64
-          - os: macos-15-intel
-            artifact: macos-x64
-          - os: macos-14
-            artifact: macos-arm64
+        include: ${{ fromJSON(inputs.windows-linux-only && '[{"os":"ubuntu-24.04","artifact":"linux-x64"},{"os":"windows-latest","artifact":"windows-x64"}]' || '[{"os":"ubuntu-24.04","artifact":"linux-x64"},{"os":"windows-latest","artifact":"windows-x64"},{"os":"macos-15-intel","artifact":"macos-x64"},{"os":"macos-14","artifact":"macos-arm64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -80,6 +106,15 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tools/check_frozen_client.py dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: upstream-notices
+          path: build/upstream-notices
+      - name: Inventory actual native payload and OS notices
+        run: python tools/collect_native_inventory.py --analysis build/papagui-client/Analysis-00.toc --analysis build/papagui-tray/Analysis-00.toc
+      - name: Preserve native inventory as build evidence
+        shell: bash
+        run: cp -R build/native-notices dist/native-notices
       - name: Build verified update bundle
         run: python tools/build_update_bundle.py
       - name: Verify native update activation and profile backup
@@ -111,6 +146,6 @@ jobs:
           python tools/check_frozen_client.py /Applications/PapaGUI
       - uses: actions/upload-artifact@v4
         with:
-          name: papagui-client-0.4.4-${{ matrix.artifact }}-unsigned
+          name: papagui-client-0.5.0-${{ matrix.artifact }}-unsigned
           path: dist/*
           if-no-files-found: error

@@ -74,7 +74,9 @@ def test_build_matrix_and_workflow_cover_exactly_four_release_targets() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "client-artifacts.yml").read_text(encoding="utf-8")
     )
-    workflow_targets = workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
+    expression = workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
+    beta_targets, workflow_targets = [json.loads(value) for value in re.findall(r"'(\[.*?\])'", expression)]
+    assert {item["artifact"] for item in beta_targets} == {"windows-x64", "linux-x64"}
     assert {(item["os"], item["artifact"]) for item in workflow_targets} == {
         ("ubuntu-24.04", "linux-x64"),
         ("windows-latest", "windows-x64"),
@@ -114,8 +116,13 @@ def test_specs_select_native_shape_for_every_release_target(
     assert (str(icons), "papagui_client/resources/icons") in analysis.options["datas"]
     if platform == "win32":
         assert executable.options["icon"] == str(icons / f"papagui-{icon_role}.ico")
+        metadata = Path(executable.options["version"]).read_text(encoding="utf-8")
+        assert "StringStruct('ProductName', 'PapaGUI')" in metadata
+        assert "StringStruct('ProductVersion', '0.5.0')" in metadata
+        assert f"StringStruct('OriginalFilename', '{entrypoint}.exe')" in metadata
     else:
         assert executable.options["icon"] is None
+        assert executable.options["version"] is None
     assert set(analysis.options["excludes"]) == {
         "papagui_server",
         "app",
@@ -133,8 +140,8 @@ def test_specs_select_native_shape_for_every_release_target(
         assert bundle.options["name"] == expected_name
         assert bundle.options["icon"] == str(icons / f"papagui-{icon_role}.icns")
         assert bundle.options["bundle_identifier"].startswith("de.papagui.")
-        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.4"
-        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.4"
+        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.5.0"
+        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.5.0"
         assert namespace["application"] == bundle
     else:
         assert "application" not in namespace

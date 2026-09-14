@@ -24,7 +24,7 @@ jobs:
           file: deploy/server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: false
-          tags: papagui-server:0.4.4-ci
+          tags: papagui-server:0.5.0-ci
 
   smoke:
     runs-on: ubuntu-latest
@@ -42,7 +42,7 @@ jobs:
       - name: Verify real server update and rollback
         run: |
           git fetch --no-tags origin refs/tags/0.4.3:refs/tags/0.4.3
-          python tools/check_server_updates.py --image papagui-server:0.4.4-smoke
+          python tools/check_server_updates.py --image papagui-server:0.5.0-smoke
       - name: Build and start separate updater image
         run: |
           docker build -f deploy/updater/Dockerfile -t papagui-updater:ci .

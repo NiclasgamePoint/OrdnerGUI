@@ -6,13 +6,23 @@ schreibende Instanz für Index, Kundenerkennung und `customers.db`. Clients
 halten ausschließlich geprüfte lokale Kopien und bleiben mit dem letzten
 gültigen Stand offline benutzbar.
 
-Der Tag 0.4.3 ist der Checkpoint **PreRelease Testing**. Der folgende Stand 0.4.4
+Der Tag 0.4.3 ist der Checkpoint **PreRelease Testing**. Der folgende Stand 0.5.0
 ergänzt [automatische Client- und Serverupdates](docs/automatic-updates.md).
 Ein auf GitHub veröffentlichtes stabiles Release startet die Prüfungen und
 stellt erst nach deren Erfolg Updatepakete bereit. Client und Server benötigen
 dafür einmalig den neuen Installer beziehungsweise den separaten Update-Dienst.
 Die Installer sind weiterhin unsigniert; der tatsächliche Buildstatus steht im
 jeweiligen Workflow-Lauf.
+
+Die erste Beta konzentriert sich auf Windows x64 und Ubuntu 24.04 x64;
+macOS-Abnahme und -Signierung folgen später. Der vorbereitete Pre-release-Weg
+veröffentlicht manuell installierbare Pakete ohne Aktivierung im stabilen
+Updatekanal. [Beta-Arbeitsliste](docs/beta-readiness.md),
+[Code signing policy](CODE_SIGNING.md), [Datenschutzhinweise](PRIVACY.md),
+[Windows-Signierung](docs/windows-signing.md) und
+[Linux-Installation und Signatur](docs/linux-distribution.md) beschreiben den Stand.
+Die [SignPath-Bewerbungsunterlagen](docs/signpath-application.md) enthalten
+vorbereitete Angaben und die noch offenen Schritte des Projektinhabers.
 
 ## Komponenten
 

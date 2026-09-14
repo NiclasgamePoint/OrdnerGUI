@@ -8,7 +8,7 @@ from tools import export_openapi
 def test_generated_openapi_has_versioned_products_and_health() -> None:
     payload = export_openapi.generate()
 
-    assert payload["info"]["version"] == "0.4.4"
+    assert payload["info"]["version"] == "0.5.0"
     assert "/health" in payload["paths"]
     assert "/v2/generations/current" in payload["paths"]
     assert "/v2/admin/session" not in payload["paths"]

@@ -1,7 +1,8 @@
-# Automatische Programmupdates ab 0.4.4
+# Automatische Programmupdates ab 0.5.0
 
-Der Tag `0.4.3` ist der unveränderliche Checkpoint **PreRelease Testing**.
-Die Updatefunktion gehört zum folgenden Entwicklungsstand 0.4.4.
+Der Tag `0.4.3` ist der Kompatibilitätscheckpoint **PreRelease Testing**;
+sein Quellstand blieb bei der notwendigen Historienbereinigung erhalten.
+Die Updatefunktion gehört zum folgenden Entwicklungsstand 0.5.0.
 Ein bereits installiertes 0.4.3 besitzt diesen Mechanismus noch nicht:
 **Client und Tray müssen einmalig mit dem neuen Installer aktualisiert werden.**
 Der Server benötigt einmalig den unten beschriebenen separaten Update-Dienst.
@@ -11,10 +12,14 @@ Quellcode-Starts, Entwicklerumgebungen und bewusst angehaltene Server aktualisie
 
 1. Paketversionen und Release Notes aktualisieren. Alle drei Pakete dieses
    gemeinsamen Releasezugs verwenden dieselbe Version.
-2. Den geprüften Commit mit `0.4.4` beziehungsweise der nächsten numerischen
+2. Den geprüften Commit mit `0.5.0` beziehungsweise der nächsten numerischen
    Version taggen. Tags anschließend nicht verschieben.
 3. Auf GitHub ein **stabiles Release** zu diesem Tag veröffentlichen.
    Entwürfe und als Pre-release markierte Veröffentlichungen werden nicht ausgerollt.
+   Für Pre-releases gibt es einen separaten Windows-/Linux-Publisher: Er stellt
+   manuell installierbare Installer und ein Serverimage bereit, ohne
+   `papagui-update.json` zu erzeugen. Einzelheiten stehen in der
+   [Beta-Arbeitsliste](beta-readiness.md).
 4. `Publish verified release updates` führt Quality, die vier nativen Client-Builds
    und die Serverprüfungen aus. Erst danach werden das Serverimage für amd64/arm64
    nach GHCR und Installer, Pythonpakete und Updatearchive zum Release hochgeladen.

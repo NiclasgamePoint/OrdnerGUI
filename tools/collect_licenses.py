@@ -1,7 +1,7 @@
 """Collect installed, locked dependency notices without scanning user data.
 
-This inventory is not a complete native-library SBOM or a source-code offer.
-Generate it separately in each target's build environment.
+Attach separately generated native inventories and verified Qt/PySide notices.
+Generate this package separately in each target's build environment.
 """
 
 from __future__ import annotations
@@ -32,6 +32,16 @@ def collect(component: str, output: Path) -> None:
     if not python_license.is_file():
         raise RuntimeError("Python LICENSE.txt missing; supply the interpreter's license")
     shutil.copy2(python_license, output / "PYTHON-LICENSE.txt")
+    if component == "client":
+        for directory, required in (("upstream-notices", "upstream-source-inventory.json"),
+                                    ("native-notices", "native-inventory.json")):
+            source = ROOT / "build" / directory
+            if not (source / required).is_file():
+                raise RuntimeError(f"Missing {directory}: prepare upstream sources and native inventory before packaging")
+            shutil.copytree(source, output / directory)
+        shutil.copy2(ROOT / "docs/native-license-review.md", output / "native-license-review.md")
+        if sys.platform == "win32":
+            shutil.copy2(ROOT / "packaging/client/vendor/mesa/NOTICE.txt", output / "MESA-LLVMPIPE-NOTICE.txt")
     requirements = ROOT / f"packages/{component}/requirements-lock.txt"
     packages = []
     locked = requirements.read_text(encoding="utf-8").splitlines()
@@ -54,7 +64,7 @@ def collect(component: str, output: Path) -> None:
         (destination / "METADATA").write_text(dist.read_text("METADATA") or "", encoding="utf-8")
         notices = []
         for file in dist.files or []:
-            if not any(word in file.name.casefold() for word in ("license", "copying", "copyright", "notice")):
+            if not any(word in file.name.casefold() for word in ("license", "licence", "copying", "copyright", "notice")):
                 continue
             source = Path(dist.locate_file(file))
             if source.is_file():
@@ -73,8 +83,8 @@ def collect(component: str, output: Path) -> None:
         "python": platform.python_version(), "platform": sys.platform,
         "architecture": platform.machine(), "packages": packages,
         "limitations": [
-            "Python lock inventory only; not a complete native-library SBOM.",
-            "Audit Qt/PDFium, Python and OS libraries and archive corresponding sources before release.",
+            "This JSON lists Python locks; the attached native inventory records bundled binary hashes.",
+            "Qt/PySide source archives and Debian server sources are required separately at release upload.",
         ],
     }, indent=2) + "\n", encoding="utf-8")
 

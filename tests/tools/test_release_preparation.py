@@ -23,9 +23,9 @@ def release_tools(monkeypatch):
 def test_package_licenses_and_versions_match_sources(release_tools):
     release, _ = release_tools
     release.check()
-    assert release.version("client") == "0.4.4"
-    assert release.version("server") == "0.4.4"
-    assert release.version("contracts") == "0.4.4"
+    assert release.version("client") == "0.5.0"
+    assert release.version("server") == "0.5.0"
+    assert release.version("contracts") == "0.5.0"
 
 
 def test_license_inventory_uses_only_lock_and_rejects_version_drift(release_tools, monkeypatch, tmp_path):
@@ -46,8 +46,13 @@ def test_license_inventory_uses_only_lock_and_rejects_version_drift(release_tool
         def get_all(self, name, default):
             return default
 
+    # openpyxl and et_xmlfile wheels use the British spelling LICENCE.
+    licence_file = base / "LICENCE.rst"
+    licence_file.write_text("Synthetic upstream license text", encoding="utf-8")
     dist = SimpleNamespace(version="1.0", metadata=Metadata(Name="example", License="MIT"),
-                           files=[], read_text=lambda _: "License: MIT\n")
+                           files=[Path("example.dist-info/LICENCE.rst")],
+                           locate_file=lambda _: licence_file,
+                           read_text=lambda _: "License: MIT\n")
 
     def distribution(name):
         requested.append(name)
@@ -59,6 +64,8 @@ def test_license_inventory_uses_only_lock_and_rejects_version_drift(release_tool
     inventory = json.loads((output / "dependency-inventory.json").read_text(encoding="utf-8"))
     assert requested == ["example"]
     assert inventory["packages"][0]["version"] == "1.0"
+    notice = inventory["packages"][0]["notices"][0]
+    assert (output / "example" / notice["file"]).read_text() == "Synthetic upstream license text"
     assert (output / "PYTHON-LICENSE.txt").is_file()
     with pytest.raises(FileExistsError):
         collector.collect("server", output)

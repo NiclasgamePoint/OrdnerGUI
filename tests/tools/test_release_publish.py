@@ -14,6 +14,8 @@ def publication(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "tools"))
     module = importlib.import_module("tools.publish_update_manifest")
     monkeypatch.setattr(module, "package_version", lambda _: "0.4.4")
+    monkeypatch.setattr(module, "source_assets", lambda _: [])  # Validated separately.
+    monkeypatch.setattr(module, "server_source_assets", lambda _: [])
     for platform in ("windows-x64", "linux-x64", "macos-x64", "macos-arm64"):
         content = platform.encode()
         name = "papagui-" + platform + ".tar.gz"

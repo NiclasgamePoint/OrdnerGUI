@@ -13,15 +13,16 @@ permissions:
 
 jobs:
   quality:
-    if: github.event.release.prerelease == false
     uses: ./.github/workflows/quality.yml
+    with:
+      windows-linux-only: ${{ github.event.release.prerelease }}
 
   clients:
-    if: github.event.release.prerelease == false
     uses: ./.github/workflows/client-artifacts.yml
+    with:
+      windows-linux-only: ${{ github.event.release.prerelease }}
 
   server-validation:
-    if: github.event.release.prerelease == false
     uses: ./.github/workflows/server-image.yml
 
   server:
@@ -54,7 +55,7 @@ jobs:
           sbom: true
 
   publish:
-    needs: [quality, clients, server]
+    needs: [quality, clients, server, server-sources]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,8 +69,51 @@ jobs:
         with:
           path: release-artifacts
       - name: Upload installers, packages and final update manifest
+        if: github.event.release.prerelease == false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           SERVER_DIGEST: ${{ needs.server.outputs.digest }}
         run: python tools/publish_update_manifest.py --artifacts release-artifacts --tag "$RELEASE_TAG" --server-digest "$SERVER_DIGEST"
+      - name: Upload Windows and Linux beta without automatic updates
+        if: github.event.release.prerelease == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SERVER_DIGEST: ${{ needs.server.outputs.digest }}
+        run: python tools/publish_beta_release.py --artifacts release-artifacts --tag "$RELEASE_TAG" --server-digest "$SERVER_DIGEST"
+
+  server-sources:
+    needs: server
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Export notices and exact Debian sources from the published image
+        env:
+          SERVER_DIGEST: ${{ needs.server.outputs.digest }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          mkdir -p server-sources
+          docker run --rm --platform "linux/$ARCHITECTURE" --user 0 --entrypoint python \
+            --mount "type=bind,source=$PWD/tools/export_server_sources.py,target=/export_sources.py,readonly" \
+            --mount "type=bind,source=$PWD/server-sources,target=/output" \
+            "ghcr.io/niclasgamepoint/ordnergui-server@$SERVER_DIGEST" /export_sources.py /output "$ARCHITECTURE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-sources-${{ matrix.architecture }}
+          path: server-sources
+          compression-level: 0

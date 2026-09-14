@@ -1,6 +1,6 @@
 # PapaGUI installieren
 
-Stand: Releasevorbereitung 0.4.3. Installer werden zunächst als **unsignierte
+Stand: Releasevorbereitung 0.5.0. Installer werden zunächst als **unsignierte
 Testartefakte** gebaut. Ein öffentlicher, signierter Release ist noch nicht
 nachgewiesen. Freigegebene Downloads dürfen erst nach der
 [Releaseabnahme](releasing.md) verlinkt werden.
@@ -26,11 +26,13 @@ Zusage für ältere Ubuntu-Versionen, alle Debian-Versionen, Fedora oder Arch.
 Für weitere Distributionen ist **Flatpak** die empfohlene nächste Ausbaustufe.
 Windows ARM64 und Linux ARM64 sind noch keine nativen Clientziele.
 
-Vor einer öffentlichen Verteilung werden Windows-Signaturen sowie Apple Developer
-ID Application/Installer, Notarisierung und Stapling benötigt, wenn ein normaler
-Installationsweg ohne Warnungen über unbekannte Herausgeber angeboten werden soll.
-Diese Zertifikate sind nicht im Repository enthalten. Signierungskosten ändern
-nichts daran, dass PapaGUI kostenlos und freie Software sein soll.
+Für die öffentliche Verteilung sind Windows-Signaturen sowie Apple Developer
+ID Application/Installer, Notarisierung und Stapling vorgesehen. Eine gültige
+Windows-Signatur garantiert bei neuen Builds noch keine sofortige Freiheit von
+SmartScreen-Warnungen. Diese Zertifikate sind nicht im Repository enthalten.
+Signierungskosten ändern nichts daran, dass PapaGUI kostenlos und freie Software
+sein soll. Konkrete Voraussetzungen und noch offene Arbeiten stehen unter
+[Beta-Abnahme und Signierung](beta-readiness.md).
 
 Quellen: [Qt-Plattformen](https://doc.qt.io/qt-6/supported-platforms.html),
 [Apple-Notarisierung](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
@@ -51,7 +53,7 @@ Datenquelle. Die Entwickler-Startskripte sind kein Endanwenderinstaller.
 
 ## Aktualisierung und Entfernung
 
-Ab 0.4.4 können installierte Clients und ein eigens eingerichteter Server-Updater
+Ab 0.5.0 können installierte Clients und ein eigens eingerichteter Server-Updater
 neue stabile GitHub Releases automatisch übernehmen. Der erste Wechsel von 0.4.3
 benötigt einmalig den neuen Installer. Ablauf, Sicherungen, private Repositories
 und Hosteinrichtung stehen unter [Automatische Updates](automatic-updates.md).

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE="${PAPAGUI_SMOKE_IMAGE:-papagui-server:0.4.4-smoke}"
+IMAGE="${PAPAGUI_SMOKE_IMAGE:-papagui-server:0.5.0-smoke}"
 CONTAINER="papagui-server-smoke-$$"
 SMOKE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/papagui-server-smoke.XXXXXX")"
 SOURCE_ROOT="${SMOKE_ROOT}/source"

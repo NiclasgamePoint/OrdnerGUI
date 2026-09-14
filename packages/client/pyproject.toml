@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
-dependencies = ["papagui-contracts==0.4.4"]
+dependencies = ["papagui-contracts==0.5.0"]
 
 [project.optional-dependencies]
 gui = [

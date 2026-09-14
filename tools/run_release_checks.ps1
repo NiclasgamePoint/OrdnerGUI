@@ -28,6 +28,8 @@ if ($BuildClient) {
     Invoke-Python -m PyInstaller --clean --noconfirm packaging/client/pyinstaller/papagui-client.spec
     Invoke-Python -m PyInstaller --clean --noconfirm packaging/client/pyinstaller/papagui-tray.spec
     Invoke-Python tools/check_frozen_client.py dist
+    Invoke-Python tools/prepare_upstream_sources.py
+    Invoke-Python tools/collect_native_inventory.py --analysis build/papagui-client/Analysis-00.toc --analysis build/papagui-tray/Analysis-00.toc
     $installerOutput = Join-Path $projectRoot ('dist/installers-' + [guid]::NewGuid().ToString('N'))
     Invoke-Python tools/build_installers.py --iscc $Iscc --output $installerOutput
     Write-Host "Installer: $installerOutput"

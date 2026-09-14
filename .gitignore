@@ -25,6 +25,8 @@ htmlcov/
 profiles/
 
 # Local databases and generated app data
+# Customer documents must never be committed. Test fixtures are generated.
+*.[pP][dD][fF]
 *.db
 *.db-journal
 *.db-wal

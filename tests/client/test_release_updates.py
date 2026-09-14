@@ -15,6 +15,13 @@ import pytest
 from papagui_client.updates import feed, runtime, storage
 
 
+@pytest.fixture(autouse=True)
+def installed_version(monkeypatch):
+    # These scenarios model a 0.4.4 installation upgrading to 0.4.5. Keep the
+    # installed version explicit when the real project advances to later tags.
+    monkeypatch.setattr(runtime, "__version__", "0.4.4")
+
+
 def metadata():
     digest = "a" * 64
     assets = []

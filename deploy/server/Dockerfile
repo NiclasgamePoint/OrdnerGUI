@@ -3,7 +3,7 @@ FROM python:3.11-slim
 
 ARG TARGETARCH
 LABEL org.opencontainers.image.title="PapaGUI Server" \
-      org.opencontainers.image.version="0.4.4" \
+      org.opencontainers.image.version="0.5.0" \
       org.opencontainers.image.licenses="GPL-3.0-or-later"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

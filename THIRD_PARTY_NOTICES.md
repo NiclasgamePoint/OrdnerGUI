@@ -9,6 +9,11 @@ own licenses; this notice does not relicense them.
 Source repository: https://github.com/NiclasgamePoint/OrdnerGUI
 Release source must identify the exact commit and include build scripts.
 
+The project owner NiclasgamePoint confirms that the original project code was
+written by them or produced during their Codex-assisted development. This
+statement does not relicense bundled dependencies or assert exclusive rights
+over AI-generated material. The original logo is addressed below.
+
 ## Python and desktop dependencies
 
 Exact versions are pinned in `packages/client/requirements-lock.txt` and
@@ -22,6 +27,7 @@ not a complete native-library SBOM and does not supply corresponding source.
 | --- | --- | --- |
 | CPython | Bundled interpreter | https://www.python.org/psf/license/ — PSF and included third-party notices |
 | PySide6, Shiboken6, Qt | Desktop, tray, PDF preview | https://doc.qt.io/qtforpython-6/licenses.html — LGPL/GPL/commercial alternatives, module-specific terms |
+| Mesa / llvmpipe | Windows software OpenGL fallback (`opengl32sw.dll`) | https://doc.qt.io/qtcreator/qtcreator-binary-attribution-llvmpipe.html — upstream MIT attribution shipped separately |
 | Qt PDF / PDFium | PDF rendering | https://doc.qt.io/qt-6/qtpdf-licensing.html — Qt terms plus PDFium/Chromium and embedded libraries |
 | openpyxl, et_xmlfile | XLSX reading | https://openpyxl.readthedocs.io/ — MIT |
 | xlrd | XLS reading | https://github.com/python-excel/xlrd — BSD |
@@ -76,10 +82,12 @@ https://pyinstaller.org/en/stable/license.html. Windows installers use Inno Setu
 https://jrsoftware.org/files/is/license.txt. Retain notices for shipped components.
 pytest, coverage, Ruff and Graphify are development tools, not runtime dependencies.
 
-Application icons were generated/edited with Imagegen from a user-provided logo;
-provenance is recorded in `docs/development/app-icons.md`. Confirm the right to
-redistribute that original logo before publication. No rights to third-party
-trademarks or supplied artwork are asserted here.
+Application icons were generated/edited with Imagegen from a logo supplied by
+the project owner. On 14 September 2026, the owner confirmed that the original
+logo was generated with ChatGPT without external reference artwork and may be
+publicly redistributed. Provenance is recorded in `docs/development/app-icons.md`.
+This records the owner's confirmation; it does not assert exclusive rights or
+rights to third-party trademarks.
 
 ## Outstanding release checks
 
@@ -87,7 +95,13 @@ trademarks or supplied artwork are asserted here.
 - Complete upstream license/copyright texts for every shipped native component.
 - Corresponding source archives and build instructions for the exact binaries,
   available alongside downloads as required by GPL/LGPL licenses.
-- Rights to supplied artwork and code contributed before this license was added.
+- Review native inventories for each supported platform; provenance of original
+  project code and artwork has been confirmed by the project owner.
+
+Starting with 0.5.0, builds preserve the native PyInstaller payload inventory and
+the notices from hash-pinned complete Qt/PySide source archives. Release upload
+requires these source archives. See `docs/native-license-review.md` for scope,
+build instructions, server sources and the remaining platform review.
 
 Package-local copies of `LICENSE` and this file are generated from the root files
 by `tools/release_metadata.py --sync` and checked for drift in CI.

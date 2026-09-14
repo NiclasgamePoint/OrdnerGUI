@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased - 0.4.4
+## 0.5.0 - Beta-Vorbereitung (2026-09-14)
+
+- Gemeinsame Version 0.5.0 für Client, Server, Contracts, Installer und Images.
+- Theme-Synchronisierung zwischen Hauptfenster und Indexserver-Oberfläche.
+- Windows-/Ubuntu-Beta-Pipeline mit Prüfsummen, ohne automatischen Beta-Rollout.
+- Windows-Versionsressourcen für Client, Tray und Setup.
+- Erweiterte Lizenzsammlung einschließlich LICENCE-Dateien, tatsächlicher nativer
+  Buildinventare und prüfsummengesicherter Qt/PySide-Quellarchive.
+- Release-Serverquellen werden aus dem konkreten Image exportiert.
+- Öffentliche Signierungsrichtlinie, Datenschutzhinweise und Windows-/Linux-
+  Anleitungen; SignPath-Aufnahme und praktische Beta-Abnahme stehen aus.
+- Vertrauliche historische Dokumente aus Branches und Tags entfernt;
+  GitHub-Support-Anfrage zur weiteren Cache-/PR-Bereinigung eingereicht.
 
 - Automatische, gepruefte Releaseupdates mit getrennten Programmversionen,
   Datensicherung und Rueckfall auf den bisherigen Stand.
