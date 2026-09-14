@@ -102,6 +102,11 @@ if ([IO.File]::ReadAllText($secretPath) -cne $initialToken) {
 $bytes = [IO.File]::ReadAllBytes($secretPath)
 if ($bytes.Length -ne 43) { throw 'Saved token contains extra bytes.' }
 
+# An existing explicit grant must also be removed, not merely inherited ACEs.
+& icacls.exe $secretPath '/grant' '*S-1-1-0:R' *> $null
+if ($LASTEXITCODE -ne 0) { throw 'Could not create synthetic explicit ACE.' }
+Protect-SecretFile $secretPath
+
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $acl = Get-Acl -LiteralPath $secretPath
 if (-not $acl.AreAccessRulesProtected) { throw 'Secret still inherits permissions.' }

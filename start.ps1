@@ -33,8 +33,26 @@ New-Item -ItemType Directory -Force $env:PAPAGUI_CLIENT_DATA_ROOT, $env:PAPAGUI_
 function Protect-SecretFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        $aclOutput = & icacls.exe $Path '/inheritance:r' '/grant:r' "*${identity}:(R,W)" 2>&1
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        # /inheritance:r /grant:r leaves unrelated explicit ACEs in place.
+        # Replace the DACL atomically, including on GitHub's Windows image.
+        $acl = Get-Acl -LiteralPath $Path
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($existingRule in @($acl.GetAccessRules(
+            $true, $false, [System.Security.Principal.SecurityIdentifier]
+        ))) {
+            $acl.RemoveAccessRuleSpecific($existingRule)
+        }
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $identity, 'FullControl', 'Allow'
+        )
+        $acl.AddAccessRule($rule)
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            [System.IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($Path), $acl)
+        } else {
+            [IO.File]::SetAccessControl($Path, $acl)
+        }
+        $aclOutput = & icacls.exe $Path '/verify' 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw ($aclOutput -join [Environment]::NewLine)
         }
