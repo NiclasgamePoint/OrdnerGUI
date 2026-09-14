@@ -1,0 +1,20 @@
+services:
+  papagui-updater:
+    build:
+      context: ../..
+      dockerfile: deploy/updater/Dockerfile
+    restart: unless-stopped
+    command:
+      - --config
+      - ${PAPAGUI_DEPLOYMENT_ROOT:?Set the dedicated absolute deployment directory}/updater-config/updater.json
+      - --watch
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Identical absolute paths are required by the host Docker daemon.
+      # Mount the dedicated parent so rollback can rename data/config roots.
+      - ${PAPAGUI_DEPLOYMENT_ROOT}:${PAPAGUI_DEPLOYMENT_ROOT}
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'

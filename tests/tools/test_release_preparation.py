@@ -23,9 +23,9 @@ def release_tools(monkeypatch):
 def test_package_licenses_and_versions_match_sources(release_tools):
     release, _ = release_tools
     release.check()
-    assert release.version("client") == "0.4.3"
-    assert release.version("server") == "0.4.3"
-    assert release.version("contracts") == "0.4.3"
+    assert release.version("client") == "0.4.4"
+    assert release.version("server") == "0.4.4"
+    assert release.version("contracts") == "0.4.4"
 
 
 def test_license_inventory_uses_only_lock_and_rejects_version_drift(release_tools, monkeypatch, tmp_path):

@@ -1,6 +1,7 @@
 name: Quality
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -91,6 +92,10 @@ jobs:
           python -m pip install --no-deps -e packages/contracts -e packages/server -e packages/client
       - name: Prove real HTTP interoperability
         run: python -m pytest tests/system/test_wire_interop.py -q
+      - name: Fetch compatibility baseline
+        run: git fetch --no-tags origin refs/tags/0.4.3:refs/tags/0.4.3
+      - name: Prove both directions against 0.4.3
+        run: python tools/check_backward_compatibility.py
 
   repository-regression:
     runs-on: ubuntu-latest

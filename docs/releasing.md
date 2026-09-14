@@ -1,14 +1,15 @@
 ﻿# Versionierung und Releasevorbereitung
 
-Stand: **14. September 2026**. Ziel ist der gemeinsame Testcheckpoint **0.4.3**
-mit dem annotierten Tagtext **PreRelease Testing**. Das ist noch keine öffentliche
-Produktfreigabe. Der GitHub-Zugriff funktioniert; Actions und Joblogs können geprüft werden.
+Stand: **14. September 2026**. Der gemeinsame Testcheckpoint **0.4.3** trägt den
+Tagtext **PreRelease Testing**. Der folgende Entwicklungsstand **0.4.4** ergänzt
+[automatische Updates](automatic-updates.md). Das ist noch keine öffentliche
+Produktfreigabe. GitHub-Zugriff, Actions und Joblogs sind verfügbar.
 
 ## Versionsstand
 
 | Bestandteil | Stand |
 | --- | --- |
-| Client, Server, Contracts | jeweils 0.4.3 |
+| Client, Server, Contracts | jeweils 0.4.4; Checkpoint 0.4.3 bleibt unverändert |
 | API / Generationsschema | v2; bestehende Kompatibilitätswege bleiben erhalten |
 | Release-Python | 3.11; lokale Testumgebung `build/release-venv` |
 | PySide6 / PyInstaller | 6.11.1 / 6.22.2 laut Lockdateien |
@@ -80,7 +81,9 @@ Vorhandene lokale und Remote-Tags vor dem Erstellen vergleichen; veröffentlicht
 Tags nicht nachträglich verschieben. Das Erstellen eines Tags veröffentlicht noch
 kein GitHub Release und installiert kein Update.
 
-Die Workflows dieses Checkpoints bauen Testartefakte ohne Registry-Push. Eine
-öffentliche Veröffentlichung mit automatischen Updates wird im folgenden
-Entwicklungsstand eingerichtet. Vor jedem künftigen Release müssen dessen eigene
-Prüfungen bestehen; das grüne Ergebnis von 0.4.3 gilt nicht für spätere Änderungen.
+Push- und PR-Workflows bauen Testartefakte ohne Registry-Push. Der neue Workflow
+`release.yml` reagiert auf stabile veröffentlichte Releases, führt die Prüfungen
+aus und lädt erst danach Images, Installer und zuletzt das Updatemanifest hoch.
+Die Kompatibilitätsprüfung verwendet den unveränderten Tag 0.4.3. Vor jedem
+künftigen Release müssen dessen eigene Prüfungen bestehen; das grüne Ergebnis
+von 0.4.3 gilt nicht für spätere Änderungen. Details: [Updateablauf](automatic-updates.md).

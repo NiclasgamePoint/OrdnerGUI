@@ -133,8 +133,8 @@ def test_specs_select_native_shape_for_every_release_target(
         assert bundle.options["name"] == expected_name
         assert bundle.options["icon"] == str(icons / f"papagui-{icon_role}.icns")
         assert bundle.options["bundle_identifier"].startswith("de.papagui.")
-        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.3"
-        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.3"
+        assert bundle.options["info_plist"]["CFBundleShortVersionString"] == "0.4.4"
+        assert bundle.options["info_plist"]["CFBundleVersion"] == "0.4.4"
         assert namespace["application"] == bundle
     else:
         assert "application" not in namespace

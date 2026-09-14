@@ -1512,6 +1512,9 @@ def run_main_gui(container: ClientContainer, *, automatic_sync: bool = True) -> 
         # detached process; users can still launch papagui-tray independently.
         pass
     window = ClientMainWindow(container, automatic_sync=automatic_sync)
+    from papagui_client.updates.runtime import signal_ready
+
     show_main_window(application, window)
+    QTimer.singleShot(0, signal_ready)
     application._papagui_window = window  # type: ignore[attr-defined]
     return application.exec()

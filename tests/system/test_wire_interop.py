@@ -108,10 +108,10 @@ def _running_server(tmp_path: Path) -> Iterator[RunningServer]:
     port = _free_port()
     log_path = tmp_path / "papagui-server.log"
     environment = os.environ.copy()
+    server_root = Path(environment.get("PAPAGUI_TEST_SERVER_ROOT", str(ROOT)))
     package_sources = (
-        ROOT / "packages" / "contracts" / "src",
-        ROOT / "packages" / "server" / "src",
-        ROOT / "packages" / "client" / "src",
+        server_root / "packages" / "contracts" / "src",
+        server_root / "packages" / "server" / "src",
     )
     python_path = [str(path) for path in package_sources]
     if existing := environment.get("PYTHONPATH"):

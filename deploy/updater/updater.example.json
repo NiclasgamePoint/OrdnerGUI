@@ -1,0 +1,10 @@
+{
+  "compose_files": ["/volume1/docker/papagui/application/deploy/server/compose.yaml"],
+  "project_directory": "/volume1/docker/papagui/application",
+  "project_name": "papagui",
+  "service": "papagui-server",
+  "env_file": "/volume1/docker/papagui/application/deploy/server/.env",
+  "data": "/volume1/docker/papagui/data",
+  "config": "/volume1/docker/papagui/config",
+  "state": "/volume1/docker/papagui/updates"
+}

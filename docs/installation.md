@@ -51,6 +51,11 @@ Datenquelle. Die Entwickler-Startskripte sind kein Endanwenderinstaller.
 
 ## Aktualisierung und Entfernung
 
+Ab 0.4.4 können installierte Clients und ein eigens eingerichteter Server-Updater
+neue stabile GitHub Releases automatisch übernehmen. Der erste Wechsel von 0.4.3
+benötigt einmalig den neuen Installer. Ablauf, Sicherungen, private Repositories
+und Hosteinrichtung stehen unter [Automatische Updates](automatic-updates.md).
+
 Windows: neuen Installer über die vorhandene Version installieren. Entfernung
 über die Windows-Appverwaltung. Einstellungen und Offline-Daten liegen außerhalb
 des Programmordners und werden nicht vom Uninstaller gelöscht.

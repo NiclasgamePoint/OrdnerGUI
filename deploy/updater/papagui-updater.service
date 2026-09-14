@@ -1,0 +1,15 @@
+[Unit]
+Description=PapaGUI verified release updater
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/papagui-updater/tools/server_update.py --config /etc/papagui-updater.json --watch
+Restart=on-failure
+RestartSec=60
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

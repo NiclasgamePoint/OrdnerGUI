@@ -12,9 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_initial_split_versions_are_independent_and_consistent() -> None:
-    assert papagui_contracts.__version__ == "0.4.3"
-    assert papagui_server.__version__ == "0.4.3"
-    assert papagui_client.__version__ == "0.4.3"
+    assert papagui_contracts.__version__ == "0.4.4"
+    assert papagui_server.__version__ == "0.4.4"
+    assert papagui_client.__version__ == "0.4.4"
 
 
 def test_server_deployment_metadata_matches_server_version() -> None:

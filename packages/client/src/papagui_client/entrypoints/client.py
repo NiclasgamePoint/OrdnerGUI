@@ -13,11 +13,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PapaGUI client")
     parser.add_argument("--sync-only", action="store_true", help="synchronize and exit")
     parser.add_argument("--offline", action="store_true", help="skip the startup sync")
+    parser.add_argument("--update-probe", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    from papagui_client.updates.runtime import try_launch, probe_startup
+
+    if arguments.update_probe:
+        return probe_startup()
+    managed = try_launch("client", list(sys.argv[1:] if argv is None else argv))
+    if managed is not None:
+        return managed
     container = build_client()
     if arguments.sync_only and not arguments.offline:
         try:

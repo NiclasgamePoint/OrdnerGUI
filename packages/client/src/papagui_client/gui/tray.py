@@ -1203,8 +1203,11 @@ def run_tray_gui(container: ClientContainer, argv: list[str] | None = None) -> i
         return 0
     try:
         controller = TrayController(application, container, show=False)
+        from papagui_client.updates.runtime import signal_ready
+
         if show_requested:
             controller.show()
+        QTimer.singleShot(0, signal_ready)
         application._papagui_tray = (controller, instance)  # type: ignore[attr-defined]
         return application.exec()
     finally:

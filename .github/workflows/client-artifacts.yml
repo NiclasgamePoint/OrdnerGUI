@@ -1,6 +1,7 @@
 name: Unsigned client artifacts
 
 on:
+  workflow_call:
   push:
     branches: [main]
   workflow_dispatch:
@@ -79,6 +80,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tools/check_frozen_client.py dist
+      - name: Build verified update bundle
+        run: python tools/build_update_bundle.py
+      - name: Verify native update activation and profile backup
+        run: python tools/check_client_update_bundle.py dist/updates
       - name: Locate Windows installer compiler
         if: runner.os == 'Windows'
         shell: pwsh
@@ -106,6 +111,6 @@ jobs:
           python tools/check_frozen_client.py /Applications/PapaGUI
       - uses: actions/upload-artifact@v4
         with:
-          name: papagui-client-0.4.3-${{ matrix.artifact }}-unsigned
+          name: papagui-client-0.4.4-${{ matrix.artifact }}-unsigned
           path: dist/*
           if-no-files-found: error

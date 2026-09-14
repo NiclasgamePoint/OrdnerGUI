@@ -6,10 +6,13 @@ schreibende Instanz für Index, Kundenerkennung und `customers.db`. Clients
 halten ausschließlich geprüfte lokale Kopien und bleiben mit dem letzten
 gültigen Stand offline benutzbar.
 
-Der Stand 0.4.3 ist der Checkpoint **PreRelease Testing**. Die enthaltenen Workflows bauen
-Testartefakte ohne Signierung und ohne Registry-Push; sie veröffentlichen keine
-GitHub Releases. Der tatsächliche Status eines Builds ist im jeweiligen
-Workflow-Lauf zu prüfen.
+Der Tag 0.4.3 ist der Checkpoint **PreRelease Testing**. Der folgende Stand 0.4.4
+ergänzt [automatische Client- und Serverupdates](docs/automatic-updates.md).
+Ein auf GitHub veröffentlichtes stabiles Release startet die Prüfungen und
+stellt erst nach deren Erfolg Updatepakete bereit. Client und Server benötigen
+dafür einmalig den neuen Installer beziehungsweise den separaten Update-Dienst.
+Die Installer sind weiterhin unsigniert; der tatsächliche Buildstatus steht im
+jeweiligen Workflow-Lauf.
 
 ## Komponenten
 

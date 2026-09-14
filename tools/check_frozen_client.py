@@ -99,7 +99,7 @@ def validate(dist: Path, platform: str = sys.platform) -> None:
         environment = os.environ.copy()
         environment.update(
             {
-                "PAPAGUI_CLIENT_DATA_ROOT": directory,
+                "PAPAGUI_CLIENT_DATA_ROOT": str(Path(directory) / "data"),
                 "PAPAGUI_CLIENT_CONFIG_PATH": str(Path(directory) / "client-config.json"),
                 "QT_QPA_PLATFORM": "offscreen",
             }
@@ -112,6 +112,8 @@ def validate(dist: Path, platform: str = sys.platform) -> None:
             environment=environment,
         )
         run_checked(products["tray"], "--help", environment=environment)
+        for executable in products.values():
+            run_checked(executable, "--update-probe", environment=environment)
 
 
 def main(argv: list[str] | None = None) -> int:

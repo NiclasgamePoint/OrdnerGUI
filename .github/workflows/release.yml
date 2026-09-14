@@ -1,0 +1,75 @@
+name: Publish verified release updates
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    if: github.event.release.prerelease == false
+    uses: ./.github/workflows/quality.yml
+
+  clients:
+    if: github.event.release.prerelease == false
+    uses: ./.github/workflows/client-artifacts.yml
+
+  server-validation:
+    if: github.event.release.prerelease == false
+    uses: ./.github/workflows/server-image.yml
+
+  server:
+    needs: [quality, clients, server-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: image
+        with:
+          context: .
+          file: deploy/server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/niclasgamepoint/ordnergui-server:${{ github.event.release.tag_name }}
+          provenance: true
+          sbom: true
+
+  publish:
+    needs: [quality, clients, server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - name: Upload installers, packages and final update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SERVER_DIGEST: ${{ needs.server.outputs.digest }}
+        run: python tools/publish_update_manifest.py --artifacts release-artifacts --tag "$RELEASE_TAG" --server-digest "$SERVER_DIGEST"

@@ -1,4 +1,4 @@
-# Fully pinned third-party runtime for papagui-server 0.4.3.
+# Fully pinned third-party runtime for papagui-server 0.4.4.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2

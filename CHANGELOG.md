@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased - 0.4.4
+
+- Automatische, gepruefte Releaseupdates mit getrennten Programmversionen,
+  Datensicherung und Rueckfall auf den bisherigen Stand.
+
+
 ## 0.4.3 - PreRelease Testing (2026-09-14)
 
 - Releasevorbereitung: GPL-3.0-or-later samt Paketlizenzdateien, Fremdsoftware-

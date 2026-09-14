@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/server/Dockerfile
-    image: papagui-server:0.4.3
+    image: papagui-server:0.4.4
     init: true
     restart: unless-stopped
     user: "${PAPAGUI_UID:-1000}:${PAPAGUI_GID:-1000}"

@@ -1,0 +1,14 @@
+**
+!tools/
+!tools/server_update.py
+!packages/
+!packages/client/
+!packages/client/src/
+!packages/client/src/papagui_client/
+!packages/client/src/papagui_client/__init__.py
+!packages/client/src/papagui_client/updates/
+!packages/client/src/papagui_client/updates/__init__.py
+!packages/client/src/papagui_client/updates/feed.py
+!packages/client/src/papagui_client/updates/storage.py
+!LICENSE
+!THIRD_PARTY_NOTICES.md

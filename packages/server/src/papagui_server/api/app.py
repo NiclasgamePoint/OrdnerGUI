@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
@@ -89,6 +91,20 @@ def create_app(
         },
     )
     app.state.container = container
+    update_hold = os.getenv("PAPAGUI_UPDATE_HOLD_FILE")
+    if update_hold:
+        hold_path = Path(update_hold)
+
+        @app.middleware("http")
+        async def hold_requests_during_update(request: Request, call_next):
+            if request.url.path != "/health" and hold_path.exists():
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": {"code": "update_in_progress", "message": "Serverupdate wird geprüft; bitte erneut versuchen."}},
+                    headers={"Retry-After": "30"},
+                )
+            return await call_next(request)
+
     client_bearer = HTTPBearer(auto_error=False)
 
     async def require_client(
